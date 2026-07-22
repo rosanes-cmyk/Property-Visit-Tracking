@@ -205,7 +205,7 @@ function buildBoard_(ss) {
     row++;
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
       '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
-      " limit 50 format " + due + " 'yyyy-mm-dd'\",0),\"— none —\")";
+      " limit 50 format " + due + " 'yyyy-MM-dd'\",0),\"— none —\")";
     sh.getRange(row,1).setFormula(q);
     row += 8;
   });
