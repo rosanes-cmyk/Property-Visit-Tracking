@@ -69,13 +69,18 @@ function onVisitStatus_(R) {
     R.setIfBlank('Next Action', 'Conduct scheduled visit & log outcome');
     R.setIfBlank('Next Action Due Date', R.get('Visit Date') || today_());
     if (isDuplicateActive_(R)) logAuto_('WARN', R.get('Property ID'), 'Possible duplicate active record for this address');
-    logAuto_('INFO', R.get('Property ID'), 'Visit scheduled; reminder due ' + fmt_(R.get('Visit Date')));
+    // Real reminder: a Task Queue item (not just a log line) for the visitor, due on the visit date.
+    var visitor = R.get('Assigned Visitor') || R.get('Assigned Owner') || 'Juan';
+    enqueueTask_(visitor, R.get('Property ID'), R.get('Property Address'),
+      'Scheduled-visit reminder — conduct visit & log outcome', R.get('Visit Date') || today_());
+    logAuto_('INFO', R.get('Property ID'), 'Visit scheduled; reminder queued for ' + visitor + ' due ' + fmt_(R.get('Visit Date')));
   } else if (v === 'Completed') {
     R.set('Current Stage', 'Visit Completed — Needs Review');
     R.setIfBlank('Assigned Owner', 'Jonathan');
     R.set('Next Action Due Date', today_());          // same-day review
     R.setIfBlank('Next Action', 'Review completed visit: make offer or pass');
     if (!R.get('Visit Notes')) logAuto_('EXCEPTION', R.get('Property ID'), 'Completed visit missing Visit Notes');
+    enqueueTask_('Jonathan', R.get('Property ID'), R.get('Property Address'), 'Review completed visit: make offer or pass', today_());
     logAuto_('TASK', R.get('Property ID'), 'Review task -> Jonathan (same-day)');
   }
 }
@@ -87,6 +92,9 @@ function onOfferApproved_(R) {
   R.setIfBlank('Offer Status', 'In Preparation');
   R.set('Next Action', 'Prepare offer (' + money_(R.get('Approved Offer Amount')) + ')');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'),
+    'Prepare offer (' + money_(R.get('Approved Offer Amount')) + ') — REI ' + (R.get('REI BlackBook Link') || 'n/a'),
+    R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'),
     'Offer-prep -> Kyle | ' + R.get('Property Address') + ' | ' + money_(R.get('Approved Offer Amount')) +
     ' | due ' + fmt_(R.get('Next Action Due Date')) + ' | REI ' + (R.get('REI BlackBook Link') || 'n/a'));
@@ -99,6 +107,8 @@ function onOfferSent_(R) {
   R.set('Next Action', 'Confirm seller received offer, then follow up');
   R.set('Next Action Due Date', addBiz_(R.get('Offer Sent Date'), 2));
   R.setIfBlank('Assigned Owner', 'Cherry');
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Follow up on sent offer', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'Offer follow-up scheduled ' + fmt_(R.get('Next Action Due Date')));
 }
 
@@ -107,6 +117,8 @@ function onSellerCounter_(R) {
   R.setIfBlank('Assigned Owner', 'Cherry');
   R.setIfBlank('Next Action', 'Decide response to seller counter');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Negotiation decision — respond to seller counter (needs Last Contact Result + Next Action + Owner + Due)', R.get('Next Action Due Date'));
   logAuto_('NOTIFY', R.get('Property ID'), 'Negotiation: notify Cherry/Juan. Requires Last Contact Result + Next Action + Owner + Due.');
 }
 
@@ -115,6 +127,7 @@ function onVerbalAgreement_(R) {
   R.set('Assigned Owner', 'Kyle');
   R.set('Next Action', 'Prepare purchase contract');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'), 'HIGHEST PRIORITY: prepare purchase contract', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'HIGHEST PRIORITY: contract-prep -> Kyle');
 }
 
@@ -123,6 +136,8 @@ function onContractSent_(R) {
   R.set('Current Stage', 'Contract Sent');
   R.set('Next Action', 'Confirm signature (daily internal follow-up)');
   R.set('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Confirm signature — daily internal follow-up until signed/declined', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'Daily internal follow-up until signed/declined');
 }
 
@@ -135,11 +150,15 @@ function onContractSigned_(R) {
   R.set('Next Action', 'Hand off signed contract to JM');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
   R.set('REI Update Required', 'Yes');
+  enqueueTask_('JM', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'JM HANDOFF created; sales follow-up stopped; REI update required');
 }
 
 function onGiftRecommended_(R) {
-  R.setIfBlank('Gift Approval Owner', ''); // approval still required (Cherry/Juan)
+  // Approval is recorded via Gift Approved By + Gift Approval Date; Gift Status=Sent stays an
+  // Exception until both are filled (see Exception Reason rule 9). Nothing is purchased or sent.
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'),
+    'Coordinate gift review — requires Cherry/Juan approval (set Gift Approved By + Gift Approval Date). NO gift sent automatically.', '');
   logAuto_('TASK', R.get('Property ID'),
     'Gift review -> Kyle to coordinate; requires Cherry/Juan approval. NO gift purchased/sent automatically.');
 }
@@ -169,6 +188,8 @@ function checkNoDecision() {
     if (!visit) return;
     if (bizDaysBetween_(visit, today_()) >= CFG.NO_DECISION_BUSINESS_DAYS) {
       if (R.get('Assigned Owner') !== 'Cherry' && !R.getNote('_escalated')) {
+        enqueueTask_('Cherry', R.get('Property ID'), R.get('Property Address'),
+          'ESCALATED: completed visit has no offer/pass decision after 1 business day (Jonathan still reviewer)', today_());
         logAuto_('ESCALATE', R.get('Property ID'), 'No offer decision > 1 business day; escalating to Cherry (kept Jonathan as reviewer)');
         R.setNote('_escalated', '1');
       }
@@ -182,6 +203,8 @@ function checkNoDecision() {
 function checkStalled() {
   eachDataRow_(function(R){
     if (R.get('Stalled Status') === 'Yes' && !R.getNote('_stalled_notified')) {
+      enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+        'STALLED > 3 business days — re-engage this deal', R.get('Next Action Due Date') || today_());
       logAuto_('NOTIFY', R.get('Property ID'), 'STALLED (>3 business days). Owner: ' + (R.get('Assigned Owner') || 'unassigned'));
       R.setNote('_stalled_notified', fmt_(today_()));
       R.flush();
@@ -212,6 +235,7 @@ function isDuplicateActive_(R) {
 }
 
 function today_() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function daysAgo_(n) { const d = today_(); d.setDate(d.getDate() - n); return d; }
 function fmt_(d) { return d ? Utilities.formatDate(new Date(d), Session.getScriptTimeZone(), 'yyyy-MM-dd') : ''; }
 function money_(n) { return n ? '$' + Number(n).toLocaleString() : ''; }
 function addBiz_(d, n) { let r = new Date(d); let added=0; while(added<n){ r.setDate(r.getDate()+1); const g=r.getDay(); if(g!==0&&g!==6) added++; } return new Date(r.getFullYear(),r.getMonth(),r.getDate()); }
@@ -231,6 +255,25 @@ function logAuto_(level, id, msg) {
   let sh = ss.getSheetByName('Automation Log');
   if (!sh) { sh = ss.insertSheet('Automation Log'); sh.appendRow(['Timestamp','Level','Property ID','Message']); sh.hideSheet(); }
   sh.appendRow([new Date(), level, id, msg]);
+}
+
+/**
+ * INTERNAL task delivery. Appends a visible row to the Task Queue sheet (the pilot task inbox)
+ * and, only if an INTERNAL address is set in OWNER_EMAILS, emails that person. Never a seller.
+ */
+function enqueueTask_(owner, id, address, task, due) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(CFG.TASK_QUEUE_SHEET) || ensureTaskQueue_(ss);
+  sh.appendRow([new Date(), owner || 'Unassigned', id || '', address || '', task || '', due ? fmt_(due) : '', 'Open']);
+  const to = OWNER_EMAILS[owner];
+  if (to) {
+    try {
+      MailApp.sendEmail({ to: to,
+        subject: 'Twin Visit Logger task: ' + task + ' — ' + (address || id),
+        body: 'Owner: ' + owner + '\nProperty: ' + (address || id) + '\nTask: ' + task +
+              '\nDue: ' + (due ? fmt_(due) : '—') + '\n\n(Internal task only. No seller was contacted.)' });
+    } catch (e) { logAuto_('ERROR', 'enqueueTask', String(e)); }
+  }
 }
 
 /** Buffered row read/write to minimise Sheet calls. */

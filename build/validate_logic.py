@@ -119,7 +119,7 @@ def compute(rec, all_norms_active):
         ex.append('Long-Term Nurture needs a FUTURE follow-up date')
     if stage == 'Lost / Closed Out' and (not g('Final Disposition') or not g('Closeout Reason')):
         ex.append('Lost / Closed Out needs Final Disposition + Closeout Reason')
-    if g('Gift Status') == 'Sent' and not g('Gift Approval Owner'):
+    if g('Gift Status') == 'Sent' and (not g('Gift Approved By') or not g('Gift Approval Date')):
         ex.append('Gift Sent without approval')
     if out['Duplicate Address Flag'] == 'Duplicate':
         ex.append('Duplicate active record')

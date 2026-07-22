@@ -43,6 +43,22 @@ function loadPilotData() {
   SpreadsheetApp.getActive().toast(msg + ' Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
 }
 
+/**
+ * Remove ONLY Source=TEST records (demo + harness rows), in place. Does NOT delete sheet
+ * rows and does NOT affect formulas/validation/formatting — each matching row is cleared and
+ * its computed formulas restored via clearRecordRow_. Real pilot rows (Source=Import) are kept.
+ */
+function removeTestData() {
+  const sh = dataSheet_();
+  if (!sh) return;
+  const src = sh.getRange(CFG.FIRST_DATA_ROW, col('Source'), CFG.MAX_ROWS - 1, 1).getValues();
+  var n = 0;
+  for (var i = 0; i < src.length; i++) {
+    if (String(src[i][0]).trim() === 'TEST') { clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i); n++; }
+  }
+  SpreadsheetApp.getActive().toast('Removed ' + n + ' Source=TEST records (rows, formulas, validation & formatting preserved).', 'Twin Visit Logger', 7);
+}
+
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
 function clearAllData() {
   const sh = dataSheet_();

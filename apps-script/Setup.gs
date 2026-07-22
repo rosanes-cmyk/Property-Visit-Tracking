@@ -18,8 +18,32 @@ function setup() {
   buildDropdownSheet_(ss);
   buildBoard_(ss);
   buildExceptionQueue_(ss);
-  buildFilterViewsNote_(ss);
+  buildMigrationLog_(ss);
+  buildTestDataSheet_(ss);
+  ensureTaskQueue_(ss);
   SpreadsheetApp.getActive().toast('Twin Visit Logger structure built. See READ ME / Deployment-Guide.', 'Setup complete', 8);
+}
+
+/**
+ * Reapply formulas, dropdown validations, number formats, and conditional formatting
+ * through row MAX_ROWS WITHOUT changing user-entered data. Safe to run anytime
+ * (e.g. after clearing test rows, or if a range shrank). Rebuilds the view sheets too.
+ */
+function repairSheet() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = dataSheet_();
+  if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
+  writeHeaders_(sh);            // row 1 only (idempotent)
+  applyDropdowns_(sh);          // rows 2..MAX_ROWS
+  writeFormulas_(sh);           // rewrites ONLY the 9 computed columns (never user data)
+  applyConditionalFormatting_(sh);
+  buildDropdownSheet_(ss);
+  buildBoard_(ss);
+  buildExceptionQueue_(ss);
+  buildMigrationLog_(ss);
+  buildTestDataSheet_(ss);
+  ensureTaskQueue_(ss);
+  SpreadsheetApp.getActive().toast('Repaired: formulas, validations, formats & views reapplied to row ' + CFG.MAX_ROWS + '.', 'Twin Visit Logger', 8);
 }
 
 function archiveLegacy_(ss) {
@@ -54,6 +78,7 @@ function applyDropdowns_(sh) {
     'Seller Timeline':'Seller Timeline','Offer Status':'Offer Status',
     'Offer Received Confirmation':'Offer Received Confirmation','Assigned Owner':'Assigned Owner',
     'Blocker':'Blocker','Gift Status':'Gift Status','Gift Approval Owner':'Gift Approval Owner',
+    'Gift Approved By':'Gift Approved By',
     'Current Stage':'Current Stage','Final Disposition':'Final Disposition',
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
@@ -117,7 +142,7 @@ function formulaFor_(header, r) {
         'IF(AND(' + A('Current Stage') + '="Contract Signed",' + A('Contract Signed Date') + '=""),"Contract Signed needs Contract Signed Date",""),' +
         'IF(AND(' + A('Current Stage') + '="Long-Term Nurture",OR(' + A('Next Action Due Date') + '="",' + A('Next Action Due Date') + '<=TODAY())),"Long-Term Nurture needs an exact FUTURE follow-up date",""),' +
         'IF(AND(' + A('Current Stage') + '="Lost / Closed Out",OR(' + A('Final Disposition') + '="",' + A('Closeout Reason') + '="")),"Lost / Closed Out needs Final Disposition + Closeout Reason",""),' +
-        'IF(AND(' + A('Gift Status') + '="Sent",' + A('Gift Approval Owner') + '=""),"Gift marked Sent without recorded approval",""),' +
+        'IF(AND(' + A('Gift Status') + '="Sent",OR(' + A('Gift Approved By') + '="",' + A('Gift Approval Date') + '="")),"Gift marked Sent without recorded approval (needs Gift Approved By + Gift Approval Date)",""),' +
         'IF(' + A('Duplicate Address Flag') + '="Duplicate","Duplicate active record for this address","")))';
     default:
       return '';
@@ -126,6 +151,24 @@ function formulaFor_(header, r) {
 
 const COMPUTED_HEADERS = ['Normalized Address','Days Since Last Activity','Days Overdue','Stalled Status',
   'Missing Required Fields','Duplicate Address Flag','Opportunity Priority','Data Quality Status','Exception Reason'];
+
+/** Rewrite the 9 computed-column formulas for a single row. */
+function restoreFormulasRow_(sh, r) {
+  COMPUTED_HEADERS.forEach(function(h){ sh.getRange(r, col(h)).setFormula(formulaFor_(h, r)); });
+}
+
+/**
+ * Clear ONE record in place: wipe user (non-computed) columns + the automation note marker,
+ * then restore the computed formulas. Never deletes the row, so the formula range,
+ * conditional-format range and dropdown-validation range never shrink.
+ */
+function clearRecordRow_(sh, r) {
+  for (var i = 0; i < HEADERS.length; i++) {
+    if (COMPUTED_HEADERS.indexOf(HEADERS[i]) < 0) sh.getRange(r, i + 1).clearContent();
+  }
+  try { sh.getRange(r, 1).clearNote(); } catch (e) {}
+  restoreFormulasRow_(sh, r);
+}
 
 function writeFormulas_(sh) {
   const first = CFG.FIRST_DATA_ROW, last = CFG.MAX_ROWS;
@@ -137,10 +180,13 @@ function writeFormulas_(sh) {
   });
   // date/currency number formats
   ['Visit Date','Offer Prepared Date','Offer Sent Date','Last Contact Date','Next Action Due Date',
-   'Gift Sent Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
+   'Gift Sent Date','Gift Approval Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('yyyy-mm-dd'); });
   ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('$#,##0'); });
+  // integer columns (must NOT inherit a date format)
+  ['Days Since Last Activity','Days Overdue','Opportunity Priority']
+    .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('0'); });
 }
 
 function applyConditionalFormatting_(sh) {
@@ -185,7 +231,7 @@ function buildBoard_(ss) {
   const stage = colL('Current Stage'), due = colL('Next Action Due Date'), ov = colL('Days Overdue'),
         stall = colL('Stalled Status'), prio = colL('Opportunity Priority'), dq = colL('Data Quality Status'),
         gift = colL('Gift Status'), handoff = colL('Transaction Handoff Status'), disp2 = colL('Final Disposition'),
-        addr = colL('Property Address');
+        addr = colL('Property Address'), src = colL('Source');
 
   const sections = [
     ['1. Contracts Possible This Week', '(' + stage + "='Verbal Agreement' or " + stage + "='Contract Sent' or " + stage + "='Active Negotiation')", prio + ' desc, ' + due],
@@ -207,8 +253,9 @@ function buildBoard_(ss) {
     row++;
     sh.getRange(row,1,1,hdr.length).setValues([hdr]).setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
     row++;
+    // live Board excludes Source=TEST records (they live in the Test Data sheet)
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
+      '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and " + s[1] + ' order by ' + s[2] +
       ' limit 50",0),"— none —")';
     sh.getRange(row,1).setFormula(q);
     row += 8;
@@ -228,14 +275,75 @@ function buildExceptionQueue_(ss) {
   const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner','Data Quality Status','Missing Required Fields','Exception Reason'];
   sh.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#990000');
   const sel = disp.map(colL).join(',');
-  const dq = colL('Data Quality Status'), addr = colL('Property Address');
+  const dq = colL('Data Quality Status'), addr = colL('Property Address'), src = colL('Source');
+  // live Exception Queue excludes Source=TEST (test exceptions show only in the Test Data sheet)
   const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-    '"select ' + sel + ' where ' + addr + " is not null and (" + dq + "='Incomplete' or " + dq + "='Exception') order by " + dq + '",0),"— none —")';
+    '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and (" + dq + "='Incomplete' or " + dq + "='Exception') order by " + dq + '",0),"— none —")';
   sh.getRange(4,1).setFormula(q);
   sh.setTabColor('#990000');
 }
 
-function buildFilterViewsNote_(ss) {
-  // Filter Views require the Sheets Advanced Service; documented as a manual/optional step.
-  // See docs/Deployment-Guide.md "Quick filters".
+/** Documents the legacy -> new field mapping used during pilot migration. */
+function buildMigrationLog_(ss) {
+  const sh = ensureSheet_(ss, CFG.MIGRATION_SHEET);
+  sh.clear();
+  sh.setTabColor('#bf9000');
+  const rows = [
+    ['Legacy field','New field(s)','Mapping rule','Confidence / notes'],
+    ['Address','Property Address (+ Normalized Address)','Copied verbatim; Normalized Address computed','High'],
+    ['Name','Seller Name','Copied verbatim','High'],
+    ['Phone','Phone','Copied verbatim','High'],
+    ['Lead Source','Lead Source','Values already match the new dropdown','High'],
+    ['Appointment date / col A','Visit Date','Copied','High'],
+    ['Inspection Status','Visit Status','Inspected→Completed; Pending Inspection→Scheduled; Cancelled→Canceled; Skipped-offer-made→Completed','High'],
+    ['Inspector','Assigned Visitor','Juan Diaz→Juan; Cesar→Cesar; others kept in visitor list','Medium'],
+    ['Closer / Agent','Assigned Owner','Cherry→Cherry; Juan Diaz→Juan; blank/other left blank → Exception Queue','Low where blank'],
+    ['Deal Stage + Deal Status','Current Stage (+ Final Disposition)','See docs/Data-Dictionary.md stage table','Medium — uncertain → Exception Queue'],
+    ['Status Update (prose)','Last Contact Result / Next Action / Visit Notes','Clear next-step → Next Action; full text → Visit Notes; ambiguous → Exception','Low — never guessed'],
+    ['Notes','Visit Notes / Seller Motivation','Notes→Visit Notes; motivation only when explicit','Medium'],
+    ['Golden Needle (unused)','(dropped)','Audit-flagged unused; not migrated','n/a'],
+    ['Contract (dropdown)','Final Disposition / Transaction Handoff Status','Acquired→Contracted; Cancelled Contract→Lost; Under Contract→context','Medium'],
+    ['', '', '', ''],
+    ['PILOT ROWS WITH INTENTIONALLY-MISSING DATA (complete manually from REI BlackBook):','','',''],
+    ['TVL-0001 / TVL-0002','REI BlackBook Link','Not present in legacy data — DO NOT invent; enter from REI BlackBook','Manual'],
+    ['TVL-0003 / TVL-0009','REI BlackBook Link, Approved Offer Amount, Offer Sent Date','Not present in legacy data — DO NOT invent; enter from REI BlackBook','Manual'],
+  ];
+  sh.getRange(1,1,rows.length,4).setValues(rows);
+  sh.getRange(1,1,1,4).setFontWeight('bold').setFontColor('#ffffff').setBackground('#bf9000');
+  sh.getRange(16,1,1,4).setFontWeight('bold');
+  sh.setColumnWidth(1,26*8); sh.setColumnWidth(2,34*8); sh.setColumnWidth(3,52*8); sh.setColumnWidth(4,30*8);
+  sh.getRange(1,1,rows.length,4).setWrap(true).setVerticalAlignment('top');
+}
+
+/** Read-only view of Source=TEST records, kept OFF the live Board/Exception Queue. */
+function buildTestDataSheet_(ss) {
+  const sh = ensureSheet_(ss, CFG.TEST_DATA_SHEET);
+  sh.clear();
+  sh.setTabColor('#999999');
+  sh.getRange(1,1).setValue('Test Data — Source = TEST records only (excluded from the live Board, Exception Queue & Daily Report)')
+    .setFontWeight('bold').setFontSize(12);
+  const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner',
+                'Next Action Due Date','Days Overdue','Stalled Status','Data Quality Status','Exception Reason'];
+  sh.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setBackground('#ddebf7');
+  const sel = disp.map(colL).join(',');
+  const src = colL('Source'), addr = colL('Property Address');
+  const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
+    '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " = 'TEST' order by " + colL('Current Stage') + '",0),"— none —")';
+  sh.getRange(4,1).setFormula(q);
+  sh.getRange(1, 6, sh.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd'); // Due
+  sh.getRange(1, 7, sh.getMaxRows(), 1).setNumberFormat('0');          // Days Overdue
+}
+
+/** Visible internal task-delivery sheet (the pilot task inbox for the team). */
+function ensureTaskQueue_(ss) {
+  let sh = ss.getSheetByName(CFG.TASK_QUEUE_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CFG.TASK_QUEUE_SHEET);
+    sh.appendRow(['Created','Owner','Property ID','Address','Task','Due','Status']);
+    sh.getRange(1,1,1,7).setFontWeight('bold').setFontColor('#ffffff').setBackground('#38761d');
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(4, 240); sh.setColumnWidth(5, 320);
+  }
+  sh.setTabColor('#38761d');
+  return sh;
 }

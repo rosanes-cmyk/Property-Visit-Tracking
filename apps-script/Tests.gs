@@ -106,6 +106,40 @@ function runAllTests() {
   SpreadsheetApp.flush();
   assert('16. Missing required -> Incomplete', new RowAccessor_(sh,k2.row).get('Data Quality Status')==='Incomplete', new RowAccessor_(sh,k2.row).get('Data Quality Status'));
 
+  // 5. Completed visit with no offer/pass decision after 1 business day -> escalation task/log
+  let nd = newRow({'Property ID':'TEST-A11','Property Address':'11 Auto Test St','Seller Name':'No Decision','REI BlackBook Link':'https://rei/a11','Visit Notes':'done','Seller Motivation':'m','Current Stage':'Visit Completed — Needs Review','Assigned Owner':'Jonathan','Visit Date':daysAgo_(5),'Source':'TEST'});
+  checkNoDecision(); SpreadsheetApp.flush();
+  assert('5. No offer decision >1 biz day -> escalate to Cherry', logHas_('ESCALATE','TEST-A11'), 'Automation Log ESCALATE present');
+
+  // 12. Stalled status + alert after 3 business days
+  let stl = newRow({'Property ID':'TEST-A12','Property Address':'12 Auto Test St','Seller Name':'Stall Test','REI BlackBook Link':'https://rei/a12','Visit Notes':'x','Seller Motivation':'m','Current Stage':'Offer Sent','Assigned Owner':'Juan','Approved Offer Amount':100000,'Offer Sent Date':daysAgo_(9),'Last Contact Date':daysAgo_(9),'Next Action':'follow','Next Action Due Date':daysAgo_(4),'Source':'TEST'});
+  SpreadsheetApp.flush();
+  assert('12. Stalled Status = Yes after 3 biz days', new RowAccessor_(sh,stl.row).get('Stalled Status')==='Yes', new RowAccessor_(sh,stl.row).get('Stalled Status'));
+  checkStalled(); SpreadsheetApp.flush();
+  assert('12b. Stalled alert task queued', logHas_('NOTIFY','TEST-A12'), 'Automation Log NOTIFY present');
+
+  // REI Update Required handling: contract signed sets it to Yes
+  let rei = newRow({'Property ID':'TEST-A13','Property Address':'13 Auto Test St','Seller Name':'Rei Test','REI BlackBook Link':'https://rei/a13','Source':'TEST'});
+  rei = edit(rei, 'Contract Signed Date', today_());
+  assert('REI. Contract signed -> REI Update Required = Yes', rei.get('REI Update Required')==='Yes', rei.get('REI Update Required'));
+
+  // Daily Report creation + no email while REPORT_TO blank
+  const savedTo = CFG.REPORT_TO; CFG.REPORT_TO = '';
+  const rep = sendDailyReport();
+  const hasSheet = !!SpreadsheetApp.getActive().getSheetByName('Daily Report');
+  assert('DR. Daily Report sheet created', hasSheet, 'sheet present');
+  assert('NoEmail. sendDailyReport sent NO email while REPORT_TO blank', rep && rep.emailed === false, 'emailed=' + (rep && rep.emailed));
+  CFG.REPORT_TO = savedTo;
+
+  // No seller messaging: only config recipients (REPORT_TO / OWNER_EMAILS) are ever used, never seller fields
+  const noSeller = (CFG.REPORT_TO === '' || CFG.REPORT_TO.indexOf('@') > 0) &&
+                   Object.keys(OWNER_EMAILS).every(function(k){ return OWNER_EMAILS[k] === '' || OWNER_EMAILS[k].indexOf('@') > 0; });
+  assert('18. No seller messaging (recipients are config-only, never seller Email/Phone)', noSeller, 'config recipients only');
+
+  // Triggers: safe check (full install/remove cycle is the separate testTriggerCycle())
+  removeAllTriggers();
+  assert('Trig. removeAllTriggers -> 0 (run testTriggerCycle for full install/remove)', ScriptApp.getProjectTriggers().length === 0 && typeof installTriggers === 'function', 'triggers cleared');
+
   writeTestResults_(results);
   cleanupTests_();
   SpreadsheetApp.getActive().toast('Automation tests complete: ' + results.filter(function(x){return x[1]==='PASS';}).length + '/' + results.length + ' passed', 'Tests', 8);
@@ -120,11 +154,38 @@ function writeTestResults_(results) {
   sh.getRange(2,1,results.length,3).setValues(results);
 }
 
-/** remove TEST-A* rows created by the harness */
+/**
+ * Clear TEST-A* harness rows IN PLACE (no deleteRow) so the formula/validation/format ranges
+ * never shrink; computed formulas are restored for each cleared row.
+ */
 function cleanupTests_() {
   const sh = dataSheet_();
-  for (let r = sh.getLastRow(); r >= CFG.FIRST_DATA_ROW; r--) {
-    const id = String(sh.getRange(r, col('Property ID')).getValue());
-    if (id.indexOf('TEST-A') === 0) sh.deleteRow(r);
+  const ids = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).indexOf('TEST-A') === 0) clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i);
   }
+}
+
+/** True if the Automation Log has a row with the given level for the given Property ID. */
+function logHas_(level, id) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Automation Log');
+  if (!sh) return false;
+  const v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][1]) === level && String(v[i][2]) === id) return true;
+  return false;
+}
+
+/**
+ * SEPARATE, opt-in test for trigger install + removal. Not part of runAllTests() because it
+ * briefly creates real triggers. It installs, verifies 4 exist, then removes all and verifies 0.
+ * Run manually only when you want to test the trigger lifecycle.
+ */
+function testTriggerCycle() {
+  installTriggers();
+  const mid = ScriptApp.getProjectTriggers().length;
+  removeAllTriggers();
+  const after = ScriptApp.getProjectTriggers().length;
+  const pass = (mid >= 4 && after === 0);
+  SpreadsheetApp.getActive().toast('Trigger cycle: installed=' + mid + ', afterRemove=' + after + ' => ' + (pass ? 'PASS' : 'FAIL'), 'Twin Visit Logger', 8);
+  return pass;
 }

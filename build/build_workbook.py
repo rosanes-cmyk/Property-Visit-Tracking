@@ -43,6 +43,7 @@ DROPDOWNS = {
     "Assigned Visitor":    ["Juan", "Kyle", "Cherry", "Jonathan", "JM",
                             "Cesar", "Jose Herrera", "Manny Morales", "Lily", "Alan Hernandez"],  # owners + legacy field reps (assumption)
     "Gift Approval Owner": ["Cherry", "Juan"],
+    "Gift Approved By":    ["Cherry", "Juan"],
     "Updated By":          ["Jonathan", "Kyle", "Cherry", "Juan", "JM", "Apps Script", "Import"],
     "Final Disposition":   ["Contracted", "Lost", "Long-Term Nurture", "Closed Out"],
     "Gift Status":         ["Not Reviewed", "Recommended", "Approved", "Sent", "Not Appropriate"],
@@ -188,11 +189,14 @@ COLUMNS = [
         # rule 8: lost/closed out
         'IF(AND({Current Stage}="Lost / Closed Out",OR({Final Disposition}="",{Closeout Reason}="")),"Lost / Closed Out needs Final Disposition + Closeout Reason",""),'
         # rule 9: gift sent requires approval
-        'IF(AND({Gift Status}="Sent",{Gift Approval Owner}=""),"Gift marked Sent without recorded approval",""),'
+        'IF(AND({Gift Status}="Sent",OR({Gift Approved By}="",{Gift Approval Date}="")),"Gift marked Sent without recorded approval (needs Gift Approved By + Gift Approval Date)",""),'
         # rule 10: duplicate
         'IF({Duplicate Address Flag}="Duplicate","Duplicate active record for this address","")))'),
     ("System",     "REI Update Required",    "REI Update Required", None),
     ("System",     "REI Update Completed",   "REI Update Completed", None),
+    # Relationship (appended so the original 59 columns keep their positions on the live sheet)
+    ("Relationship","Gift Approved By",      "Gift Approved By", None),
+    ("Relationship","Gift Approval Date",    None, None),
 ]
 
 HEADERS = [c[1] for c in COLUMNS]

@@ -2,7 +2,18 @@
 
 **Files:** `apps-script/Config.gs`, `Setup.gs`, `Automation.gs`, `DailyReport.gs`, `Tests.gs`
 **Golden safety rule:** the system **never** sends a message to a seller. Every "notification" is
-internal only (a row in the hidden **Automation Log** sheet, and/or an email to internal staff).
+internal only.
+
+## Internal task delivery (pilot)
+Every task the automation creates is delivered two ways, both internal:
+- **Task Queue sheet** (visible): one row per task — `Created · Owner · Property ID · Address ·
+  Task · Due · Status`. This is the team's pilot task inbox for Jonathan, Kyle, Cherry/Juan, JM.
+- **Optional internal email** via `OWNER_EMAILS` in `Config.gs` (blank by default = Task Queue
+  only). Set an owner's **internal** address to also email them their tasks. Never a seller address.
+- The hidden **Automation Log** keeps a full audit trail of every automation action.
+
+The **scheduled-visit reminder** is a real Task Queue item (due on the visit date) for the assigned
+visitor — not just a log line.
 
 ## Trigger model
 | Trigger | Type | Function |
@@ -51,7 +62,7 @@ Required-field blanks (active records) ⇒ Incomplete.
 6. Contract Signed ⇒ Contract Signed Date
 7. Long-Term Nurture ⇒ exact future follow-up date
 8. Lost / Closed Out ⇒ Final Disposition + Closeout Reason
-9. Gift Sent ⇒ prior approval (Gift Approval Owner)
+9. Gift Sent ⇒ prior approval recorded (**Gift Approved By** + **Gift Approval Date**)
 10. One active record per Normalized Address (Duplicate Address Flag)
 11. Unclear records → Exception Queue (via Incomplete/Exception status)
 12. No record is "complete" while required fields are blank

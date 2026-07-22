@@ -1,6 +1,7 @@
 # Data Dictionary — Twin Visit Logger (`Data` sheet)
 
-One row per property. Headers on row 1; data from row 2. 59 columns in 9 groups.
+One row per property. Headers on row 1; data from row 2. 61 columns in 9 groups
+(cols 60–61, Gift Approved By / Gift Approval Date, are appended so the original 59 keep their positions).
 `✏️` = user-entered · `⚙️` = formula (never hand-edit) · `🔽` = dropdown (data validation).
 
 ## Property information
@@ -66,8 +67,10 @@ One row per property. Headers on row 1; data from row 2. 59 columns in 9 groups.
 |---|---|---|---|
 | 39 | Gift Status | 🔽 | Not Reviewed · Recommended · Approved · Sent · Not Appropriate |
 | 40 | Gift Recommendation Reason | ✏️ text | |
-| 41 | Gift Approval Owner | 🔽 | Cherry · Juan — required before Gift Status = Sent (rule 9). |
+| 41 | Gift Approval Owner | 🔽 | Cherry · Juan — who owns getting approval. |
 | 42 | Gift Sent Date | ✏️ date | |
+| 60 | Gift Approved By | 🔽 | Cherry · Juan — the actual approver (appended column). |
+| 61 | Gift Approval Date | ✏️ date | Date approval was granted (appended column). Gift Status = Sent is an Exception unless **both** Gift Approved By and Gift Approval Date are set (rule 9). |
 
 ## Closeout information
 | # | Field | Type | Notes |

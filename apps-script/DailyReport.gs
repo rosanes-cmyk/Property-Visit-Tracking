@@ -8,24 +8,27 @@
 function sendDailyReport() {
   const d = new Date();
   const g = d.getDay();
-  if (g === 0 || g === 6) return; // business days only
-
+  // Business days only for the scheduled trigger; manual/preview runs still build the sheet.
   const sections = reportSections_();
   const total = sections.reduce(function(n,s){ return n + s.rows.length; }, 0);
   const sendEmpty = false;
-  if (total === 0 && !sendEmpty) { writeReportSheet_(sections, 0); return; }
 
-  const html = renderReportHtml_(sections, total);
-  if (CFG.REPORT_TO) {
+  writeReportSheet_(sections, total);           // always refresh the Daily Report sheet
+  let emailed = false;
+  if (CFG.REPORT_TO && !(total === 0 && !sendEmpty)) {
+    const html = renderReportHtml_(sections, total);
     MailApp.sendEmail({ to: CFG.REPORT_TO, subject: CFG.REPORT_TITLE + ' — ' + fmt_(today_()), htmlBody: html });
+    emailed = true;
   }
-  writeReportSheet_(sections, total);
+  logAuto_('REPORT', '', 'Daily report built (' + total + ' actionable). Emailed=' + emailed + (CFG.REPORT_TO ? '' : ' (REPORT_TO blank — no email)'));
+  return { emailed: emailed, total: total, recipient: CFG.REPORT_TO || '(none)' };
 }
 
 /** The 10 report sections, computed from Data (same logic as the Board). */
 function reportSections_() {
   const rows = readAllRows_();
-  const active = rows.filter(function(r){ return r['Property Address']; });
+  // live report excludes Source=TEST demo records
+  const active = rows.filter(function(r){ return r['Property Address'] && r['Source'] !== 'TEST'; });
   function f(pred){ return active.filter(pred); }
   const ov = function(r){ return Number(r['Days Overdue']) || 0; };
 

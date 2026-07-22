@@ -19,7 +19,13 @@ const CFG = {
   REPORT_TO: '',           // e.g. 'rosanes@twinhomebuyer.com'
   STALLED_BUSINESS_DAYS: 3,
   NO_DECISION_BUSINESS_DAYS: 1,
+  TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
+  TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
 };
+
+// Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
+// Set an INTERNAL address to also email that person their tasks. NEVER a seller address.
+const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '', JM: '' };
 
 // 59 columns, in order. Keep IN SYNC with build/build_workbook.py.
 const HEADERS = [
@@ -41,6 +47,8 @@ const HEADERS = [
   'Missing Required Fields','Duplicate Address Flag','Opportunity Priority',
   // System
   'Created Date','Last Updated Date','Updated By','Source','Data Quality Status','Exception Reason','REI Update Required','REI Update Completed',
+  // Relationship (appended so the original 59 columns keep their positions on the live sheet)
+  'Gift Approved By','Gift Approval Date',
 ];
 
 const DROPDOWNS = {
@@ -49,6 +57,7 @@ const DROPDOWNS = {
   'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
   'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
+  'Gift Approved By': ['Cherry','Juan'],
   'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],

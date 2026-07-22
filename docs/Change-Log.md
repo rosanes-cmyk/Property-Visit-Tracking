@@ -1,5 +1,40 @@
 # Change Log — Twin Visit Logger
 
+## v2.1 — 2026-07-22 (SOP-review corrections; triggers still OFF)
+
+Corrections after reviewing the deployed dev copy against the SOP. No triggers installed.
+
+1. **`cleanupTests_()` no longer uses `deleteRow()`** — it clears TEST-A* rows in place and restores
+   their computed formulas, so the formula / conditional-format / validation ranges never shrink.
+   New shared helpers `clearRecordRow_()` + `restoreFormulasRow_()`.
+2. **`repairSheet()`** added (menu: *Repair sheet*) — reapplies headers, dropdowns, formulas,
+   number formats, and conditional formatting through row 500 and rebuilds the view sheets, without
+   changing any user-entered data.
+3. **Source = TEST excluded** from the live **Cherry Opportunity Board**, **Exception Queue**, and
+   **Daily Report**. Test records now show only in a new read-only **Test Data** sheet.
+4. **New automated tests**: no-offer-decision escalation (#5), stalled status + alert (#12),
+   Daily Report creation, REI-Update-Required on contract signed, no-email-while-blank, and a
+   separate opt-in `testTriggerCycle()` for trigger install/remove.
+5. **Internal task delivery**: a visible **Task Queue** sheet (owner, property, task, due, status)
+   is written for every task, with optional internal email via `OWNER_EMAILS` (blank in pilot).
+   No seller is ever contacted.
+6. **Real scheduled-visit reminder**: scheduling a visit now enqueues a Task Queue item for the
+   visitor due on the visit date (not just a log line).
+7. **Gift approval strengthened**: new **Gift Approved By** + **Gift Approval Date** columns;
+   `Gift Status = Sent` is an Exception unless both are recorded.
+8. **Days Since Last Activity** and **Days Overdue** now formatted as integers.
+9. **Migration Log** sheet is now actually built by `setup()`/`repairSheet()`, documenting every
+   pilot→live mapping (incl. the intentionally-blank REI/offer fields to complete manually).
+10. **`removeTestData()`** (menu) removes only Source = TEST records in place — no row deletion,
+    formulas preserved.
+11. **`sendDailyReport()`** returns `{emailed,total}` and sends nothing while `REPORT_TO` is blank
+    (safe preview) — asserted by a test.
+12. Triggers are still installed only by explicit menu action.
+
+Kept intentionally visible (real pilot exceptions — complete manually from REI BlackBook, not
+invented): **TVL-0001/0002** missing REI links; **TVL-0003/0009** missing REI links + Approved
+Offer Amount + Offer Sent Date.
+
 ## v2.0.1 — 2026-07-22 (live deployment to the dev copy)
 
 Deployed the Apps Script build to the development-copy Google Sheet and ran it end to end. Fixes

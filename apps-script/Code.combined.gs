@@ -6,13 +6,14 @@
  *   1. In the DEV COPY sheet: Extensions -> Apps Script.
  *   2. Delete the default Code.gs contents, paste this entire file, Save.
  *   3. Reload the spreadsheet tab. A "🏠 Twin Visit Logger" menu appears.
- *   4. Menu -> "1) Build structure (setup)"  -> authorize when asked.
+ *   4. Menu -> "1) Build structure (setup)"  (or "Repair sheet" if already built).
  *   5. Menu -> "2) Load pilot + test data".
  *   6. Menu -> "3) Run tests"  -> check the Test Results sheet.
- *   7. (Only after tests pass) Menu -> "4) Install automation triggers".
+ *   7. (Only after tests pass, and only when YOU approve) "4) Install automation triggers".
  *
  *  Concatenation of Config/Setup/LoadData/Automation/DailyReport/Tests.
  *  Never contacts sellers. The original workbook is never modified.
+ *  Triggers are NEVER installed automatically.
  * ================================================================
  */
 
@@ -26,6 +27,8 @@ function onOpen() {
     .addItem('4) Install automation triggers', 'installTriggers')
     .addItem('Send daily report now (preview)', 'sendDailyReport')
     .addSeparator()
+    .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
+    .addItem('Remove test data (Source = TEST)', 'removeTestData')
     .addItem('Clear all data rows', 'clearAllData')
     .addItem('⛔ Remove ALL triggers (kill switch)', 'removeAllTriggers')
     .addToUi();
@@ -55,7 +58,13 @@ const CFG = {
   REPORT_TO: '',           // e.g. 'rosanes@twinhomebuyer.com'
   STALLED_BUSINESS_DAYS: 3,
   NO_DECISION_BUSINESS_DAYS: 1,
+  TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
+  TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
 };
+
+// Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
+// Set an INTERNAL address to also email that person their tasks. NEVER a seller address.
+const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '', JM: '' };
 
 // 59 columns, in order. Keep IN SYNC with build/build_workbook.py.
 const HEADERS = [
@@ -77,6 +86,8 @@ const HEADERS = [
   'Missing Required Fields','Duplicate Address Flag','Opportunity Priority',
   // System
   'Created Date','Last Updated Date','Updated By','Source','Data Quality Status','Exception Reason','REI Update Required','REI Update Completed',
+  // Relationship (appended so the original 59 columns keep their positions on the live sheet)
+  'Gift Approved By','Gift Approval Date',
 ];
 
 const DROPDOWNS = {
@@ -85,6 +96,7 @@ const DROPDOWNS = {
   'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
   'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
+  'Gift Approved By': ['Cherry','Juan'],
   'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
@@ -140,8 +152,32 @@ function setup() {
   buildDropdownSheet_(ss);
   buildBoard_(ss);
   buildExceptionQueue_(ss);
-  buildFilterViewsNote_(ss);
+  buildMigrationLog_(ss);
+  buildTestDataSheet_(ss);
+  ensureTaskQueue_(ss);
   SpreadsheetApp.getActive().toast('Twin Visit Logger structure built. See READ ME / Deployment-Guide.', 'Setup complete', 8);
+}
+
+/**
+ * Reapply formulas, dropdown validations, number formats, and conditional formatting
+ * through row MAX_ROWS WITHOUT changing user-entered data. Safe to run anytime
+ * (e.g. after clearing test rows, or if a range shrank). Rebuilds the view sheets too.
+ */
+function repairSheet() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = dataSheet_();
+  if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
+  writeHeaders_(sh);            // row 1 only (idempotent)
+  applyDropdowns_(sh);          // rows 2..MAX_ROWS
+  writeFormulas_(sh);           // rewrites ONLY the 9 computed columns (never user data)
+  applyConditionalFormatting_(sh);
+  buildDropdownSheet_(ss);
+  buildBoard_(ss);
+  buildExceptionQueue_(ss);
+  buildMigrationLog_(ss);
+  buildTestDataSheet_(ss);
+  ensureTaskQueue_(ss);
+  SpreadsheetApp.getActive().toast('Repaired: formulas, validations, formats & views reapplied to row ' + CFG.MAX_ROWS + '.', 'Twin Visit Logger', 8);
 }
 
 function archiveLegacy_(ss) {
@@ -176,6 +212,7 @@ function applyDropdowns_(sh) {
     'Seller Timeline':'Seller Timeline','Offer Status':'Offer Status',
     'Offer Received Confirmation':'Offer Received Confirmation','Assigned Owner':'Assigned Owner',
     'Blocker':'Blocker','Gift Status':'Gift Status','Gift Approval Owner':'Gift Approval Owner',
+    'Gift Approved By':'Gift Approved By',
     'Current Stage':'Current Stage','Final Disposition':'Final Disposition',
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
@@ -239,7 +276,7 @@ function formulaFor_(header, r) {
         'IF(AND(' + A('Current Stage') + '="Contract Signed",' + A('Contract Signed Date') + '=""),"Contract Signed needs Contract Signed Date",""),' +
         'IF(AND(' + A('Current Stage') + '="Long-Term Nurture",OR(' + A('Next Action Due Date') + '="",' + A('Next Action Due Date') + '<=TODAY())),"Long-Term Nurture needs an exact FUTURE follow-up date",""),' +
         'IF(AND(' + A('Current Stage') + '="Lost / Closed Out",OR(' + A('Final Disposition') + '="",' + A('Closeout Reason') + '="")),"Lost / Closed Out needs Final Disposition + Closeout Reason",""),' +
-        'IF(AND(' + A('Gift Status') + '="Sent",' + A('Gift Approval Owner') + '=""),"Gift marked Sent without recorded approval",""),' +
+        'IF(AND(' + A('Gift Status') + '="Sent",OR(' + A('Gift Approved By') + '="",' + A('Gift Approval Date') + '="")),"Gift marked Sent without recorded approval (needs Gift Approved By + Gift Approval Date)",""),' +
         'IF(' + A('Duplicate Address Flag') + '="Duplicate","Duplicate active record for this address","")))';
     default:
       return '';
@@ -248,6 +285,24 @@ function formulaFor_(header, r) {
 
 const COMPUTED_HEADERS = ['Normalized Address','Days Since Last Activity','Days Overdue','Stalled Status',
   'Missing Required Fields','Duplicate Address Flag','Opportunity Priority','Data Quality Status','Exception Reason'];
+
+/** Rewrite the 9 computed-column formulas for a single row. */
+function restoreFormulasRow_(sh, r) {
+  COMPUTED_HEADERS.forEach(function(h){ sh.getRange(r, col(h)).setFormula(formulaFor_(h, r)); });
+}
+
+/**
+ * Clear ONE record in place: wipe user (non-computed) columns + the automation note marker,
+ * then restore the computed formulas. Never deletes the row, so the formula range,
+ * conditional-format range and dropdown-validation range never shrink.
+ */
+function clearRecordRow_(sh, r) {
+  for (var i = 0; i < HEADERS.length; i++) {
+    if (COMPUTED_HEADERS.indexOf(HEADERS[i]) < 0) sh.getRange(r, i + 1).clearContent();
+  }
+  try { sh.getRange(r, 1).clearNote(); } catch (e) {}
+  restoreFormulasRow_(sh, r);
+}
 
 function writeFormulas_(sh) {
   const first = CFG.FIRST_DATA_ROW, last = CFG.MAX_ROWS;
@@ -259,10 +314,13 @@ function writeFormulas_(sh) {
   });
   // date/currency number formats
   ['Visit Date','Offer Prepared Date','Offer Sent Date','Last Contact Date','Next Action Due Date',
-   'Gift Sent Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
+   'Gift Sent Date','Gift Approval Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('yyyy-mm-dd'); });
   ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('$#,##0'); });
+  // integer columns (must NOT inherit a date format)
+  ['Days Since Last Activity','Days Overdue','Opportunity Priority']
+    .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('0'); });
 }
 
 function applyConditionalFormatting_(sh) {
@@ -307,7 +365,7 @@ function buildBoard_(ss) {
   const stage = colL('Current Stage'), due = colL('Next Action Due Date'), ov = colL('Days Overdue'),
         stall = colL('Stalled Status'), prio = colL('Opportunity Priority'), dq = colL('Data Quality Status'),
         gift = colL('Gift Status'), handoff = colL('Transaction Handoff Status'), disp2 = colL('Final Disposition'),
-        addr = colL('Property Address');
+        addr = colL('Property Address'), src = colL('Source');
 
   const sections = [
     ['1. Contracts Possible This Week', '(' + stage + "='Verbal Agreement' or " + stage + "='Contract Sent' or " + stage + "='Active Negotiation')", prio + ' desc, ' + due],
@@ -329,8 +387,9 @@ function buildBoard_(ss) {
     row++;
     sh.getRange(row,1,1,hdr.length).setValues([hdr]).setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
     row++;
+    // live Board excludes Source=TEST records (they live in the Test Data sheet)
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
+      '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and " + s[1] + ' order by ' + s[2] +
       ' limit 50",0),"— none —")';
     sh.getRange(row,1).setFormula(q);
     row += 8;
@@ -350,16 +409,77 @@ function buildExceptionQueue_(ss) {
   const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner','Data Quality Status','Missing Required Fields','Exception Reason'];
   sh.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#990000');
   const sel = disp.map(colL).join(',');
-  const dq = colL('Data Quality Status'), addr = colL('Property Address');
+  const dq = colL('Data Quality Status'), addr = colL('Property Address'), src = colL('Source');
+  // live Exception Queue excludes Source=TEST (test exceptions show only in the Test Data sheet)
   const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-    '"select ' + sel + ' where ' + addr + " is not null and (" + dq + "='Incomplete' or " + dq + "='Exception') order by " + dq + '",0),"— none —")';
+    '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and (" + dq + "='Incomplete' or " + dq + "='Exception') order by " + dq + '",0),"— none —")';
   sh.getRange(4,1).setFormula(q);
   sh.setTabColor('#990000');
 }
 
-function buildFilterViewsNote_(ss) {
-  // Filter Views require the Sheets Advanced Service; documented as a manual/optional step.
-  // See docs/Deployment-Guide.md "Quick filters".
+/** Documents the legacy -> new field mapping used during pilot migration. */
+function buildMigrationLog_(ss) {
+  const sh = ensureSheet_(ss, CFG.MIGRATION_SHEET);
+  sh.clear();
+  sh.setTabColor('#bf9000');
+  const rows = [
+    ['Legacy field','New field(s)','Mapping rule','Confidence / notes'],
+    ['Address','Property Address (+ Normalized Address)','Copied verbatim; Normalized Address computed','High'],
+    ['Name','Seller Name','Copied verbatim','High'],
+    ['Phone','Phone','Copied verbatim','High'],
+    ['Lead Source','Lead Source','Values already match the new dropdown','High'],
+    ['Appointment date / col A','Visit Date','Copied','High'],
+    ['Inspection Status','Visit Status','Inspected→Completed; Pending Inspection→Scheduled; Cancelled→Canceled; Skipped-offer-made→Completed','High'],
+    ['Inspector','Assigned Visitor','Juan Diaz→Juan; Cesar→Cesar; others kept in visitor list','Medium'],
+    ['Closer / Agent','Assigned Owner','Cherry→Cherry; Juan Diaz→Juan; blank/other left blank → Exception Queue','Low where blank'],
+    ['Deal Stage + Deal Status','Current Stage (+ Final Disposition)','See docs/Data-Dictionary.md stage table','Medium — uncertain → Exception Queue'],
+    ['Status Update (prose)','Last Contact Result / Next Action / Visit Notes','Clear next-step → Next Action; full text → Visit Notes; ambiguous → Exception','Low — never guessed'],
+    ['Notes','Visit Notes / Seller Motivation','Notes→Visit Notes; motivation only when explicit','Medium'],
+    ['Golden Needle (unused)','(dropped)','Audit-flagged unused; not migrated','n/a'],
+    ['Contract (dropdown)','Final Disposition / Transaction Handoff Status','Acquired→Contracted; Cancelled Contract→Lost; Under Contract→context','Medium'],
+    ['', '', '', ''],
+    ['PILOT ROWS WITH INTENTIONALLY-MISSING DATA (complete manually from REI BlackBook):','','',''],
+    ['TVL-0001 / TVL-0002','REI BlackBook Link','Not present in legacy data — DO NOT invent; enter from REI BlackBook','Manual'],
+    ['TVL-0003 / TVL-0009','REI BlackBook Link, Approved Offer Amount, Offer Sent Date','Not present in legacy data — DO NOT invent; enter from REI BlackBook','Manual'],
+  ];
+  sh.getRange(1,1,rows.length,4).setValues(rows);
+  sh.getRange(1,1,1,4).setFontWeight('bold').setFontColor('#ffffff').setBackground('#bf9000');
+  sh.getRange(16,1,1,4).setFontWeight('bold');
+  sh.setColumnWidth(1,26*8); sh.setColumnWidth(2,34*8); sh.setColumnWidth(3,52*8); sh.setColumnWidth(4,30*8);
+  sh.getRange(1,1,rows.length,4).setWrap(true).setVerticalAlignment('top');
+}
+
+/** Read-only view of Source=TEST records, kept OFF the live Board/Exception Queue. */
+function buildTestDataSheet_(ss) {
+  const sh = ensureSheet_(ss, CFG.TEST_DATA_SHEET);
+  sh.clear();
+  sh.setTabColor('#999999');
+  sh.getRange(1,1).setValue('Test Data — Source = TEST records only (excluded from the live Board, Exception Queue & Daily Report)')
+    .setFontWeight('bold').setFontSize(12);
+  const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner',
+                'Next Action Due Date','Days Overdue','Stalled Status','Data Quality Status','Exception Reason'];
+  sh.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setBackground('#ddebf7');
+  const sel = disp.map(colL).join(',');
+  const src = colL('Source'), addr = colL('Property Address');
+  const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
+    '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " = 'TEST' order by " + colL('Current Stage') + '",0),"— none —")';
+  sh.getRange(4,1).setFormula(q);
+  sh.getRange(1, 6, sh.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd'); // Due
+  sh.getRange(1, 7, sh.getMaxRows(), 1).setNumberFormat('0');          // Days Overdue
+}
+
+/** Visible internal task-delivery sheet (the pilot task inbox for the team). */
+function ensureTaskQueue_(ss) {
+  let sh = ss.getSheetByName(CFG.TASK_QUEUE_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CFG.TASK_QUEUE_SHEET);
+    sh.appendRow(['Created','Owner','Property ID','Address','Task','Due','Status']);
+    sh.getRange(1,1,1,7).setFontWeight('bold').setFontColor('#ffffff').setBackground('#38761d');
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(4, 240); sh.setColumnWidth(5, 320);
+  }
+  sh.setTabColor('#38761d');
+  return sh;
 }
 
 /* ========================= LoadData.gs ========================= */
@@ -407,6 +527,22 @@ function loadPilotData() {
   SpreadsheetApp.flush();
   const msg = SEED.length + ' pilot + test rows loaded.' + (skipped.length ? ' Skipped: ' + skipped.join(', ') : '');
   SpreadsheetApp.getActive().toast(msg + ' Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
+}
+
+/**
+ * Remove ONLY Source=TEST records (demo + harness rows), in place. Does NOT delete sheet
+ * rows and does NOT affect formulas/validation/formatting — each matching row is cleared and
+ * its computed formulas restored via clearRecordRow_. Real pilot rows (Source=Import) are kept.
+ */
+function removeTestData() {
+  const sh = dataSheet_();
+  if (!sh) return;
+  const src = sh.getRange(CFG.FIRST_DATA_ROW, col('Source'), CFG.MAX_ROWS - 1, 1).getValues();
+  var n = 0;
+  for (var i = 0; i < src.length; i++) {
+    if (String(src[i][0]).trim() === 'TEST') { clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i); n++; }
+  }
+  SpreadsheetApp.getActive().toast('Removed ' + n + ' Source=TEST records (rows, formulas, validation & formatting preserved).', 'Twin Visit Logger', 7);
 }
 
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
@@ -492,13 +628,18 @@ function onVisitStatus_(R) {
     R.setIfBlank('Next Action', 'Conduct scheduled visit & log outcome');
     R.setIfBlank('Next Action Due Date', R.get('Visit Date') || today_());
     if (isDuplicateActive_(R)) logAuto_('WARN', R.get('Property ID'), 'Possible duplicate active record for this address');
-    logAuto_('INFO', R.get('Property ID'), 'Visit scheduled; reminder due ' + fmt_(R.get('Visit Date')));
+    // Real reminder: a Task Queue item (not just a log line) for the visitor, due on the visit date.
+    var visitor = R.get('Assigned Visitor') || R.get('Assigned Owner') || 'Juan';
+    enqueueTask_(visitor, R.get('Property ID'), R.get('Property Address'),
+      'Scheduled-visit reminder — conduct visit & log outcome', R.get('Visit Date') || today_());
+    logAuto_('INFO', R.get('Property ID'), 'Visit scheduled; reminder queued for ' + visitor + ' due ' + fmt_(R.get('Visit Date')));
   } else if (v === 'Completed') {
     R.set('Current Stage', 'Visit Completed — Needs Review');
     R.setIfBlank('Assigned Owner', 'Jonathan');
     R.set('Next Action Due Date', today_());          // same-day review
     R.setIfBlank('Next Action', 'Review completed visit: make offer or pass');
     if (!R.get('Visit Notes')) logAuto_('EXCEPTION', R.get('Property ID'), 'Completed visit missing Visit Notes');
+    enqueueTask_('Jonathan', R.get('Property ID'), R.get('Property Address'), 'Review completed visit: make offer or pass', today_());
     logAuto_('TASK', R.get('Property ID'), 'Review task -> Jonathan (same-day)');
   }
 }
@@ -510,6 +651,9 @@ function onOfferApproved_(R) {
   R.setIfBlank('Offer Status', 'In Preparation');
   R.set('Next Action', 'Prepare offer (' + money_(R.get('Approved Offer Amount')) + ')');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'),
+    'Prepare offer (' + money_(R.get('Approved Offer Amount')) + ') — REI ' + (R.get('REI BlackBook Link') || 'n/a'),
+    R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'),
     'Offer-prep -> Kyle | ' + R.get('Property Address') + ' | ' + money_(R.get('Approved Offer Amount')) +
     ' | due ' + fmt_(R.get('Next Action Due Date')) + ' | REI ' + (R.get('REI BlackBook Link') || 'n/a'));
@@ -522,6 +666,8 @@ function onOfferSent_(R) {
   R.set('Next Action', 'Confirm seller received offer, then follow up');
   R.set('Next Action Due Date', addBiz_(R.get('Offer Sent Date'), 2));
   R.setIfBlank('Assigned Owner', 'Cherry');
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Follow up on sent offer', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'Offer follow-up scheduled ' + fmt_(R.get('Next Action Due Date')));
 }
 
@@ -530,6 +676,8 @@ function onSellerCounter_(R) {
   R.setIfBlank('Assigned Owner', 'Cherry');
   R.setIfBlank('Next Action', 'Decide response to seller counter');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Negotiation decision — respond to seller counter (needs Last Contact Result + Next Action + Owner + Due)', R.get('Next Action Due Date'));
   logAuto_('NOTIFY', R.get('Property ID'), 'Negotiation: notify Cherry/Juan. Requires Last Contact Result + Next Action + Owner + Due.');
 }
 
@@ -538,6 +686,7 @@ function onVerbalAgreement_(R) {
   R.set('Assigned Owner', 'Kyle');
   R.set('Next Action', 'Prepare purchase contract');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'), 'HIGHEST PRIORITY: prepare purchase contract', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'HIGHEST PRIORITY: contract-prep -> Kyle');
 }
 
@@ -546,6 +695,8 @@ function onContractSent_(R) {
   R.set('Current Stage', 'Contract Sent');
   R.set('Next Action', 'Confirm signature (daily internal follow-up)');
   R.set('Next Action Due Date', addBiz_(today_(), 1));
+  enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+    'Confirm signature — daily internal follow-up until signed/declined', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'Daily internal follow-up until signed/declined');
 }
 
@@ -558,11 +709,15 @@ function onContractSigned_(R) {
   R.set('Next Action', 'Hand off signed contract to JM');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
   R.set('REI Update Required', 'Yes');
+  enqueueTask_('JM', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
   logAuto_('TASK', R.get('Property ID'), 'JM HANDOFF created; sales follow-up stopped; REI update required');
 }
 
 function onGiftRecommended_(R) {
-  R.setIfBlank('Gift Approval Owner', ''); // approval still required (Cherry/Juan)
+  // Approval is recorded via Gift Approved By + Gift Approval Date; Gift Status=Sent stays an
+  // Exception until both are filled (see Exception Reason rule 9). Nothing is purchased or sent.
+  enqueueTask_('Kyle', R.get('Property ID'), R.get('Property Address'),
+    'Coordinate gift review — requires Cherry/Juan approval (set Gift Approved By + Gift Approval Date). NO gift sent automatically.', '');
   logAuto_('TASK', R.get('Property ID'),
     'Gift review -> Kyle to coordinate; requires Cherry/Juan approval. NO gift purchased/sent automatically.');
 }
@@ -592,6 +747,8 @@ function checkNoDecision() {
     if (!visit) return;
     if (bizDaysBetween_(visit, today_()) >= CFG.NO_DECISION_BUSINESS_DAYS) {
       if (R.get('Assigned Owner') !== 'Cherry' && !R.getNote('_escalated')) {
+        enqueueTask_('Cherry', R.get('Property ID'), R.get('Property Address'),
+          'ESCALATED: completed visit has no offer/pass decision after 1 business day (Jonathan still reviewer)', today_());
         logAuto_('ESCALATE', R.get('Property ID'), 'No offer decision > 1 business day; escalating to Cherry (kept Jonathan as reviewer)');
         R.setNote('_escalated', '1');
       }
@@ -605,6 +762,8 @@ function checkNoDecision() {
 function checkStalled() {
   eachDataRow_(function(R){
     if (R.get('Stalled Status') === 'Yes' && !R.getNote('_stalled_notified')) {
+      enqueueTask_(R.get('Assigned Owner') || 'Cherry', R.get('Property ID'), R.get('Property Address'),
+        'STALLED > 3 business days — re-engage this deal', R.get('Next Action Due Date') || today_());
       logAuto_('NOTIFY', R.get('Property ID'), 'STALLED (>3 business days). Owner: ' + (R.get('Assigned Owner') || 'unassigned'));
       R.setNote('_stalled_notified', fmt_(today_()));
       R.flush();
@@ -635,6 +794,7 @@ function isDuplicateActive_(R) {
 }
 
 function today_() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function daysAgo_(n) { const d = today_(); d.setDate(d.getDate() - n); return d; }
 function fmt_(d) { return d ? Utilities.formatDate(new Date(d), Session.getScriptTimeZone(), 'yyyy-MM-dd') : ''; }
 function money_(n) { return n ? '$' + Number(n).toLocaleString() : ''; }
 function addBiz_(d, n) { let r = new Date(d); let added=0; while(added<n){ r.setDate(r.getDate()+1); const g=r.getDay(); if(g!==0&&g!==6) added++; } return new Date(r.getFullYear(),r.getMonth(),r.getDate()); }
@@ -654,6 +814,25 @@ function logAuto_(level, id, msg) {
   let sh = ss.getSheetByName('Automation Log');
   if (!sh) { sh = ss.insertSheet('Automation Log'); sh.appendRow(['Timestamp','Level','Property ID','Message']); sh.hideSheet(); }
   sh.appendRow([new Date(), level, id, msg]);
+}
+
+/**
+ * INTERNAL task delivery. Appends a visible row to the Task Queue sheet (the pilot task inbox)
+ * and, only if an INTERNAL address is set in OWNER_EMAILS, emails that person. Never a seller.
+ */
+function enqueueTask_(owner, id, address, task, due) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(CFG.TASK_QUEUE_SHEET) || ensureTaskQueue_(ss);
+  sh.appendRow([new Date(), owner || 'Unassigned', id || '', address || '', task || '', due ? fmt_(due) : '', 'Open']);
+  const to = OWNER_EMAILS[owner];
+  if (to) {
+    try {
+      MailApp.sendEmail({ to: to,
+        subject: 'Twin Visit Logger task: ' + task + ' — ' + (address || id),
+        body: 'Owner: ' + owner + '\nProperty: ' + (address || id) + '\nTask: ' + task +
+              '\nDue: ' + (due ? fmt_(due) : '—') + '\n\n(Internal task only. No seller was contacted.)' });
+    } catch (e) { logAuto_('ERROR', 'enqueueTask', String(e)); }
+  }
 }
 
 /** Buffered row read/write to minimise Sheet calls. */
@@ -681,24 +860,27 @@ function RowAccessor_(sh, row) {
 function sendDailyReport() {
   const d = new Date();
   const g = d.getDay();
-  if (g === 0 || g === 6) return; // business days only
-
+  // Business days only for the scheduled trigger; manual/preview runs still build the sheet.
   const sections = reportSections_();
   const total = sections.reduce(function(n,s){ return n + s.rows.length; }, 0);
   const sendEmpty = false;
-  if (total === 0 && !sendEmpty) { writeReportSheet_(sections, 0); return; }
 
-  const html = renderReportHtml_(sections, total);
-  if (CFG.REPORT_TO) {
+  writeReportSheet_(sections, total);           // always refresh the Daily Report sheet
+  let emailed = false;
+  if (CFG.REPORT_TO && !(total === 0 && !sendEmpty)) {
+    const html = renderReportHtml_(sections, total);
     MailApp.sendEmail({ to: CFG.REPORT_TO, subject: CFG.REPORT_TITLE + ' — ' + fmt_(today_()), htmlBody: html });
+    emailed = true;
   }
-  writeReportSheet_(sections, total);
+  logAuto_('REPORT', '', 'Daily report built (' + total + ' actionable). Emailed=' + emailed + (CFG.REPORT_TO ? '' : ' (REPORT_TO blank — no email)'));
+  return { emailed: emailed, total: total, recipient: CFG.REPORT_TO || '(none)' };
 }
 
 /** The 10 report sections, computed from Data (same logic as the Board). */
 function reportSections_() {
   const rows = readAllRows_();
-  const active = rows.filter(function(r){ return r['Property Address']; });
+  // live report excludes Source=TEST demo records
+  const active = rows.filter(function(r){ return r['Property Address'] && r['Source'] !== 'TEST'; });
   function f(pred){ return active.filter(pred); }
   const ov = function(r){ return Number(r['Days Overdue']) || 0; };
 
@@ -895,6 +1077,40 @@ function runAllTests() {
   SpreadsheetApp.flush();
   assert('16. Missing required -> Incomplete', new RowAccessor_(sh,k2.row).get('Data Quality Status')==='Incomplete', new RowAccessor_(sh,k2.row).get('Data Quality Status'));
 
+  // 5. Completed visit with no offer/pass decision after 1 business day -> escalation task/log
+  let nd = newRow({'Property ID':'TEST-A11','Property Address':'11 Auto Test St','Seller Name':'No Decision','REI BlackBook Link':'https://rei/a11','Visit Notes':'done','Seller Motivation':'m','Current Stage':'Visit Completed — Needs Review','Assigned Owner':'Jonathan','Visit Date':daysAgo_(5),'Source':'TEST'});
+  checkNoDecision(); SpreadsheetApp.flush();
+  assert('5. No offer decision >1 biz day -> escalate to Cherry', logHas_('ESCALATE','TEST-A11'), 'Automation Log ESCALATE present');
+
+  // 12. Stalled status + alert after 3 business days
+  let stl = newRow({'Property ID':'TEST-A12','Property Address':'12 Auto Test St','Seller Name':'Stall Test','REI BlackBook Link':'https://rei/a12','Visit Notes':'x','Seller Motivation':'m','Current Stage':'Offer Sent','Assigned Owner':'Juan','Approved Offer Amount':100000,'Offer Sent Date':daysAgo_(9),'Last Contact Date':daysAgo_(9),'Next Action':'follow','Next Action Due Date':daysAgo_(4),'Source':'TEST'});
+  SpreadsheetApp.flush();
+  assert('12. Stalled Status = Yes after 3 biz days', new RowAccessor_(sh,stl.row).get('Stalled Status')==='Yes', new RowAccessor_(sh,stl.row).get('Stalled Status'));
+  checkStalled(); SpreadsheetApp.flush();
+  assert('12b. Stalled alert task queued', logHas_('NOTIFY','TEST-A12'), 'Automation Log NOTIFY present');
+
+  // REI Update Required handling: contract signed sets it to Yes
+  let rei = newRow({'Property ID':'TEST-A13','Property Address':'13 Auto Test St','Seller Name':'Rei Test','REI BlackBook Link':'https://rei/a13','Source':'TEST'});
+  rei = edit(rei, 'Contract Signed Date', today_());
+  assert('REI. Contract signed -> REI Update Required = Yes', rei.get('REI Update Required')==='Yes', rei.get('REI Update Required'));
+
+  // Daily Report creation + no email while REPORT_TO blank
+  const savedTo = CFG.REPORT_TO; CFG.REPORT_TO = '';
+  const rep = sendDailyReport();
+  const hasSheet = !!SpreadsheetApp.getActive().getSheetByName('Daily Report');
+  assert('DR. Daily Report sheet created', hasSheet, 'sheet present');
+  assert('NoEmail. sendDailyReport sent NO email while REPORT_TO blank', rep && rep.emailed === false, 'emailed=' + (rep && rep.emailed));
+  CFG.REPORT_TO = savedTo;
+
+  // No seller messaging: only config recipients (REPORT_TO / OWNER_EMAILS) are ever used, never seller fields
+  const noSeller = (CFG.REPORT_TO === '' || CFG.REPORT_TO.indexOf('@') > 0) &&
+                   Object.keys(OWNER_EMAILS).every(function(k){ return OWNER_EMAILS[k] === '' || OWNER_EMAILS[k].indexOf('@') > 0; });
+  assert('18. No seller messaging (recipients are config-only, never seller Email/Phone)', noSeller, 'config recipients only');
+
+  // Triggers: safe check (full install/remove cycle is the separate testTriggerCycle())
+  removeAllTriggers();
+  assert('Trig. removeAllTriggers -> 0 (run testTriggerCycle for full install/remove)', ScriptApp.getProjectTriggers().length === 0 && typeof installTriggers === 'function', 'triggers cleared');
+
   writeTestResults_(results);
   cleanupTests_();
   SpreadsheetApp.getActive().toast('Automation tests complete: ' + results.filter(function(x){return x[1]==='PASS';}).length + '/' + results.length + ' passed', 'Tests', 8);
@@ -909,11 +1125,38 @@ function writeTestResults_(results) {
   sh.getRange(2,1,results.length,3).setValues(results);
 }
 
-/** remove TEST-A* rows created by the harness */
+/**
+ * Clear TEST-A* harness rows IN PLACE (no deleteRow) so the formula/validation/format ranges
+ * never shrink; computed formulas are restored for each cleared row.
+ */
 function cleanupTests_() {
   const sh = dataSheet_();
-  for (let r = sh.getLastRow(); r >= CFG.FIRST_DATA_ROW; r--) {
-    const id = String(sh.getRange(r, col('Property ID')).getValue());
-    if (id.indexOf('TEST-A') === 0) sh.deleteRow(r);
+  const ids = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).indexOf('TEST-A') === 0) clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i);
   }
+}
+
+/** True if the Automation Log has a row with the given level for the given Property ID. */
+function logHas_(level, id) {
+  const sh = SpreadsheetApp.getActive().getSheetByName('Automation Log');
+  if (!sh) return false;
+  const v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][1]) === level && String(v[i][2]) === id) return true;
+  return false;
+}
+
+/**
+ * SEPARATE, opt-in test for trigger install + removal. Not part of runAllTests() because it
+ * briefly creates real triggers. It installs, verifies 4 exist, then removes all and verifies 0.
+ * Run manually only when you want to test the trigger lifecycle.
+ */
+function testTriggerCycle() {
+  installTriggers();
+  const mid = ScriptApp.getProjectTriggers().length;
+  removeAllTriggers();
+  const after = ScriptApp.getProjectTriggers().length;
+  const pass = (mid >= 4 && after === 0);
+  SpreadsheetApp.getActive().toast('Trigger cycle: installed=' + mid + ', afterRemove=' + after + ' => ' + (pass ? 'PASS' : 'FAIL'), 'Twin Visit Logger', 8);
+  return pass;
 }
