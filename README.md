@@ -1,7 +1,7 @@
 # Twin Visit Logger — Upgrade Project
 
 **Owner:** Cherry (Lead Manager) · **Company:** Equity Track Inc. / Twin Home Buyer
-**Status:** Phase 2 built + logic-validated; Phase 3 automation scripts written and ready to deploy.
+**Status:** Phase 2 **deployed & verified in the dev copy** (2026-07-22); Phase 3 automation `runAllTests()` → **16/16 PASS**. Triggers + daily-report email remain OFF pending go-ahead.
 
 **Dev copy:** *"Property Visit Tracking — DEV COPY (Twin Visit Logger Upgrade)"* —
 <https://docs.google.com/spreadsheets/d/1gxjc3vO1l3Q-dffzhgnDDh86mqFv5zmBqZaWyAPVKT4/edit>
@@ -36,8 +36,8 @@ Every active property must always have:
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **Phase 1** | Audit the current workbook + SOP, document structure, identify reusable vs. missing pieces, recommend a technical approach | ✅ Complete |
-| **Phase 2** | Build the upgraded system (59-column `Data`, dropdowns, formulas, Cherry Opportunity Board, Exception Queue, pilot migration) | ✅ Built + logic-validated — pending live deploy |
-| **Phase 3** | Automation (edit + time-driven rules, daily report, alerts, escalations) | ✅ Scripts written + tests ready — pending execution |
+| **Phase 2** | Build the upgraded system (59-column `Data`, dropdowns, formulas, Cherry Opportunity Board, Exception Queue, pilot migration) | ✅ Deployed & verified in the dev copy |
+| **Phase 3** | Automation (edit + time-driven rules, daily report, alerts, escalations) | ✅ Deployed; `runAllTests()` 16/16 PASS. Triggers OFF pending go-ahead |
 
 All work is on the **development copy**; the original workbook has **not** been modified. The Phase 3
 automation scripts are **ready to deploy** — they have not yet been executed (Apps Script runs inside

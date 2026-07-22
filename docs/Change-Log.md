@@ -1,5 +1,24 @@
 # Change Log — Twin Visit Logger
 
+## v2.0.1 — 2026-07-22 (live deployment to the dev copy)
+
+Deployed the Apps Script build to the development-copy Google Sheet and ran it end to end. Fixes
+made while deploying live (all found by running on the real sheet):
+
+- Added `Import` to the **Updated By** list and wrapped the loader's cell writes in try/catch so the
+  pilot loader can't abort on a single value.
+- **Updated By** changed to a **soft** dropdown (accepts any editor name); `RowAccessor.flush` now
+  writes each cell defensively so a validated cell can never abort an automation update.
+- Test harness now writes its rows **inside** the formula range (`firstEmptyDataRow_`) instead of
+  past `getLastRow()`, fixing the four formula-dependent test failures.
+- Cherry Opportunity Board **Due** column now uses a `yyyy-mm-dd` number format (the QUERY `format`
+  clause rendered date serials).
+- Added `loadPilotData()` / `clearAllData()` and an `onOpen` menu; single-file `Code.combined.gs`.
+
+**Result:** structure, dropdowns, formulas, conditional formatting, Board (10 sections, real dates),
+Exception Queue, and 19 migrated pilot + test rows all live and correct. `runAllTests()` → **16/16
+PASS**. Automation triggers and the daily-report email remain **OFF** pending owner go-ahead.
+
 ## v2.0 — 2026-07-22 (Phase 2 build + Phase 3 automation, ready to deploy)
 
 The upgrade rebuilds the tracking system on the development copy while preserving all history. The

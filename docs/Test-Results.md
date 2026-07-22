@@ -4,8 +4,15 @@ Aggregate index of testing for the Twin Visit Logger upgrade.
 
 | Phase | Scope | Method | Result | Detail |
 |---|---|---|---|---|
-| **Phase 2** | Data structure, dropdowns, 9 formula columns, 12 validation rules, migration | Static lint + Python reference re-implementation of the rules over 19 records (LibreOffice/Java unavailable) | **ALL PASS** — 10/10 assertions, lint clean | [`Phase-2-Test-Results.md`](Phase-2-Test-Results.md) |
-| **Phase 3** | 18 automation scenarios | `apps-script/Tests.gs` harness + code review | 4 logic-verified now, 1 (no-seller-contact) verified by code review, 13 **ready — pending execution** on the dev copy | [`Phase-3-Automation-Test-Results.md`](Phase-3-Automation-Test-Results.md) |
+| **Phase 2** | Data structure, dropdowns, 9 formula columns, 12 validation rules, migration | Static lint + Python reference re-implementation of the rules over 19 records, then **built live in the dev copy Google Sheet** | **ALL PASS** — 10/10 logic assertions; structure/board/exceptions confirmed live | [`Phase-2-Test-Results.md`](Phase-2-Test-Results.md) |
+| **Phase 3** | 18 automation scenarios | `apps-script/Tests.gs` `runAllTests()` **executed live in the dev copy** (2026-07-22) + code review | **16/16 harness assertions PASS**; 2 time-driven + 1 safety verified by code review | [`Phase-3-Automation-Test-Results.md`](Phase-3-Automation-Test-Results.md) |
+
+## Deployment status (2026-07-22)
+Phase 2 structure and Phase 3 scripts are **deployed and verified in the development-copy Google
+Sheet**: 59-column Data, dropdowns, formulas, conditional formatting, Cherry Opportunity Board (all
+10 sections populating with real dates), Exception Queue, and 19 migrated pilot + test rows.
+`runAllTests()` returned 16/16 PASS. **Automation triggers and the daily-report email remain OFF**
+pending the owner's go-ahead. The original workbook was never modified.
 
 ## What "pending execution" means
 Phase 2 logic is fully validated here because it is deterministic formula/business logic. Phase 3's
