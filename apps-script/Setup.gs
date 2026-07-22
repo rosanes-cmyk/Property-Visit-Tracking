@@ -58,9 +58,13 @@ function applyDropdowns_(sh) {
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
   };
+  // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
+  // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the
+  // editor's name would violate the rule and throw on every edit.
+  const SOFT = {'Updated By': true};
   Object.keys(map).forEach(function(header){
     const rule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(false).build();
+      .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(!!SOFT[header]).build();
     sh.getRange(CFG.FIRST_DATA_ROW, col(header), last - 1, 1).setDataValidation(rule);
   });
 }

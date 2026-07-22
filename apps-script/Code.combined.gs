@@ -180,9 +180,13 @@ function applyDropdowns_(sh) {
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
   };
+  // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
+  // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the
+  // editor's name would violate the rule and throw on every edit.
+  const SOFT = {'Updated By': true};
   Object.keys(map).forEach(function(header){
     const rule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(false).build();
+      .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(!!SOFT[header]).build();
     sh.getRange(CFG.FIRST_DATA_ROW, col(header), last - 1, 1).setDataValidation(rule);
   });
 }
@@ -659,7 +663,7 @@ function RowAccessor_(sh, row) {
   this.setIfBlank = function(h,v){ if(this.get(h)===''||this.get(h)==null) this.set(h,v); return this; };
   this.getNote = function(key){ const n=this.sh.getRange(this.row,1).getNote()||''; const m=n.match(new RegExp(key+'=([^;]*)')); return m?m[1]:''; };
   this.setNote = function(key,val){ let n=this.sh.getRange(this.row,1).getNote()||''; const re=new RegExp(key+'=[^;]*;?'); n=n.replace(re,''); if(val!=='') n+=key+'='+val+';'; this.sh.getRange(this.row,1).setNote(n); };
-  this.flush = function(){ const cols=Object.keys(this._dirty); cols.forEach(function(c){ this.sh.getRange(this.row, Number(c)).setValue(this._dirty[c]); }, this); this._dirty={}; };
+  this.flush = function(){ const cols=Object.keys(this._dirty); cols.forEach(function(c){ try { this.sh.getRange(this.row, Number(c)).setValue(this._dirty[c]); } catch(e){} }, this); this._dirty={}; };
 }
 
 /* ========================= DailyReport.gs ========================= */
