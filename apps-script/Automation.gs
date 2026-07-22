@@ -13,13 +13,19 @@
 
 function installTriggers() {
   const ss = SpreadsheetApp.getActive();
-  // clear existing project triggers to avoid duplicates
-  ScriptApp.getProjectTriggers().forEach(function(t){ ScriptApp.deleteTrigger(t); });
+  removeAllTriggers();  // clear existing project triggers to avoid duplicates
   ScriptApp.newTrigger('onEditInstallable').forSpreadsheet(ss).onEdit().create();
   ScriptApp.newTrigger('checkNoDecision').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('checkStalled').timeBased().everyDays(1).atHour(6).create();
   ScriptApp.newTrigger('sendDailyReport').timeBased().everyDays(1).atHour(7).create();
   SpreadsheetApp.getActive().toast('Automation triggers installed.', 'Twin Visit Logger', 6);
+}
+
+/** KILL SWITCH: remove every trigger this project installed. Data is untouched. */
+function removeAllTriggers() {
+  const t = ScriptApp.getProjectTriggers();
+  t.forEach(function(x){ ScriptApp.deleteTrigger(x); });
+  try { SpreadsheetApp.getActive().toast('All ' + t.length + ' triggers removed.', 'Twin Visit Logger', 6); } catch (e) {}
 }
 
 /* ---------------------------- edit-driven ---------------------------- */
