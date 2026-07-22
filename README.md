@@ -1,7 +1,11 @@
 # Twin Visit Logger — Upgrade Project
 
 **Owner:** Cherry (Lead Manager) · **Company:** Equity Track Inc. / Twin Home Buyer
-**Status:** Phase 1 — Audit & Technical Recommendation (planning only, no implementation yet)
+**Status:** Phase 2 built + logic-validated; Phase 3 automation scripts written and ready to deploy.
+
+**Dev copy:** *"Property Visit Tracking — DEV COPY (Twin Visit Logger Upgrade)"* —
+<https://docs.google.com/spreadsheets/d/1gxjc3vO1l3Q-dffzhgnDDh86mqFv5zmBqZaWyAPVKT4/edit>
+(the original "Property Visit Tracking" is never modified).
 
 ---
 
@@ -31,15 +35,40 @@ Every active property must always have:
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| **Phase 1** | Audit the current workbook + SOP, document structure, identify reusable vs. missing pieces, recommend a technical approach | ✅ **This deliverable** |
-| Phase 2 | Build the upgraded system (pending approval of Phase 1) | ⏸ Not started |
-| Phase 3 | Automation (daily report, alerts, escalations) | ⏸ Not started |
+| **Phase 1** | Audit the current workbook + SOP, document structure, identify reusable vs. missing pieces, recommend a technical approach | ✅ Complete |
+| **Phase 2** | Build the upgraded system (59-column `Data`, dropdowns, formulas, Cherry Opportunity Board, Exception Queue, pilot migration) | ✅ Built + logic-validated — pending live deploy |
+| **Phase 3** | Automation (edit + time-driven rules, daily report, alerts, escalations) | ✅ Scripts written + tests ready — pending execution |
 
-**Nothing is being implemented yet.** The original workbook has **not** been modified.
+All work is on the **development copy**; the original workbook has **not** been modified. The Phase 3
+automation scripts are **ready to deploy** — they have not yet been executed (Apps Script runs inside
+Google Sheets and must be run by a person; see the deploy guide).
+
+## How to deploy
+
+Follow [`docs/Deployment-Guide.md`](docs/Deployment-Guide.md) — paste the `apps-script/` files into
+the dev copy's Apps Script editor, run `setup()` → `installTriggers()` → `runAllTests()`.
+
+## Repository layout
+
+- **`apps-script/`** — Google Apps Script for the live sheet: `Config.gs` (schema, headers,
+  dropdowns), `Setup.gs` (builds the sheet structure), `Automation.gs` (edit + time-driven rules),
+  `DailyReport.gs` (daily Opportunity Report), `Tests.gs` (`runAllTests`), `appsscript.json` (manifest).
+- **`build/`** — offline artifacts: `Twin_Visit_Logger_DEV_reference.xlsx` (validated reference
+  workbook), `build_workbook.py` (builder), `validate_logic.py` (logic validator).
+- **`docs/`** — project documentation (below).
 
 ## Documents
 
 - [`docs/Phase-1-Audit-Report.md`](docs/Phase-1-Audit-Report.md) — the full Phase 1 audit and technical recommendation.
+- [`docs/Phase-2-Build-Spec.md`](docs/Phase-2-Build-Spec.md) — the Phase 2 build specification.
+- [`docs/Data-Dictionary.md`](docs/Data-Dictionary.md) — the 59 columns, 10 stages, formulas, and migration mapping.
+- [`docs/Automation-Rules.md`](docs/Automation-Rules.md) — the edit + time-driven automation and validation rules.
+- [`docs/Phase-2-Test-Results.md`](docs/Phase-2-Test-Results.md) — Phase 2 logic validation results.
+- [`docs/Phase-3-Automation-Test-Results.md`](docs/Phase-3-Automation-Test-Results.md) — Phase 3 test scenarios (ready, pending execution).
+- [`docs/User-Guide.md`](docs/User-Guide.md) — task-based guide for Cherry and the team.
+- [`docs/Deployment-Guide.md`](docs/Deployment-Guide.md) — step-by-step deploy to the dev copy.
+- [`docs/Phase-2-Cherry-Approval-Summary.md`](docs/Phase-2-Cherry-Approval-Summary.md) — one-page approval summary for Cherry.
+- [`docs/Change-Log.md`](docs/Change-Log.md) — version history (v2.0, v1.0).
 
 ## Source files reviewed (read-only)
 
