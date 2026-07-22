@@ -1,5 +1,20 @@
 # Change Log — Twin Visit Logger
 
+## v2.3 — 2026-07-22 (deployment verified in dev copy; triggers still OFF)
+
+Verified live in the development-copy Google Sheet after the round-2 fixes:
+- **Expanded test suite passes** (edit-driven + coverage + TEST-exclusion + go-live-cleanup),
+  including test #16 now correctly reading *Incomplete*.
+- **Live Exception Queue = exactly 4** real pilot records: TVL-0001 & TVL-0002 (Incomplete —
+  missing REI BlackBook Link) and TVL-0003 & TVL-0009 (Exception — missing REI link + Approved
+  Offer Amount + Offer Sent Date). No Source=TEST rows leak into the live queue.
+- **Data** = 10 real pilot rows; **Task Queue** = only real operational tasks; **Test Data**,
+  **Migration Log**, formulas/validation to row 500 all confirmed.
+- `runAllTests()` made idempotent (clears leftover TEST-A rows at start) so the duplicate-address
+  contamination that had flipped #16 to Exception no longer occurs.
+
+Automation triggers remain OFF pending explicit go-ahead.
+
 ## v2.2 — 2026-07-22 (deployment-review round 2; triggers still OFF)
 
 **Root cause found:** a prior run of the old `deleteRow()`-based cleanup had shrunk the Data grid
