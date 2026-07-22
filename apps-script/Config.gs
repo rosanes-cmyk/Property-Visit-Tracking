@@ -1,0 +1,83 @@
+/**
+ * Twin Visit Logger — shared configuration.
+ * Single source of truth for sheet names, column order, and dropdown lists.
+ * Mirrors build/build_workbook.py so the live Google Sheet matches the reference .xlsx.
+ */
+
+const CFG = {
+  DATA_SHEET: 'Data',
+  BOARD_SHEET: 'Cherry Opportunity Board',
+  DROPDOWN_SHEET: 'Dropdowns',
+  EXCEPTIONS_SHEET: 'Exception Queue',
+  MIGRATION_SHEET: 'Migration Log',
+  LEGACY_ARCHIVE: 'Legacy Pipeline (archive)',
+  HEADER_ROW: 1,
+  FIRST_DATA_ROW: 2,
+  MAX_ROWS: 500,           // formulas maintained down to this row
+  REPORT_TITLE: 'Twin Visit Logger Daily Opportunity Report',
+  // Set to Cherry's address for the daily report; left blank = report is written to a sheet only.
+  REPORT_TO: '',           // e.g. 'rosanes@twinhomebuyer.com'
+  STALLED_BUSINESS_DAYS: 3,
+  NO_DECISION_BUSINESS_DAYS: 1,
+};
+
+// 59 columns, in order. Keep IN SYNC with build/build_workbook.py.
+const HEADERS = [
+  // Property
+  'Property ID','Property Address','Normalized Address','Seller Name','Phone','Email','Lead Source','REI BlackBook Link',
+  // Visit
+  'Visit Date','Visit Time','Visit Status','Assigned Visitor','Visit Notes','Property Condition','Occupancy Status','Photos Link','Video Link','File Link',
+  // Seller
+  'Seller Motivation','Seller Timeline','Asking Price','Price Expectation','Seller Concerns',
+  // Offer
+  'Approved Offer Amount','Offer Status','Offer Prepared Date','Offer Sent Date','Offer Received Confirmation','Counteroffer Amount',
+  // Follow-up
+  'Last Contact Date','Last Contact Result','Next Action','Next Action Due Date','Assigned Owner','Blocker','Days Since Last Activity','Days Overdue','Stalled Status',
+  // Relationship
+  'Gift Status','Gift Recommendation Reason','Gift Approval Owner','Gift Sent Date',
+  // Closeout
+  'Current Stage','Final Disposition','Closeout Reason','Contract Sent Date','Contract Signed Date','Transaction Handoff Status',
+  // Computed
+  'Missing Required Fields','Duplicate Address Flag','Opportunity Priority',
+  // System
+  'Created Date','Last Updated Date','Updated By','Source','Data Quality Status','Exception Reason','REI Update Required','REI Update Completed',
+];
+
+const DROPDOWNS = {
+  'Visit Status': ['Scheduled','Completed','Canceled','Reschedule Needed'],
+  'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
+  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
+  'Gift Approval Owner': ['Cherry','Juan'],
+  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script'],
+  'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
+  'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
+  'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
+  'Lead Source': ['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'],
+  'Offer Status': ['Not Started','In Preparation','Sent','Countered','Accepted','Rejected','Withdrawn'],
+  'Occupancy Status': ['Owner-Occupied','Tenant-Occupied','Vacant','Unknown'],
+  'Property Condition': ['Excellent','Good','Fair','Poor','Distressed'],
+  'Seller Timeline': ['ASAP','30 days','60 days','90+ days','Unknown'],
+  'Offer Received Confirmation': ['Yes','No'],
+  'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off to JM','JM Confirmed'],
+  'REI Update Required': ['Yes','No'],
+  'REI Update Completed': ['Yes','No'],
+  'Source': ['Manual','Apps Script','Import','TEST'],
+};
+
+/** column index (1-based) for a header name */
+function col(name) {
+  const i = HEADERS.indexOf(name);
+  if (i < 0) throw new Error('Unknown column: ' + name);
+  return i + 1;
+}
+/** A1 column letter for a header name */
+function colL(name) {
+  return columnToLetter_(col(name));
+}
+function columnToLetter_(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+  return s;
+}
+function dataSheet_() { return SpreadsheetApp.getActive().getSheetByName(CFG.DATA_SHEET); }
