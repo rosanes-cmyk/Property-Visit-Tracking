@@ -19,6 +19,8 @@ function firstEmptyDataRow_(sh) {
 function runAllTests() {
   const results = [];
   const sh = dataSheet_();
+  cleanupTests_();          // clear any leftover TEST-A rows from a prior/interrupted run first,
+  SpreadsheetApp.flush();   // so this run starts clean and test addresses stay unique (no false duplicates)
   // Place test rows INSIDE the formula range (formulas fill rows 2..MAX_ROWS), not past getLastRow().
   const startRow = firstEmptyDataRow_(sh);
   let r = startRow;
