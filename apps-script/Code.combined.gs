@@ -10,6 +10,7 @@
  *   5. Menu -> "2) Load pilot + test data".
  *   6. Menu -> "3) Run tests"  -> check the Test Results sheet.
  *   7. (Only after tests pass, and only when YOU approve) "4) Install automation triggers".
+ *   Go-live cleanup: "Remove test artifacts" purges all Source=TEST demo data safely.
  *
  *  Concatenation of Config/Setup/LoadData/Automation/DailyReport/Tests.
  *  Never contacts sellers. The original workbook is never modified.
@@ -29,6 +30,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
     .addItem('Remove test data (Source = TEST)', 'removeTestData')
+    .addItem('Remove test artifacts (go-live cleanup)', 'removeTestArtifacts')
     .addItem('Clear all data rows', 'clearAllData')
     .addItem('⛔ Remove ALL triggers (kill switch)', 'removeAllTriggers')
     .addToUi();
@@ -145,6 +147,7 @@ function setup() {
   const ss = SpreadsheetApp.getActive();
   archiveLegacy_(ss);
   const sh = ensureSheet_(ss, CFG.DATA_SHEET, 0);
+  ensureRows_(sh, CFG.MAX_ROWS);
   writeHeaders_(sh);
   applyDropdowns_(sh);
   writeFormulas_(sh);
@@ -167,17 +170,35 @@ function repairSheet() {
   const ss = SpreadsheetApp.getActive();
   const sh = dataSheet_();
   if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
-  writeHeaders_(sh);            // row 1 only (idempotent)
-  applyDropdowns_(sh);          // rows 2..MAX_ROWS
-  writeFormulas_(sh);           // rewrites ONLY the 9 computed columns (never user data)
+  ensureRows_(sh, CFG.MAX_ROWS);   // <-- guarantees the grid reaches row 500 before writing
+  writeHeaders_(sh);               // row 1 only (idempotent)
+  applyDropdowns_(sh);             // rows 2..MAX_ROWS
+  writeFormulas_(sh);              // rewrites ONLY the 9 computed columns (never user data)
   applyConditionalFormatting_(sh);
   buildDropdownSheet_(ss);
-  buildBoard_(ss);
-  buildExceptionQueue_(ss);
+  buildBoard_(ss);                 // every section excludes Source = TEST
+  buildExceptionQueue_(ss);        // live queue excludes Source = TEST
   buildMigrationLog_(ss);
-  buildTestDataSheet_(ss);
+  buildTestDataSheet_(ss);         // Source = TEST records shown here only
   ensureTaskQueue_(ss);
-  SpreadsheetApp.getActive().toast('Repaired: formulas, validations, formats & views reapplied to row ' + CFG.MAX_ROWS + '.', 'Twin Visit Logger', 8);
+
+  // ---- coverage + counts for the summary toast ----
+  const fRow = lastFormulaRow_(sh, 'Normalized Address');
+  const vRow = lastValidationRow_(sh, 'Current Stage');
+  const data = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const si = col('Source') - 1, ai = col('Property Address') - 1, di = col('Data Quality Status') - 1;
+  var live = 0, liveExc = 0, tests = 0;
+  data.forEach(function(row){
+    if (!row[ai]) return;
+    if (String(row[si]).trim() === 'TEST') { tests++; return; }
+    live++;
+    if (row[di] === 'Incomplete' || row[di] === 'Exception') liveExc++;
+  });
+  SpreadsheetApp.getActive().toast(
+    'Repair complete — formulas → row ' + fRow + ' | validation → row ' + vRow +
+    ' | live records ' + live + ' | live exceptions ' + liveExc +
+    ' | test records isolated ' + tests + ' (in Test Data). Grid rows: ' + sh.getMaxRows() + '.',
+    'repairSheet', 15);
 }
 
 function archiveLegacy_(ss) {
@@ -196,6 +217,26 @@ function ensureSheet_(ss, name, index) {
   return sh;
 }
 
+/** Guarantee the sheet grid has at least n rows (a prior deleteRow may have shrunk it below 500). */
+function ensureRows_(sh, n) {
+  const have = sh.getMaxRows();
+  if (have < n) sh.insertRowsAfter(have, n - have);
+}
+
+/** Last row (<= MAX_ROWS) that actually holds a formula in the given computed column. */
+function lastFormulaRow_(sh, header) {
+  const f = sh.getRange(CFG.FIRST_DATA_ROW, col(header), CFG.MAX_ROWS - 1, 1).getFormulas();
+  for (var i = f.length - 1; i >= 0; i--) if (f[i][0]) return CFG.FIRST_DATA_ROW + i;
+  return 0;
+}
+
+/** Last row (<= MAX_ROWS) that actually has a data-validation rule in the given column. */
+function lastValidationRow_(sh, header) {
+  const dv = sh.getRange(CFG.FIRST_DATA_ROW, col(header), CFG.MAX_ROWS - 1, 1).getDataValidations();
+  for (var i = dv.length - 1; i >= 0; i--) if (dv[i][0]) return CFG.FIRST_DATA_ROW + i;
+  return 0;
+}
+
 function writeHeaders_(sh) {
   sh.getRange(CFG.HEADER_ROW, 1, 1, HEADERS.length).setValues([HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#2e5a88')
@@ -205,6 +246,7 @@ function writeHeaders_(sh) {
 }
 
 function applyDropdowns_(sh) {
+  ensureRows_(sh, CFG.MAX_ROWS);
   const last = CFG.MAX_ROWS;
   const map = {
     'Lead Source':'Lead Source','Visit Status':'Visit Status','Assigned Visitor':'Assigned Visitor',
@@ -305,6 +347,7 @@ function clearRecordRow_(sh, r) {
 }
 
 function writeFormulas_(sh) {
+  ensureRows_(sh, CFG.MAX_ROWS);
   const first = CFG.FIRST_DATA_ROW, last = CFG.MAX_ROWS;
   COMPUTED_HEADERS.forEach(function(h){
     const c = col(h);
@@ -466,6 +509,7 @@ function buildTestDataSheet_(ss) {
   sh.getRange(4,1).setFormula(q);
   sh.getRange(1, 6, sh.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd'); // Due
   sh.getRange(1, 7, sh.getMaxRows(), 1).setNumberFormat('0');          // Days Overdue
+  return sh;
 }
 
 /** Visible internal task-delivery sheet (the pilot task inbox for the team). */
@@ -543,6 +587,64 @@ function removeTestData() {
     if (String(src[i][0]).trim() === 'TEST') { clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i); n++; }
   }
   SpreadsheetApp.getActive().toast('Removed ' + n + ' Source=TEST records (rows, formulas, validation & formatting preserved).', 'Twin Visit Logger', 7);
+}
+
+/**
+ * Full go-live cleanup of test artifacts. Safe: preserves the grid, formulas, validation and
+ * conditional formatting; keeps the Test Results sheet.
+ *   1. Archives the Source=TEST rows into the Test Data sheet (static values).
+ *   2. Clears those rows IN PLACE in Data (formulas restored) — no row deletion.
+ *   3. Removes TEST / TEST-A tasks from Task Queue (a plain log sheet).
+ *   4. Removes TEST / TEST-A entries from Automation Log.
+ *   5. Leaves Test Results intact.
+ */
+function removeTestArtifacts() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = dataSheet_();
+  if (!sh) return;
+  const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner',
+                'Next Action Due Date','Days Overdue','Stalled Status','Data Quality Status','Exception Reason'];
+  const all = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const si = col('Source') - 1, ai = col('Property Address') - 1;
+  const archive = [], clearRows = [];
+  for (var i = 0; i < all.length; i++) {
+    if (all[i][ai] && String(all[i][si]).trim() === 'TEST') {
+      archive.push(disp.map(function(h){ return all[i][col(h) - 1]; }));
+      clearRows.push(CFG.FIRST_DATA_ROW + i);
+    }
+  }
+  // 1. archive to Test Data (static)
+  const td = ensureSheet_(ss, CFG.TEST_DATA_SHEET);
+  td.clear(); td.setTabColor('#999999');
+  td.getRange(1,1).setValue('Test Data — archived Source=TEST demo records (isolated from all live views)').setFontWeight('bold').setFontSize(12);
+  td.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setBackground('#ddebf7');
+  if (archive.length) td.getRange(4,1,archive.length,disp.length).setValues(archive);
+  else td.getRange(4,1).setValue('— none —');
+  td.getRange(1,6,td.getMaxRows(),1).setNumberFormat('yyyy-mm-dd');
+  td.getRange(1,7,td.getMaxRows(),1).setNumberFormat('0');
+  // 2. clear in place (formulas restored; grid unchanged)
+  clearRows.forEach(function(r){ clearRecordRow_(sh, r); });
+  // 3 & 4. purge TEST/TEST-A from the log sheets (safe row deletes — not the Data grid)
+  const tq = removeRowsByPrefix_(ss, CFG.TASK_QUEUE_SHEET, 3, 'TEST');
+  const al = removeRowsByPrefix_(ss, 'Automation Log', 3, 'TEST');
+  SpreadsheetApp.getActive().toast(
+    'Removed ' + clearRows.length + ' TEST data rows (archived to Test Data), ' + tq + ' Task Queue + ' + al +
+    ' Automation Log entries. Test Results kept. Grid rows: ' + sh.getMaxRows() + ' (unchanged).',
+    'removeTestArtifacts', 12);
+}
+
+/** Delete rows from a plain LOG sheet where column idCol starts with prefix. Returns count. */
+function removeRowsByPrefix_(ss, sheetName, idCol, prefix) {
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) return 0;
+  const last = sh.getLastRow();
+  if (last < 2) return 0;
+  const vals = sh.getRange(2, idCol, last - 1, 1).getValues();
+  var removed = 0;
+  for (var r = last; r >= 2; r--) {                 // bottom-up so indices stay valid
+    if (String(vals[r - 2][0]).indexOf(prefix) === 0) { sh.deleteRow(r); removed++; }
+  }
+  return removed;
 }
 
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
@@ -1111,6 +1213,35 @@ function runAllTests() {
   removeAllTriggers();
   assert('Trig. removeAllTriggers -> 0 (run testTriggerCycle for full install/remove)', ScriptApp.getProjectTriggers().length === 0 && typeof installTriggers === 'function', 'triggers cleared');
 
+  // ---- coverage + TEST-exclusion + go-live-cleanup tests ----
+  const ss2 = SpreadsheetApp.getActive();
+  buildBoard_(ss2); buildExceptionQueue_(ss2); SpreadsheetApp.flush();
+  // TEST seller names currently in Data (harness TEST-A rows guarantee this set is non-empty)
+  const dv = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const testSellers = {};
+  dv.forEach(function(row){ if (String(row[col('Source')-1]).trim() === 'TEST' && row[col('Seller Name')-1]) testSellers[String(row[col('Seller Name')-1])] = true; });
+
+  const bSellers = columnValues_(ss2.getSheetByName(CFG.BOARD_SHEET), 2);   // Board Seller = col B
+  assert('B1. Board contains zero Source=TEST records', !bSellers.some(function(v){ return testSellers[v]; }), 'board sellers checked');
+  const eSellers = columnValues_(ss2.getSheetByName(CFG.EXCEPTIONS_SHEET), 3); // Exc Seller = col C
+  assert('B2. Exception Queue contains zero Source=TEST records', !eSellers.some(function(v){ return testSellers[v]; }), 'queue sellers checked');
+
+  assert('B3. Formula coverage reaches row 500', lastFormulaRow_(sh,'Normalized Address') >= CFG.MAX_ROWS && sh.getMaxRows() >= CFG.MAX_ROWS, 'fRow=' + lastFormulaRow_(sh,'Normalized Address') + ' grid=' + sh.getMaxRows());
+  assert('B4. Validation coverage reaches row 500', lastValidationRow_(sh,'Current Stage') >= CFG.MAX_ROWS, 'vRow=' + lastValidationRow_(sh,'Current Stage'));
+
+  // Gift Sent must be an Exception until Gift Approved By + Gift Approval Date are set
+  let gf = newRow({'Property ID':'TEST-A14','Property Address':'14 Auto Test St','Seller Name':'Gift Test','REI BlackBook Link':'https://rei/a14','Visit Notes':'x','Seller Motivation':'m','Current Stage':'Long-Term Nurture','Assigned Owner':'Cherry','Next Action':'nurture','Next Action Due Date':addBiz_(today_(),30),'Gift Status':'Sent','Source':'TEST'});
+  SpreadsheetApp.flush();
+  assert('B5a. Gift Sent WITHOUT approver+date -> Exception', String(new RowAccessor_(sh,gf.row).get('Exception Reason')).indexOf('Gift') >= 0, new RowAccessor_(sh,gf.row).get('Exception Reason'));
+  gf.set('Gift Approved By','Cherry'); gf.set('Gift Approval Date', today_()); gf.flush(); SpreadsheetApp.flush();
+  assert('B5b. Gift Sent WITH approver+date -> no gift exception', String(new RowAccessor_(sh,gf.row).get('Exception Reason')).indexOf('Gift') < 0, new RowAccessor_(sh,gf.row).get('Exception Reason') || '(clear)');
+
+  // removeTestArtifacts must NOT delete/shrink grid rows
+  const rowsBefore = sh.getMaxRows();
+  removeTestArtifacts();
+  const rowsAfter = sh.getMaxRows();
+  assert('B6. removeTestArtifacts does not delete/shrink rows', rowsAfter === rowsBefore && rowsAfter >= CFG.MAX_ROWS, 'before=' + rowsBefore + ' after=' + rowsAfter);
+
   writeTestResults_(results);
   cleanupTests_();
   SpreadsheetApp.getActive().toast('Automation tests complete: ' + results.filter(function(x){return x[1]==='PASS';}).length + '/' + results.length + ' passed', 'Tests', 8);
@@ -1135,6 +1266,16 @@ function cleanupTests_() {
   for (var i = 0; i < ids.length; i++) {
     if (String(ids[i][0]).indexOf('TEST-A') === 0) clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i);
   }
+}
+
+/** Non-empty, non-placeholder values from column c of a sheet (used to inspect rendered QUERY output). */
+function columnValues_(sh, c) {
+  if (!sh) return [];
+  const last = sh.getLastRow();
+  if (last < 1) return [];
+  return sh.getRange(1, c, last, 1).getValues()
+    .map(function(r){ return String(r[0]); })
+    .filter(function(v){ return v && v !== '— none —'; });
 }
 
 /** True if the Automation Log has a row with the given level for the given Property ID. */

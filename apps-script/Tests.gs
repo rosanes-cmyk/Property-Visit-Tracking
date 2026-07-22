@@ -140,6 +140,35 @@ function runAllTests() {
   removeAllTriggers();
   assert('Trig. removeAllTriggers -> 0 (run testTriggerCycle for full install/remove)', ScriptApp.getProjectTriggers().length === 0 && typeof installTriggers === 'function', 'triggers cleared');
 
+  // ---- coverage + TEST-exclusion + go-live-cleanup tests ----
+  const ss2 = SpreadsheetApp.getActive();
+  buildBoard_(ss2); buildExceptionQueue_(ss2); SpreadsheetApp.flush();
+  // TEST seller names currently in Data (harness TEST-A rows guarantee this set is non-empty)
+  const dv = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const testSellers = {};
+  dv.forEach(function(row){ if (String(row[col('Source')-1]).trim() === 'TEST' && row[col('Seller Name')-1]) testSellers[String(row[col('Seller Name')-1])] = true; });
+
+  const bSellers = columnValues_(ss2.getSheetByName(CFG.BOARD_SHEET), 2);   // Board Seller = col B
+  assert('B1. Board contains zero Source=TEST records', !bSellers.some(function(v){ return testSellers[v]; }), 'board sellers checked');
+  const eSellers = columnValues_(ss2.getSheetByName(CFG.EXCEPTIONS_SHEET), 3); // Exc Seller = col C
+  assert('B2. Exception Queue contains zero Source=TEST records', !eSellers.some(function(v){ return testSellers[v]; }), 'queue sellers checked');
+
+  assert('B3. Formula coverage reaches row 500', lastFormulaRow_(sh,'Normalized Address') >= CFG.MAX_ROWS && sh.getMaxRows() >= CFG.MAX_ROWS, 'fRow=' + lastFormulaRow_(sh,'Normalized Address') + ' grid=' + sh.getMaxRows());
+  assert('B4. Validation coverage reaches row 500', lastValidationRow_(sh,'Current Stage') >= CFG.MAX_ROWS, 'vRow=' + lastValidationRow_(sh,'Current Stage'));
+
+  // Gift Sent must be an Exception until Gift Approved By + Gift Approval Date are set
+  let gf = newRow({'Property ID':'TEST-A14','Property Address':'14 Auto Test St','Seller Name':'Gift Test','REI BlackBook Link':'https://rei/a14','Visit Notes':'x','Seller Motivation':'m','Current Stage':'Long-Term Nurture','Assigned Owner':'Cherry','Next Action':'nurture','Next Action Due Date':addBiz_(today_(),30),'Gift Status':'Sent','Source':'TEST'});
+  SpreadsheetApp.flush();
+  assert('B5a. Gift Sent WITHOUT approver+date -> Exception', String(new RowAccessor_(sh,gf.row).get('Exception Reason')).indexOf('Gift') >= 0, new RowAccessor_(sh,gf.row).get('Exception Reason'));
+  gf.set('Gift Approved By','Cherry'); gf.set('Gift Approval Date', today_()); gf.flush(); SpreadsheetApp.flush();
+  assert('B5b. Gift Sent WITH approver+date -> no gift exception', String(new RowAccessor_(sh,gf.row).get('Exception Reason')).indexOf('Gift') < 0, new RowAccessor_(sh,gf.row).get('Exception Reason') || '(clear)');
+
+  // removeTestArtifacts must NOT delete/shrink grid rows
+  const rowsBefore = sh.getMaxRows();
+  removeTestArtifacts();
+  const rowsAfter = sh.getMaxRows();
+  assert('B6. removeTestArtifacts does not delete/shrink rows', rowsAfter === rowsBefore && rowsAfter >= CFG.MAX_ROWS, 'before=' + rowsBefore + ' after=' + rowsAfter);
+
   writeTestResults_(results);
   cleanupTests_();
   SpreadsheetApp.getActive().toast('Automation tests complete: ' + results.filter(function(x){return x[1]==='PASS';}).length + '/' + results.length + ' passed', 'Tests', 8);
@@ -164,6 +193,16 @@ function cleanupTests_() {
   for (var i = 0; i < ids.length; i++) {
     if (String(ids[i][0]).indexOf('TEST-A') === 0) clearRecordRow_(sh, CFG.FIRST_DATA_ROW + i);
   }
+}
+
+/** Non-empty, non-placeholder values from column c of a sheet (used to inspect rendered QUERY output). */
+function columnValues_(sh, c) {
+  if (!sh) return [];
+  const last = sh.getLastRow();
+  if (last < 1) return [];
+  return sh.getRange(1, c, last, 1).getValues()
+    .map(function(r){ return String(r[0]); })
+    .filter(function(v){ return v && v !== '— none —'; });
 }
 
 /** True if the Automation Log has a row with the given level for the given Property ID. */

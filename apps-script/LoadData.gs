@@ -59,6 +59,64 @@ function removeTestData() {
   SpreadsheetApp.getActive().toast('Removed ' + n + ' Source=TEST records (rows, formulas, validation & formatting preserved).', 'Twin Visit Logger', 7);
 }
 
+/**
+ * Full go-live cleanup of test artifacts. Safe: preserves the grid, formulas, validation and
+ * conditional formatting; keeps the Test Results sheet.
+ *   1. Archives the Source=TEST rows into the Test Data sheet (static values).
+ *   2. Clears those rows IN PLACE in Data (formulas restored) — no row deletion.
+ *   3. Removes TEST / TEST-A tasks from Task Queue (a plain log sheet).
+ *   4. Removes TEST / TEST-A entries from Automation Log.
+ *   5. Leaves Test Results intact.
+ */
+function removeTestArtifacts() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = dataSheet_();
+  if (!sh) return;
+  const disp = ['Property ID','Property Address','Seller Name','Current Stage','Assigned Owner',
+                'Next Action Due Date','Days Overdue','Stalled Status','Data Quality Status','Exception Reason'];
+  const all = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const si = col('Source') - 1, ai = col('Property Address') - 1;
+  const archive = [], clearRows = [];
+  for (var i = 0; i < all.length; i++) {
+    if (all[i][ai] && String(all[i][si]).trim() === 'TEST') {
+      archive.push(disp.map(function(h){ return all[i][col(h) - 1]; }));
+      clearRows.push(CFG.FIRST_DATA_ROW + i);
+    }
+  }
+  // 1. archive to Test Data (static)
+  const td = ensureSheet_(ss, CFG.TEST_DATA_SHEET);
+  td.clear(); td.setTabColor('#999999');
+  td.getRange(1,1).setValue('Test Data — archived Source=TEST demo records (isolated from all live views)').setFontWeight('bold').setFontSize(12);
+  td.getRange(3,1,1,disp.length).setValues([disp]).setFontWeight('bold').setBackground('#ddebf7');
+  if (archive.length) td.getRange(4,1,archive.length,disp.length).setValues(archive);
+  else td.getRange(4,1).setValue('— none —');
+  td.getRange(1,6,td.getMaxRows(),1).setNumberFormat('yyyy-mm-dd');
+  td.getRange(1,7,td.getMaxRows(),1).setNumberFormat('0');
+  // 2. clear in place (formulas restored; grid unchanged)
+  clearRows.forEach(function(r){ clearRecordRow_(sh, r); });
+  // 3 & 4. purge TEST/TEST-A from the log sheets (safe row deletes — not the Data grid)
+  const tq = removeRowsByPrefix_(ss, CFG.TASK_QUEUE_SHEET, 3, 'TEST');
+  const al = removeRowsByPrefix_(ss, 'Automation Log', 3, 'TEST');
+  SpreadsheetApp.getActive().toast(
+    'Removed ' + clearRows.length + ' TEST data rows (archived to Test Data), ' + tq + ' Task Queue + ' + al +
+    ' Automation Log entries. Test Results kept. Grid rows: ' + sh.getMaxRows() + ' (unchanged).',
+    'removeTestArtifacts', 12);
+}
+
+/** Delete rows from a plain LOG sheet where column idCol starts with prefix. Returns count. */
+function removeRowsByPrefix_(ss, sheetName, idCol, prefix) {
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) return 0;
+  const last = sh.getLastRow();
+  if (last < 2) return 0;
+  const vals = sh.getRange(2, idCol, last - 1, 1).getValues();
+  var removed = 0;
+  for (var r = last; r >= 2; r--) {                 // bottom-up so indices stay valid
+    if (String(vals[r - 2][0]).indexOf(prefix) === 0) { sh.deleteRow(r); removed++; }
+  }
+  return removed;
+}
+
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
 function clearAllData() {
   const sh = dataSheet_();

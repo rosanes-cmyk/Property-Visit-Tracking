@@ -1,5 +1,33 @@
 # Change Log — Twin Visit Logger
 
+## v2.2 — 2026-07-22 (deployment-review round 2; triggers still OFF)
+
+**Root cause found:** a prior run of the old `deleteRow()`-based cleanup had shrunk the Data grid
+below 500 rows, so `repairSheet()` threw when writing to row 500 and aborted before rebuilding the
+Board/Exception Queue. Fixes:
+
+1. **Board** — every section formula now explicitly excludes `Source = 'TEST'`.
+2. **Exception Queue** — live queue formula excludes `Source = 'TEST'`.
+3. **Grid guard `ensureRows_()`** — `setup`, `repairSheet`, `writeFormulas_`, `applyDropdowns_`
+   now insert rows first so formulas, validations, number formats & conditional formatting always
+   reach **row 500** (fixes the "only reaches 488" symptom).
+4. **Test Data** sheet built by setup/repair (Source = TEST records shown there only).
+5. **Migration Log** sheet built by setup/repair; documents the 10 pilot mappings + the
+   intentionally-blank fields to complete from REI BlackBook.
+6. **Gift Approved By / Gift Approval Date** in schema, dropdowns, gift rule, and Data Dictionary
+   (Gift Status = Sent is an Exception unless both are set).
+7. **`removeTestArtifacts()`** — archives TEST rows to Test Data, clears them in place (no row
+   deletion, formulas restored), purges TEST/TEST-A rows from Task Queue and Automation Log, and
+   **keeps Test Results**.
+8. **Task Queue** contains only real operational tasks after `removeTestArtifacts()`.
+9. **`repairSheet()`** now performs all of the above and shows a summary toast: formula end row,
+   validation end row, live Board records, live Exception records, and test records isolated.
+10. **New tests** (item 10): Board=0 TEST, Exception Queue=0 TEST, formula coverage→500,
+    validation coverage→500, Gift Sent fails without approver+date, and `removeTestArtifacts`
+    does not shrink the grid.
+
+Triggers remain installed only by explicit menu action.
+
 ## v2.1 — 2026-07-22 (SOP-review corrections; triggers still OFF)
 
 Corrections after reviewing the deployed dev copy against the SOP. No triggers installed.

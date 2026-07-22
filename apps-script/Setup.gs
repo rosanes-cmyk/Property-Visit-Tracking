@@ -11,6 +11,7 @@ function setup() {
   const ss = SpreadsheetApp.getActive();
   archiveLegacy_(ss);
   const sh = ensureSheet_(ss, CFG.DATA_SHEET, 0);
+  ensureRows_(sh, CFG.MAX_ROWS);
   writeHeaders_(sh);
   applyDropdowns_(sh);
   writeFormulas_(sh);
@@ -33,17 +34,35 @@ function repairSheet() {
   const ss = SpreadsheetApp.getActive();
   const sh = dataSheet_();
   if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
-  writeHeaders_(sh);            // row 1 only (idempotent)
-  applyDropdowns_(sh);          // rows 2..MAX_ROWS
-  writeFormulas_(sh);           // rewrites ONLY the 9 computed columns (never user data)
+  ensureRows_(sh, CFG.MAX_ROWS);   // <-- guarantees the grid reaches row 500 before writing
+  writeHeaders_(sh);               // row 1 only (idempotent)
+  applyDropdowns_(sh);             // rows 2..MAX_ROWS
+  writeFormulas_(sh);              // rewrites ONLY the 9 computed columns (never user data)
   applyConditionalFormatting_(sh);
   buildDropdownSheet_(ss);
-  buildBoard_(ss);
-  buildExceptionQueue_(ss);
+  buildBoard_(ss);                 // every section excludes Source = TEST
+  buildExceptionQueue_(ss);        // live queue excludes Source = TEST
   buildMigrationLog_(ss);
-  buildTestDataSheet_(ss);
+  buildTestDataSheet_(ss);         // Source = TEST records shown here only
   ensureTaskQueue_(ss);
-  SpreadsheetApp.getActive().toast('Repaired: formulas, validations, formats & views reapplied to row ' + CFG.MAX_ROWS + '.', 'Twin Visit Logger', 8);
+
+  // ---- coverage + counts for the summary toast ----
+  const fRow = lastFormulaRow_(sh, 'Normalized Address');
+  const vRow = lastValidationRow_(sh, 'Current Stage');
+  const data = sh.getRange(CFG.FIRST_DATA_ROW, 1, CFG.MAX_ROWS - 1, HEADERS.length).getValues();
+  const si = col('Source') - 1, ai = col('Property Address') - 1, di = col('Data Quality Status') - 1;
+  var live = 0, liveExc = 0, tests = 0;
+  data.forEach(function(row){
+    if (!row[ai]) return;
+    if (String(row[si]).trim() === 'TEST') { tests++; return; }
+    live++;
+    if (row[di] === 'Incomplete' || row[di] === 'Exception') liveExc++;
+  });
+  SpreadsheetApp.getActive().toast(
+    'Repair complete — formulas → row ' + fRow + ' | validation → row ' + vRow +
+    ' | live records ' + live + ' | live exceptions ' + liveExc +
+    ' | test records isolated ' + tests + ' (in Test Data). Grid rows: ' + sh.getMaxRows() + '.',
+    'repairSheet', 15);
 }
 
 function archiveLegacy_(ss) {
@@ -62,6 +81,26 @@ function ensureSheet_(ss, name, index) {
   return sh;
 }
 
+/** Guarantee the sheet grid has at least n rows (a prior deleteRow may have shrunk it below 500). */
+function ensureRows_(sh, n) {
+  const have = sh.getMaxRows();
+  if (have < n) sh.insertRowsAfter(have, n - have);
+}
+
+/** Last row (<= MAX_ROWS) that actually holds a formula in the given computed column. */
+function lastFormulaRow_(sh, header) {
+  const f = sh.getRange(CFG.FIRST_DATA_ROW, col(header), CFG.MAX_ROWS - 1, 1).getFormulas();
+  for (var i = f.length - 1; i >= 0; i--) if (f[i][0]) return CFG.FIRST_DATA_ROW + i;
+  return 0;
+}
+
+/** Last row (<= MAX_ROWS) that actually has a data-validation rule in the given column. */
+function lastValidationRow_(sh, header) {
+  const dv = sh.getRange(CFG.FIRST_DATA_ROW, col(header), CFG.MAX_ROWS - 1, 1).getDataValidations();
+  for (var i = dv.length - 1; i >= 0; i--) if (dv[i][0]) return CFG.FIRST_DATA_ROW + i;
+  return 0;
+}
+
 function writeHeaders_(sh) {
   sh.getRange(CFG.HEADER_ROW, 1, 1, HEADERS.length).setValues([HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#2e5a88')
@@ -71,6 +110,7 @@ function writeHeaders_(sh) {
 }
 
 function applyDropdowns_(sh) {
+  ensureRows_(sh, CFG.MAX_ROWS);
   const last = CFG.MAX_ROWS;
   const map = {
     'Lead Source':'Lead Source','Visit Status':'Visit Status','Assigned Visitor':'Assigned Visitor',
@@ -171,6 +211,7 @@ function clearRecordRow_(sh, r) {
 }
 
 function writeFormulas_(sh) {
+  ensureRows_(sh, CFG.MAX_ROWS);
   const first = CFG.FIRST_DATA_ROW, last = CFG.MAX_ROWS;
   COMPUTED_HEADERS.forEach(function(h){
     const c = col(h);
@@ -332,6 +373,7 @@ function buildTestDataSheet_(ss) {
   sh.getRange(4,1).setFormula(q);
   sh.getRange(1, 6, sh.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd'); // Due
   sh.getRange(1, 7, sh.getMaxRows(), 1).setNumberFormat('0');          // Days Overdue
+  return sh;
 }
 
 /** Visible internal task-delivery sheet (the pilot task inbox for the team). */
