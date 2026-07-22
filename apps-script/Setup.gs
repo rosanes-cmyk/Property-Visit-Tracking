@@ -209,10 +209,13 @@ function buildBoard_(ss) {
     row++;
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
       '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
-      " limit 50 format " + due + " 'yyyy-MM-dd'\",0),\"— none —\")";
+      ' limit 50",0),"— none —")';
     sh.getRange(row,1).setFormula(q);
     row += 8;
   });
+  // Deterministic display formats: Due (display col 6/F) as a date, Days Overdue (col 7/G) as integer.
+  sh.getRange(1, 6, sh.getMaxRows(), 1).setNumberFormat('yyyy-mm-dd');
+  sh.getRange(1, 7, sh.getMaxRows(), 1).setNumberFormat('0');
   sh.setColumnWidth(1, 240); sh.setColumnWidth(4, 220); sh.setColumnWidth(9, 240); sh.setColumnWidth(10, 220);
   sh.setFrozenRows(3);
 }
