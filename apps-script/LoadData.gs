@@ -30,12 +30,17 @@ function loadPilotData() {
   const sh = dataSheet_();
   if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
   const start = CFG.FIRST_DATA_ROW;
+  var skipped = [];
   SEED.forEach(function(rec, i){
     const row = start + i;
-    Object.keys(rec).forEach(function(h){ sh.getRange(row, col(h)).setValue(rec[h]); });
+    Object.keys(rec).forEach(function(h){
+      try { sh.getRange(row, col(h)).setValue(rec[h]); }
+      catch (e) { skipped.push(rec['Property ID'] + '/' + h); }  // never let one cell abort the load
+    });
   });
   SpreadsheetApp.flush();
-  SpreadsheetApp.getActive().toast(SEED.length + ' pilot + test rows loaded. Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
+  const msg = SEED.length + ' pilot + test rows loaded.' + (skipped.length ? ' Skipped: ' + skipped.join(', ') : '');
+  SpreadsheetApp.getActive().toast(msg + ' Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
 }
 
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */

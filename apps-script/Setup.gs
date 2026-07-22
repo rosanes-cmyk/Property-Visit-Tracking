@@ -204,7 +204,8 @@ function buildBoard_(ss) {
     sh.getRange(row,1,1,hdr.length).setValues([hdr]).setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
     row++;
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] + ' limit 50",0),"— none —")';
+      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
+      " limit 50 format " + due + " 'yyyy-mm-dd'\",0),\"— none —\")";
     sh.getRange(row,1).setFormula(q);
     row += 8;
   });

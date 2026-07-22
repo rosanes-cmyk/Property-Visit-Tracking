@@ -49,7 +49,7 @@ const DROPDOWNS = {
   'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
   'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
-  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script'],
+  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],

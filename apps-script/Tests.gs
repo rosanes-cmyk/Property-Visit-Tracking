@@ -9,10 +9,18 @@
  * same handlers), which is exactly the code path a real edit runs.
  */
 
+/** First row (>=2, within the formula range) whose Property Address is blank. */
+function firstEmptyDataRow_(sh) {
+  const vals = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < vals.length; i++) if (String(vals[i][0]).trim() === '') return CFG.FIRST_DATA_ROW + i;
+  return CFG.FIRST_DATA_ROW;
+}
+
 function runAllTests() {
   const results = [];
   const sh = dataSheet_();
-  const startRow = sh.getLastRow() + 2;
+  // Place test rows INSIDE the formula range (formulas fill rows 2..MAX_ROWS), not past getLastRow().
+  const startRow = firstEmptyDataRow_(sh);
   let r = startRow;
 
   function newRow(fields) {

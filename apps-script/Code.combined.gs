@@ -85,7 +85,7 @@ const DROPDOWNS = {
   'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
   'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
-  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script'],
+  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
@@ -326,7 +326,8 @@ function buildBoard_(ss) {
     sh.getRange(row,1,1,hdr.length).setValues([hdr]).setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
     row++;
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] + ' limit 50",0),"— none —")';
+      '"select ' + sel + ' where ' + addr + ' is not null and ' + s[1] + ' order by ' + s[2] +
+      " limit 50 format " + due + " 'yyyy-mm-dd'\",0),\"— none —\")";
     sh.getRange(row,1).setFormula(q);
     row += 8;
   });
@@ -388,12 +389,17 @@ function loadPilotData() {
   const sh = dataSheet_();
   if (!sh) { SpreadsheetApp.getUi().alert('Run "Build structure (setup)" first.'); return; }
   const start = CFG.FIRST_DATA_ROW;
+  var skipped = [];
   SEED.forEach(function(rec, i){
     const row = start + i;
-    Object.keys(rec).forEach(function(h){ sh.getRange(row, col(h)).setValue(rec[h]); });
+    Object.keys(rec).forEach(function(h){
+      try { sh.getRange(row, col(h)).setValue(rec[h]); }
+      catch (e) { skipped.push(rec['Property ID'] + '/' + h); }  // never let one cell abort the load
+    });
   });
   SpreadsheetApp.flush();
-  SpreadsheetApp.getActive().toast(SEED.length + ' pilot + test rows loaded. Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
+  const msg = SEED.length + ' pilot + test rows loaded.' + (skipped.length ? ' Skipped: ' + skipped.join(', ') : '');
+  SpreadsheetApp.getActive().toast(msg + ' Check the Cherry Opportunity Board.', 'Twin Visit Logger', 8);
 }
 
 /** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
@@ -785,10 +791,18 @@ function readAllRows_() {
  * same handlers), which is exactly the code path a real edit runs.
  */
 
+/** First row (>=2, within the formula range) whose Property Address is blank. */
+function firstEmptyDataRow_(sh) {
+  const vals = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < vals.length; i++) if (String(vals[i][0]).trim() === '') return CFG.FIRST_DATA_ROW + i;
+  return CFG.FIRST_DATA_ROW;
+}
+
 function runAllTests() {
   const results = [];
   const sh = dataSheet_();
-  const startRow = sh.getLastRow() + 2;
+  // Place test rows INSIDE the formula range (formulas fill rows 2..MAX_ROWS), not past getLastRow().
+  const startRow = firstEmptyDataRow_(sh);
   let r = startRow;
 
   function newRow(fields) {
