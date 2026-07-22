@@ -41,7 +41,7 @@ Every active property must always have:
 
 - [`docs/Phase-1-Audit-Report.md`](docs/Phase-1-Audit-Report.md) — the full Phase 1 audit and technical recommendation.
 
-## Source files reviewed (read-only, in Google Drive)
+## Source files reviewed (read-only)
 
-- **Property Visit Tracking** — Google Sheets workbook (system of record)
+- **Property Visit Tracking** — Google Sheets workbook (system of record): 13 sheets, 370 property records, 71 currently Active. Analyzed from a supplied `.xlsx` copy; the original was not modified.
 - **Property_Visit_SOP.docx** — "Property Visit Folder, WhatsApp Group & Photo Upload Process" (the Twin Visit Logger SOP)
