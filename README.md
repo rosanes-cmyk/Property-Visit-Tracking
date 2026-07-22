@@ -1,7 +1,7 @@
 # Twin Visit Logger — Upgrade Project
 
 **Owner:** Cherry (Lead Manager) · **Company:** Equity Track Inc. / Twin Home Buyer
-**Status:** Phase 2 **deployed & verified in the dev copy** (2026-07-22); Phase 3 automation `runAllTests()` → **16/16 PASS**. Triggers + daily-report email remain OFF pending go-ahead.
+**Status:** Independently **verified in the dev copy** (2026-07-22) — **30/30 tests passed**, Data = 10 real pilot rows, TEST isolated, Exception Queue = TVL-0001/0002/0003/0009, formulas/validation to row 500, original untouched. **Verified but NOT yet fully operational:** triggers are OFF and four records need REI BlackBook data. Go-live steps: [`docs/Go-Live-Checklist.md`](docs/Go-Live-Checklist.md).
 
 **Dev copy:** *"Property Visit Tracking — DEV COPY (Twin Visit Logger Upgrade)"* —
 <https://docs.google.com/spreadsheets/d/1gxjc3vO1l3Q-dffzhgnDDh86mqFv5zmBqZaWyAPVKT4/edit>
@@ -67,6 +67,7 @@ the dev copy's Apps Script editor, run `setup()` → `installTriggers()` → `ru
 - [`docs/Phase-3-Automation-Test-Results.md`](docs/Phase-3-Automation-Test-Results.md) — Phase 3 test scenarios (ready, pending execution).
 - [`docs/User-Guide.md`](docs/User-Guide.md) — task-based guide for Cherry and the team.
 - [`docs/Deployment-Guide.md`](docs/Deployment-Guide.md) — step-by-step deploy to the dev copy.
+- [`docs/Go-Live-Checklist.md`](docs/Go-Live-Checklist.md) — the 8-step go-live checklist (REI records → triggers → verify).
 - [`docs/Phase-2-Cherry-Approval-Summary.md`](docs/Phase-2-Cherry-Approval-Summary.md) — one-page approval summary for Cherry.
 - [`docs/Change-Log.md`](docs/Change-Log.md) — version history (v2.0, v1.0).
 
