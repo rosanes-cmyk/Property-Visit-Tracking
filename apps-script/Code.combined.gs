@@ -6,7 +6,7 @@
  *   1. In the DEV COPY sheet: Extensions -> Apps Script.
  *   2. Delete the default Code.gs contents, paste this entire file, Save.
  *   3. Reload the spreadsheet tab. A "🏠 Twin Visit Logger" menu appears.
- *   4. Menu -> "1) Build structure (setup)"  (or "Repair sheet" if already built).
+ *   4. Menu -> "Repair sheet" (or "1) Build structure (setup)" for a first build).
  *   5. Menu -> "2) Load pilot + test data".
  *   6. Menu -> "3) Run tests"  -> check the Test Results sheet.
  *   7. (Only after tests pass, and only when YOU approve) "4) Install automation triggers".
@@ -248,6 +248,9 @@ function writeHeaders_(sh) {
 function applyDropdowns_(sh) {
   ensureRows_(sh, CFG.MAX_ROWS);
   const last = CFG.MAX_ROWS;
+  // Clear any stale validations across the data range first, so a rule left over from an earlier
+  // build (different column layout) can never mismatch the current schema (fixes BH35-type errors).
+  sh.getRange(CFG.FIRST_DATA_ROW, 1, last - 1, HEADERS.length).clearDataValidations();
   const map = {
     'Lead Source':'Lead Source','Visit Status':'Visit Status','Assigned Visitor':'Assigned Visitor',
     'Property Condition':'Property Condition','Occupancy Status':'Occupancy Status',
@@ -262,7 +265,7 @@ function applyDropdowns_(sh) {
   // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
   // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the
   // editor's name would violate the rule and throw on every edit.
-  const SOFT = {'Updated By': true};
+  const SOFT = {'Updated By': true, 'Gift Approved By': true};
   Object.keys(map).forEach(function(header){
     const rule = SpreadsheetApp.newDataValidation()
       .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(!!SOFT[header]).build();

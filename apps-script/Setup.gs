@@ -112,6 +112,9 @@ function writeHeaders_(sh) {
 function applyDropdowns_(sh) {
   ensureRows_(sh, CFG.MAX_ROWS);
   const last = CFG.MAX_ROWS;
+  // Clear any stale validations across the data range first, so a rule left over from an earlier
+  // build (different column layout) can never mismatch the current schema (fixes BH35-type errors).
+  sh.getRange(CFG.FIRST_DATA_ROW, 1, last - 1, HEADERS.length).clearDataValidations();
   const map = {
     'Lead Source':'Lead Source','Visit Status':'Visit Status','Assigned Visitor':'Assigned Visitor',
     'Property Condition':'Property Condition','Occupancy Status':'Occupancy Status',
@@ -126,7 +129,7 @@ function applyDropdowns_(sh) {
   // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
   // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the
   // editor's name would violate the rule and throw on every edit.
-  const SOFT = {'Updated By': true};
+  const SOFT = {'Updated By': true, 'Gift Approved By': true};
   Object.keys(map).forEach(function(header){
     const rule = SpreadsheetApp.newDataValidation()
       .requireValueInList(DROPDOWNS[map[header]], true).setAllowInvalid(!!SOFT[header]).build();
