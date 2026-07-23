@@ -1,0 +1,229 @@
+/**
+ * Twin Visit Logger — Web Dashboard (Apps Script Web App).
+ * The Google Sheet remains the database. doGet() serves a mobile-friendly dashboard that reads the
+ * live Data sheet; quick-actions call webAction(), which writes the sheet and runs the SAME
+ * automation handlers as a manual edit (validation, Task Queue, stage cascades all apply).
+ * Never contacts sellers. Excludes Source = TEST from every view.
+ *
+ * Deploy: Apps Script editor -> Deploy -> New deployment -> Web app
+ *   Execute as: Me | Who has access: (your choice, e.g. anyone in your org). Open the /exec URL.
+ */
+
+function doGet() {
+  return HtmlService.createHtmlOutput(dashboardHtml_())
+    .setTitle('Twin Visit Logger')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/* ---------------- server: read ---------------- */
+
+function webGetData() {
+  const sh = dataSheet_();
+  const last = sh.getLastRow();
+  const rows = [];
+  if (last >= CFG.FIRST_DATA_ROW) {
+    const vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+    vals.forEach(function(v, i){
+      const rec = {}; HEADERS.forEach(function(h, j){ rec[h] = v[j]; });
+      if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return; // live records only
+      rows.push({
+        rowNum: CFG.FIRST_DATA_ROW + i,
+        id: rec['Property ID'] || '',
+        address: rec['Property Address'] || '',
+        seller: rec['Seller Name'] || '',
+        phone: rec['Phone'] || '',
+        stage: rec['Current Stage'] || '',
+        owner: rec['Assigned Owner'] || '',
+        visitStatus: rec['Visit Status'] || '',
+        nextAction: rec['Next Action'] || '',
+        due: fmt_(rec['Next Action Due Date']),
+        daysOverdue: rec['Days Overdue'] === '' ? 0 : Number(rec['Days Overdue']) || 0,
+        stalled: rec['Stalled Status'] === 'Yes',
+        blocker: rec['Blocker'] || '',
+        lastResult: rec['Last Contact Result'] || '',
+        offerAmount: rec['Approved Offer Amount'] || '',
+        dq: rec['Data Quality Status'] || '',
+        exceptionReason: rec['Exception Reason'] || '',
+        missing: rec['Missing Required Fields'] || '',
+        rei: rec['REI BlackBook Link'] || '',
+        priority: Number(rec['Opportunity Priority']) || 0,
+        daysSince: rec['Days Since Last Activity'] === '' ? '' : Number(rec['Days Since Last Activity']),
+        disposition: rec['Final Disposition'] || '',
+        handoff: rec['Transaction Handoff Status'] || '',
+        gift: rec['Gift Status'] || ''
+      });
+    });
+  }
+  function by(pred, sort){ const r = rows.filter(pred); if (sort) r.sort(sort); return r; }
+  const ovSort = function(a,b){ return b.daysOverdue - a.daysOverdue; };
+  const prSort = function(a,b){ return b.priority - a.priority; };
+  const sections = [
+    ['Contracts Possible This Week', by(function(r){ return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage) >= 0; }, prSort)],
+    ['Visited — No Offer Decision', by(function(r){ return r.stage === 'Visit Completed — Needs Review'; }, ovSort)],
+    ['Offer Sent — Follow-Up Due', by(function(r){ return r.stage === 'Offer Sent'; }, ovSort)],
+    ['Stalled Deals', by(function(r){ return r.stalled; }, ovSort)],
+    ['Overdue Tasks', by(function(r){ return r.daysOverdue > 0; }, ovSort)],
+    ['Negotiation Decisions', by(function(r){ return r.stage === 'Active Negotiation'; }, prSort)],
+    ['Contract Handoffs', by(function(r){ return r.stage === 'Contract Signed' && r.handoff !== 'JM Confirmed'; })],
+    ['Gift Review', by(function(r){ return r.gift === 'Recommended'; })],
+    ['Revival Opportunities', by(function(r){ return r.disposition === 'Lost' && r.daysSince !== '' && r.daysSince >= 45; }, ovSort)],
+    ['Exceptions Requiring Review', by(function(r){ return r.dq === 'Incomplete' || r.dq === 'Exception'; })]
+  ].map(function(s){ return { title: s[0], rows: s[1] }; });
+
+  const owners = DROPDOWNS['Assigned Owner'];
+  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, totalLive: rows.length };
+}
+
+/* ---------------- server: safe write actions ---------------- */
+
+function findRowById_(id) {
+  const sh = dataSheet_();
+  const last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return 0;
+  const ids = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), last - CFG.FIRST_DATA_ROW + 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return CFG.FIRST_DATA_ROW + i;
+  return 0;
+}
+
+/**
+ * Perform a guarded action from the web. It writes the record then runs the SAME automation
+ * handler a manual edit would, so validation, Task Queue, and stage cascades all apply.
+ * The dashboard only records values the user supplies — it never sets prices/decisions itself
+ * and never messages a seller.
+ */
+function webAction(action, id, params) {
+  params = params || {};
+  const sh = dataSheet_();
+  const rowNum = findRowById_(id);
+  if (!rowNum) return { ok: false, error: 'Record not found: ' + id };
+  const R = new RowAccessor_(sh, rowNum);
+  try {
+    switch (action) {
+      case 'visitCompleted':
+        R.set('Visit Status', 'Completed'); stamp_(R); R.flush();
+        onVisitStatus_(new RowAccessor_(sh, rowNum)); break;
+      case 'logContact':
+        R.set('Last Contact Date', today_());
+        if (params.result) R.set('Last Contact Result', params.result);
+        if (params.nextAction) R.set('Next Action', params.nextAction);
+        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        stamp_(R); R.flush(); break;
+      case 'recordOfferSent':
+        if (params.amount) R.set('Approved Offer Amount', Number(params.amount));
+        R.set('Offer Sent Date', params.date ? new Date(params.date) : today_());
+        stamp_(R); R.flush(); onOfferSent_(new RowAccessor_(sh, rowNum)); break;
+      case 'sellerCounter':
+        if (params.amount) R.set('Counteroffer Amount', Number(params.amount));
+        if (params.result) R.set('Last Contact Result', params.result);
+        stamp_(R); R.flush(); onSellerCounter_(new RowAccessor_(sh, rowNum)); break;
+      case 'contractSent':
+        R.set('Contract Sent Date', params.date ? new Date(params.date) : today_());
+        stamp_(R); R.flush(); onContractSent_(new RowAccessor_(sh, rowNum)); break;
+      case 'contractSigned':
+        R.set('Contract Signed Date', params.date ? new Date(params.date) : today_());
+        stamp_(R); R.flush(); onContractSigned_(new RowAccessor_(sh, rowNum)); break;
+      case 'nurture':
+        R.set('Current Stage', 'Long-Term Nurture');
+        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        if (params.nextAction) R.set('Next Action', params.nextAction);
+        stamp_(R); R.flush(); onStageManual_(new RowAccessor_(sh, rowNum)); break;
+      case 'setNextAction':
+        if (params.nextAction) R.set('Next Action', params.nextAction);
+        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        if (params.owner) R.set('Assigned Owner', params.owner);
+        stamp_(R); R.flush(); break;
+      default:
+        return { ok: false, error: 'Unknown action: ' + action };
+    }
+    SpreadsheetApp.flush();
+    return { ok: true, data: webGetData() };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/* ---------------- the dashboard page (self-contained HTML) ---------------- */
+
+function dashboardHtml_() {
+  return [
+'<!DOCTYPE html><html><head><base target="_top"><meta charset="utf-8">',
+'<style>',
+'*{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f6f9;color:#222}',
+'header{background:#1f4e79;color:#fff;padding:12px 16px;position:sticky;top:0;z-index:5}',
+'header h1{margin:0;font-size:17px} header .sub{font-size:12px;opacity:.85;margin-top:2px}',
+'.bar{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;background:#fff;border-bottom:1px solid #e2e6ea;position:sticky;top:52px;z-index:4}',
+'.chip{border:1px solid #cdd6df;background:#fff;border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer}',
+'.chip.on{background:#1f4e79;color:#fff;border-color:#1f4e79}',
+'select{padding:5px 8px;border:1px solid #cdd6df;border-radius:8px;font-size:12px}',
+'.wrap{padding:10px 12px 60px}',
+'.sec{margin:14px 0 6px;font-size:13px;font-weight:bold;color:#1f4e79;display:flex;align-items:center;gap:8px}',
+'.sec .n{background:#1f4e79;color:#fff;border-radius:10px;padding:0 8px;font-size:11px}',
+'.card{background:#fff;border:1px solid #e2e6ea;border-left:4px solid #9aa7b4;border-radius:8px;padding:10px 12px;margin:8px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}',
+'.card.overdue{border-left-color:#c0392b} .card.stalled{border-left-color:#e08e0b} .card.ok{border-left-color:#2e7d32} .card.exc{border-left-color:#c0392b}',
+'.card .top{display:flex;justify-content:space-between;gap:8px} .card .seller{font-weight:bold;font-size:14px} .card .addr{font-size:12px;color:#555}',
+'.stg{font-size:11px;background:#eef2f6;border-radius:10px;padding:2px 8px;white-space:nowrap}',
+'.meta{font-size:12px;color:#444;margin-top:6px;display:flex;flex-wrap:wrap;gap:10px}',
+'.meta b{color:#111} .due.od{color:#c0392b;font-weight:bold} .flag{color:#c0392b;font-size:11px;margin-top:4px}',
+'.na{font-size:12px;margin-top:6px} .acts{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}',
+'button.act{font-size:11px;border:1px solid #1f4e79;color:#1f4e79;background:#fff;border-radius:6px;padding:5px 9px;cursor:pointer}',
+'button.act.p{background:#1f4e79;color:#fff} a.rei{font-size:11px;color:#1565c0;text-decoration:none;border:1px solid #90caf9;border-radius:6px;padding:5px 9px}',
+'#toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:9px 14px;border-radius:8px;font-size:13px;display:none;z-index:20}',
+'.empty{color:#8a97a3;font-size:12px;padding:4px 2px}',
+'</style></head><body>',
+'<header><h1>🏠 Twin Visit Logger</h1><div class="sub" id="sub">Loading…</div></header>',
+'<div class="bar">',
+'<span class="chip on" data-f="all" onclick="setFilter(this)">All</span>',
+'<span class="chip" data-f="today" onclick="setFilter(this)">Due Today</span>',
+'<span class="chip" data-f="overdue" onclick="setFilter(this)">Overdue</span>',
+'<span class="chip" data-f="stalled" onclick="setFilter(this)">Stalled</span>',
+'<select id="owner" onchange="draw()"><option value="">All owners</option></select>',
+'<span class="chip" onclick="loadData()">↻ Refresh</span>',
+'</div>',
+'<div class="wrap" id="wrap"></div>',
+'<div id="toast"></div>',
+'<script>',
+'var DATA=null, FILTER="all";',
+'function toast(m){var t=document.getElementById("toast");t.textContent=m;t.style.display="block";setTimeout(function(){t.style.display="none";},2600);}',
+'function setFilter(el){FILTER=el.getAttribute("data-f");var c=document.querySelectorAll(".bar .chip[data-f]");for(var i=0;i<c.length;i++)c[i].classList.remove("on");el.classList.add("on");draw();}',
+'function loadData(){document.getElementById("sub").textContent="Loading…";google.script.run.withSuccessHandler(function(d){DATA=d;fillOwners();document.getElementById("sub").textContent=d.generatedAt+" · "+d.totalLive+" live records";draw();}).withFailureHandler(function(e){toast("Error: "+e.message);}).webGetData();}',
+'function fillOwners(){var s=document.getElementById("owner");if(s.options.length>1)return;DATA.owners.forEach(function(o){var op=document.createElement("option");op.value=o;op.textContent=o;s.appendChild(op);});}',
+'function todayStr(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2);}',
+'function keep(r){var own=document.getElementById("owner").value;if(own&&r.owner!==own)return false;if(FILTER==="overdue")return r.daysOverdue>0;if(FILTER==="today")return r.due===todayStr();if(FILTER==="stalled")return r.stalled;return true;}',
+'function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}',
+'function actsFor(r){var a=[];',
+'  if(r.visitStatus!=="Completed"&&r.stage==="Visit Scheduled")a.push(["visitCompleted","Mark visit completed",true]);',
+'  if(r.stage==="Visit Completed — Needs Review"){a.push(["recordOfferSent","Record offer sent",true]);a.push(["nurture","Move to nurture",false]);}',
+'  if(r.stage==="Offer Sent"){a.push(["logContact","Log follow-up",true]);a.push(["sellerCounter","Seller countered",false]);a.push(["contractSent","Contract sent",false]);}',
+'  if(r.stage==="Active Negotiation"){a.push(["logContact","Log follow-up",true]);a.push(["contractSent","Contract sent",false]);}',
+'  if(r.stage==="Verbal Agreement"||r.stage==="Contract Sent"){a.push(["contractSigned","Contract signed",true]);a.push(["logContact","Log follow-up",false]);}',
+'  a.push(["setNextAction","Set next action",false]);',
+'  return a;}',
+'function card(r){var cls="card";if(r.daysOverdue>0)cls+=" overdue";else if(r.stalled)cls+=" stalled";else if(r.dq==="Exception"||r.dq==="Incomplete")cls+=" exc";else if(r.stage==="Contract Signed")cls+=" ok";',
+'  var h="<div class=\\""+cls+"\\">";',
+'  h+="<div class=\\"top\\"><div><div class=\\"seller\\">"+esc(r.seller)+"</div><div class=\\"addr\\">"+esc(r.address)+"</div></div><div class=\\"stg\\">"+esc(r.stage)+"</div></div>";',
+'  h+="<div class=\\"meta\\"><span>👤 <b>"+esc(r.owner||"—")+"</b></span>";',
+'  h+="<span class=\\"due"+(r.daysOverdue>0?" od":"")+"\\">📅 "+esc(r.due||"—")+(r.daysOverdue>0?(" ("+r.daysOverdue+"d over)"):"")+"</span>";',
+'  if(r.blocker)h+="<span>⛔ "+esc(r.blocker)+"</span>";if(r.stalled)h+="<span>🟠 stalled</span>";',
+'  h+="</div>";',
+'  if(r.nextAction)h+="<div class=\\"na\\">➡ "+esc(r.nextAction)+"</div>";',
+'  if(r.lastResult)h+="<div class=\\"na\\" style=\\"color:#666\\">🗒 "+esc(r.lastResult)+"</div>";',
+'  if(r.missing||r.exceptionReason)h+="<div class=\\"flag\\">⚠ "+esc(r.exceptionReason||("Missing: "+r.missing))+"</div>";',
+'  h+="<div class=\\"acts\\">";',
+'  if(r.rei)h+="<a class=\\"rei\\" href=\\""+esc(r.rei)+"\\" target=\\"_blank\\">REI ↗</a>";',
+'  actsFor(r).forEach(function(a){h+="<button class=\\"act"+(a[2]?" p":"")+"\\" onclick=\\"doAct(\\x27"+a[0]+"\\x27,\\x27"+esc(r.id)+"\\x27)\\">"+a[1]+"</button>";});',
+'  h+="</div></div>";return h;}',
+'function draw(){if(!DATA)return;var w=document.getElementById("wrap");var html="";DATA.sections.forEach(function(s){var rows=s.rows.filter(keep);if(!rows.length&&FILTER!=="all")return;html+="<div class=\\"sec\\">"+esc(s.title)+"<span class=\\"n\\">"+rows.length+"</span></div>";if(!rows.length){html+="<div class=\\"empty\\">— none —</div>";}else{rows.forEach(function(r){html+=card(r);});}});w.innerHTML=html;}',
+'function doAct(action,id){var p={};',
+'  if(action==="recordOfferSent"){p.amount=prompt("Approved offer amount (numbers only):");if(p.amount===null)return;p.date=prompt("Offer sent date (YYYY-MM-DD):",todayStr());if(p.date===null)return;}',
+'  else if(action==="sellerCounter"){p.amount=prompt("Counteroffer amount (numbers only):");if(p.amount===null)return;p.result=prompt("What did the seller say? (Last Contact Result):","");}',
+'  else if(action==="contractSent"){p.date=prompt("Contract sent date (YYYY-MM-DD):",todayStr());if(p.date===null)return;}',
+'  else if(action==="contractSigned"){p.date=prompt("Contract signed date (YYYY-MM-DD):",todayStr());if(p.date===null)return;}',
+'  else if(action==="logContact"){p.result=prompt("Result of contact:","");if(p.result===null)return;p.nextAction=prompt("Next action:","");p.due=prompt("Next action due date (YYYY-MM-DD):",todayStr());}',
+'  else if(action==="nurture"){p.due=prompt("Future follow-up date (YYYY-MM-DD):","");if(!p.due)return;p.nextAction=prompt("Next action:","Nurture check-in");}',
+'  else if(action==="setNextAction"){p.nextAction=prompt("Next action:","");if(p.nextAction===null)return;p.due=prompt("Due date (YYYY-MM-DD):",todayStr());p.owner=prompt("Assigned owner (Jonathan/Kyle/Cherry/Juan/JM), blank=keep:","");}',
+'  toast("Saving…");google.script.run.withSuccessHandler(function(res){if(res&&res.ok){DATA=res.data;draw();toast("Saved ✔");}else{toast("Error: "+(res&&res.error));}}).withFailureHandler(function(e){toast("Error: "+e.message);}).webAction(action,id,p);}',
+'loadData();',
+'</script></body></html>'
+  ].join('\n');
+}
