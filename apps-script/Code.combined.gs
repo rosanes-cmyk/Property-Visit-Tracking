@@ -1383,9 +1383,24 @@ function webIntake_(lead) {
   const g = function(a, b){ return lead[a] != null && lead[a] !== '' ? lead[a] : (lead[b] != null ? lead[b] : ''); };
   const addr = g('Property Address', 'address'), phone = g('Phone', 'phone');
   if (!addr) return { ok: false, error: 'Property Address is required' };
-  const dup = findByAddressOrPhone_(addr, phone);
-  if (dup) return { ok: true, duplicate: true, id: dup.id };
   const sh = dataSheet_(); ensureRows_(sh, CFG.MAX_ROWS);
+  // UPSERT: if this lead already exists, auto-update its note / status / stage (never sends anything)
+  const dup = findByAddressOrPhone_(addr, phone);
+  if (dup) {
+    const U = new RowAccessor_(sh, dup.rowNum);
+    var updated = [];
+    var up = function(h, v){ if (v !== '' && v != null) { if (h.indexOf('Date') >= 0) U.set(h, new Date(v)); else U.set(h, v); updated.push(h); } };
+    up('Last Contact Result', g('Last Contact Result', 'note') || g('Notes', 'notes') || g('Status update', 'statusUpdate'));
+    up('Visit Status', g('Visit Status', 'visitStatus'));
+    up('Current Stage', g('Current Stage', 'stage'));
+    up('Next Action', g('Next Action', 'next'));
+    up('Visit Date', g('Visit Date', 'visitDate'));
+    up('Assigned Visitor', g('Assigned Visitor', 'visitor'));
+    U.set('Last Contact Date', today_());
+    U.set('Updated By', 'Apps Script'); U.set('Last Updated Date', today_());
+    U.flush(); SpreadsheetApp.flush();
+    return { ok: true, updated: true, id: dup.id, fields: updated };
+  }
   var row = 0;
   const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
   for (var i = 0; i < addrs.length; i++) { if (String(addrs[i][0]).trim() === '') { row = CFG.FIRST_DATA_ROW + i; break; } }
@@ -1419,11 +1434,11 @@ function testIntake() {
   var res = webIntake_(sample);
   Logger.log('INTAKE RESULT: ' + JSON.stringify(res));
   var res2 = webIntake_(sample);
-  Logger.log('DEDUPE CHECK (should say duplicate:true): ' + JSON.stringify(res2));
+  Logger.log('UPSERT CHECK (should say updated:true): ' + JSON.stringify(res2));
   if (res.ok && res.created) { var rn = findRowById_(res.id); if (rn) clearRecordRow_(dataSheet_(), rn); }
   SpreadsheetApp.getActive().toast(
     'Intake test: ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · created ' + (res.id || '-') +
-    ' · calendar: ' + (res.calendar || '-') + ' · dedupe: ' + (res2.duplicate ? 'OK' : 'FAILED') +
+    ' · calendar: ' + (res.calendar || '-') + ' · upsert: ' + ((res2.updated||res2.duplicate) ? 'OK' : 'FAILED') +
     ' · test row cleaned up.', 'testIntake', 12);
 }
 
