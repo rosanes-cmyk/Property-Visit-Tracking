@@ -201,7 +201,7 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
 </div>
 <div class="subbar"><div class="inner">
   <div class="seg" role="tablist">
-    <button class="on" data-v="board">Board</button><button data-v="kpi">KPIs</button><button data-v="data">Data</button><button data-v="reports">Reports</button>
+    <button class="on" data-v="board">Board</button><button data-v="kpi">KPIs</button><button data-v="data">Data</button><button data-v="reports">Reports</button><button data-v="trash">🗑 Trash</button>
   </div>
   <div class="ribbon" id="ribbon"></div>
 </div></div>
@@ -290,7 +290,7 @@ function openDetail(id,edit){var r=RECS.filter(function(x){return x.id===id;})[0
   host.querySelector('[data-x]').onclick=close;
   if(!edit){
     host.querySelector('[data-edit]').onclick=function(){close();openDetail(id,true);};
-    host.querySelector('[data-del]').onclick=function(){if(window.confirm('Delete this record permanently? It will be cleared from the sheet.')){toast('Deleting…');runAction('deleteRecord',id,{},close);}};
+    host.querySelector('[data-del]').onclick=function(){if(window.confirm('Move this record to Trash? You can restore it anytime from the 🗑 Trash tab.')){toast('Moving to Trash…');runAction('deleteRecord',id,{},close);}};
   } else {
     host.querySelector('[data-save]').onclick=function(){var params={};host.querySelectorAll('[data-h]').forEach(function(el){params[el.getAttribute('data-h')]=el.value;});toast('Saving…');runAction('updateRecord',id,params,close);};
   }
@@ -513,8 +513,8 @@ function ribbon(live){
 function draw(){
   RECS.forEach(compute); var live=RECS;
   ribbon(live);
-  document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports')?'none':'block';
-  if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else renderData(live);
+  document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports'||VIEW==='trash')?'none':'block';
+  if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else if(VIEW==='trash')renderTrash(); else renderData(live);
 }
 function setView(v){VIEW=v;PAGE={};DPAGE=0;document.querySelectorAll('.seg button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v);});draw();window.scrollTo(0,0);}
 function setFilter(f){FILTER=f;PAGE={};DPAGE=0;document.querySelectorAll('.chip[data-f]').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-f')===f);});draw();}
@@ -542,14 +542,14 @@ function applyAction(act,r,v){
 function openAction(act,id){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;var spec=AF[act];
   function fire(v){var pmap={recordOfferSent:{amount:v.offer,date:v.offerSent},sellerCounter:{amount:v.counter,result:v.lastResult},contractSent:{date:v.contractSent},contractSigned:{date:v.contractSigned},logContact:{result:v.lastResult,nextAction:v.next,due:v.due},nurture:{due:v.due,nextAction:v.next},setNextAction:{nextAction:v.next,due:v.due,owner:v.owner},visitCompleted:{}};toast('Saving…');runAction(act,id,pmap[act]||{});}
   if(!spec.f.length){fire({});return;}
-  modal(spec.t+' — '+r.seller,spec.f,fire);}
+  modal(spec.t+' — '+r.seller,spec.f,fire,null,{next:suggestNext(r.stage)});}
 function field(f,val){var k=f[0],label=f[1],type=f[2],req=f[3],inp;
   if(type==='owner')inp='<select data-k="'+k+'"><option value="">(keep current)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select>';
   else if(type==='nextaction')inp='<select data-k="'+k+'" data-na="1"><option value="">— choose an action —</option>'+NEXT_ACTIONS.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'<option value="__custom__">✍️ Type a custom action…</option></select><input data-k="'+k+'__custom" placeholder="Type the next action" style="display:none;margin-top:8px">';
   else inp='<input data-k="'+k+'" type="'+(type==='number'?'number':type==='date'?'date':'text')+'" value="'+esc(val||'')+'">';
   return '<div class="field"><label>'+esc(label)+(req?' *':'')+'</label>'+inp+'</div>';}
-function modal(title,fields,onSave,cap){var host=document.createElement('div');host.className='modal-bg';var today=todayISO();
-  host.innerHTML='<div class="modal"><h3>'+esc(title)+'</h3>'+(cap?'<p class="cap">'+esc(cap)+'</p>':'')+fields.map(function(f){return field(f,f[2]==='date'?today:'');}).join('')+'<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
+function modal(title,fields,onSave,cap,defaults){var host=document.createElement('div');host.className='modal-bg';var today=todayISO();defaults=defaults||{};
+  host.innerHTML='<div class="modal"><h3>'+esc(title)+'</h3>'+(cap?'<p class="cap">'+esc(cap)+'</p>':'')+fields.map(function(f){var dv=(defaults[f[0]]!=null&&defaults[f[0]]!=='')?defaults[f[0]]:(f[2]==='date'?today:'');return field(f,dv);}).join('')+'<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
   host.querySelectorAll('select[data-na]').forEach(function(sel){var c=host.querySelector('[data-k="'+sel.getAttribute('data-k')+'__custom"]');sel.onchange=function(){if(sel.value==='__custom__'){c.style.display='block';c.focus();}else{c.style.display='none';}};});
@@ -572,7 +572,19 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
 
 function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
-function onData(d){RECS=(d.records||[]).map(hydrate);if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onData(d){RECS=(d.records||[]).map(hydrate);TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+var TRASH=[];
+function renderTrash(){
+  var h='<div class="sec"><h2>Trash — deleted records</h2><span class="n">'+TRASH.length+'</span><span class="rule"></span></div>';
+  h+='<p class="dnote" style="margin:0 2px 10px">Deleted records are kept here (and in the sheet’s Trash tab). Click Restore to bring one back to the board.</p>';
+  if(!TRASH.length){h+='<div class="empty">Trash is empty.</div>';document.getElementById('wrap').innerHTML=h;return;}
+  h+='<div class="tablewrap"><table><colgroup><col style="width:13%"><col style="width:20%"><col style="width:27%"><col style="width:15%"><col style="width:13%"><col style="width:12%"></colgroup><thead><tr><th>ID</th><th>Seller</th><th>Address</th><th>Stage</th><th>Deleted</th><th></th></tr></thead><tbody>';
+  TRASH.forEach(function(t){h+='<tr><td class="num">'+esc(t.id)+'</td><td><b>'+esc(t.seller||'—')+'</b></td><td class="addr">'+esc(t.address||'—')+'</td><td>'+esc(t.stage||'—')+'</td><td class="num">'+esc(t.deletedDate||'')+'<div class="rsub">'+esc(t.deletedBy||'')+'</div></td><td><button class="btn2 primary" data-restore="'+t.trashRow+'">↩ Restore</button></td></tr>';});
+  h+='</tbody></table></div>';
+  var wrap=document.getElementById('wrap');wrap.innerHTML=h;
+  wrap.querySelectorAll('[data-restore]').forEach(function(b){b.onclick=function(){toast('Restoring…');runAction('restoreRecord',null,{trashRow:+b.getAttribute('data-restore')});};});
+}
+function suggestNext(stage){return {'Visit Scheduled':'Conduct scheduled visit & log outcome','Visit Completed — Needs Review':'Decide: make offer or pass','Offer Sent':'Follow up on sent offer','Active Negotiation':'Decide counter response','Verbal Agreement':'Prepare & send contract','Contract Sent':'Confirm signature','Long-Term Nurture':'Nurture check-in call'}[stage]||'';}
 function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
 function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
 function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}

@@ -21,6 +21,7 @@ const CFG = {
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
+  TRASH_SHEET: 'Trash',             // soft-deleted records (restorable from the dashboard)
   // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
   API_TOKEN: '',

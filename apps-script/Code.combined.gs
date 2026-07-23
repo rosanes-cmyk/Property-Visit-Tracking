@@ -56,6 +56,7 @@ const CFG = {
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
+  TRASH_SHEET: 'Trash',             // soft-deleted records (restorable from the dashboard)
   // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
   API_TOKEN: '',
@@ -1177,7 +1178,7 @@ function webGetData() {
 
   const owners = DROPDOWNS['Assigned Owner'];
   var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
-  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, records: rows, userEmail: email, totalLive: rows.length };
+  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
@@ -1241,6 +1242,7 @@ function webAddRecord_(params) {
 function webAction(action, id, params) {
   params = params || {};
   if (action === 'addRecord') { try { return webAddRecord_(params); } catch (e) { return { ok: false, error: String(e) }; } }
+  if (action === 'restoreRecord') { try { var rr = restoreFromTrash_(Number(params.trashRow)); if (rr.ok) rr.data = webGetData(); return rr; } catch (e) { return { ok: false, error: String(e) }; } }
   const sh = dataSheet_();
   const rowNum = findRowById_(id);
   if (!rowNum) return { ok: false, error: 'Record not found: ' + id };
@@ -1292,7 +1294,7 @@ function webAction(action, id, params) {
         stamp_(R); R.flush(); break;
       }
       case 'deleteRecord':
-        clearRecordRow_(sh, rowNum); break;
+        softDelete_(sh, rowNum); break;
       default:
         return { ok: false, error: 'Unknown action: ' + action };
     }
@@ -1301,6 +1303,59 @@ function webAction(action, id, params) {
   } catch (e) {
     return { ok: false, error: String(e) };
   }
+}
+
+/* ---------------- Trash: soft delete + restore ---------------- */
+function trashSheet_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(CFG.TRASH_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(CFG.TRASH_SHEET);
+    sh.setTabColor('#9aa0a6');
+    sh.getRange(1, 1, 1, HEADERS.length + 2).setValues([['Deleted Date', 'Deleted By'].concat(HEADERS)])
+      .setFontWeight('bold').setBackground('#eeeeee');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function softDelete_(sh, rowNum) {
+  var vals = sh.getRange(rowNum, 1, 1, HEADERS.length).getValues()[0];
+  if (!vals[col('Property Address') - 1]) return;
+  var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+  trashSheet_().appendRow([new Date(), email].concat(vals));
+  clearRecordRow_(sh, rowNum);
+}
+function restoreFromTrash_(trashRow) {
+  var t = trashSheet_();
+  if (!trashRow || trashRow < 2 || trashRow > t.getLastRow()) return { ok: false, error: 'Trash entry not found' };
+  var row = t.getRange(trashRow, 3, 1, HEADERS.length).getValues()[0];
+  var sh = dataSheet_();
+  ensureRows_(sh, CFG.MAX_ROWS);
+  var addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
+  var dest = 0;
+  for (var i = 0; i < addrs.length; i++) { if (String(addrs[i][0]).trim() === '') { dest = CFG.FIRST_DATA_ROW + i; break; } }
+  if (!dest) return { ok: false, error: 'No empty rows to restore into' };
+  var R = new RowAccessor_(sh, dest);
+  HEADERS.forEach(function(h, j){ if (COMPUTED_HEADERS.indexOf(h) < 0 && row[j] !== '' && row[j] != null) R.set(h, row[j]); });
+  R.flush();
+  t.deleteRow(trashRow);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+function trashList_() {
+  var t = trashSheet_();
+  var last = t.getLastRow();
+  var out = [];
+  if (last >= 2) {
+    var vals = t.getRange(2, 1, last - 1, HEADERS.length + 2).getValues();
+    var pi = col('Property ID') + 1, si = col('Seller Name') + 1, ai = col('Property Address') + 1, ci = col('Current Stage') + 1;
+    vals.forEach(function(v, i){
+      if (!v[ai]) return;
+      out.push({ trashRow: 2 + i, deletedDate: fmt_(v[0]), deletedBy: v[1] || '',
+                 id: v[pi] || '', seller: v[si] || '', address: v[ai] || '', stage: v[ci] || '' });
+    });
+  }
+  return out;
 }
 
 /* ---------------- the dashboard page (self-contained HTML) ---------------- */
