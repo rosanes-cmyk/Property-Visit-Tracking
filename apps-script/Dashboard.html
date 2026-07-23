@@ -1,0 +1,542 @@
+<title>Twin Visit Logger</title>
+<style>
+/* Single rich near-black theme with vibrant, lively accents (black-only) */
+:root{
+  --bg:#05070c; --surface:#0f141e; --surface-2:#151b28; --border:#212b3b; --border-2:#303d52;
+  --ink:#f1f5fc; --muted:#9aa8bd; --faint:#63748c;
+  --brand:#4f8cff; --brand-2:#6ea6ff; --brand-soft:#12203c; --on-brand:#04070d;
+  --good:#22e08a; --good-bg:#08281c; --warn:#ffb020; --warn-bg:#2b2008; --crit:#ff4d63; --crit-bg:#2c0f16;
+  --r:14px; --r-sm:10px; --r-xs:8px;
+  --sh:0 1px 2px rgba(0,0,0,.5),0 2px 12px rgba(0,0,0,.4); --sh-lift:0 10px 34px rgba(0,0,0,.6);
+  --glow:0 0 22px rgba(79,140,255,.30);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;background-image:radial-gradient(900px 380px at 78% -8%,rgba(79,140,255,.10),transparent 70%)}
+::selection{background:rgba(79,140,255,.28)}
+*::-webkit-scrollbar{width:12px;height:12px}
+*::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:8px;border:3px solid var(--bg)}
+*::-webkit-scrollbar-thumb:hover{background:var(--brand)}
+.live{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--good);background:var(--good-bg);border:1px solid rgba(34,224,138,.25);padding:4px 10px;border-radius:999px}
+.live .dot{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good)}
+@media (prefers-reduced-motion:no-preference){.live .dot{animation:pulse 1.8s ease-in-out infinite}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.num{font-variant-numeric:tabular-nums}
+.appbar{background:var(--surface);color:var(--ink);padding:11px 22px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:20;border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:11px} .brand .logo{font-size:19px;width:34px;height:34px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--brand-2));border-radius:10px;box-shadow:var(--glow)} .brand h1{margin:0;font-size:16px;font-weight:750;letter-spacing:.2px} .brand .env{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--brand-2);background:var(--brand-soft);border:1px solid var(--border);padding:3px 9px;border-radius:999px}
+.appbar .right{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted)}
+.appbar button{background:var(--surface-2);color:var(--ink);border:1px solid var(--border-2);border-radius:8px;padding:7px 12px;cursor:pointer;font:inherit;font-weight:600}
+.appbar button:hover{border-color:var(--brand)}
+.subbar{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:47px;z-index:19}
+.subbar .inner{max-width:1360px;margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px}
+.seg button{border:none;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:13px;padding:7px 17px;border-radius:999px;cursor:pointer}
+.seg button.on{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;box-shadow:var(--glow)}
+.ribbon{display:flex;gap:9px;flex-wrap:wrap;margin-left:auto}
+.rchip{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 12px;cursor:pointer;transition:border-color .15s,transform .15s}
+.rchip:hover{border-color:var(--brand);transform:translateY(-1px)}
+.rchip .rv{font-size:17px;font-weight:750;line-height:1} .rchip .rl{font-size:11px;color:var(--muted);line-height:1.1}
+.rchip.crit .rv{color:var(--crit)} .rchip.warn .rv{color:var(--warn)} .rchip.brand .rv{color:var(--brand-2)}
+.filters{background:var(--surface-2);border-bottom:1px solid var(--border);position:sticky;top:95px;z-index:18}
+.filters .inner{max-width:1360px;margin:0 auto;padding:9px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{border:1px solid var(--border-2);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 13px;font-size:12.5px;cursor:pointer}
+.chip.on{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-color:transparent;box-shadow:var(--glow)}
+select,input,textarea{padding:8px 10px;border:1px solid var(--border-2);border-radius:var(--r-xs);font:inherit;background:var(--surface);color:var(--ink)}
+:focus-visible{outline:2px solid var(--brand-2);outline-offset:1px}
+.wrap{max-width:1360px;margin:0 auto;padding:16px 20px 96px}
+.sec{display:flex;align-items:center;gap:10px;margin:22px 0 10px}
+.sec h2{margin:0;font-size:12.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+.sec .n{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-radius:999px;padding:1px 10px;font-size:11px;font-weight:700;box-shadow:var(--glow)}
+.sec .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--border-2);border-radius:var(--r);padding:14px 15px;box-shadow:var(--sh);transition:box-shadow .18s,transform .18s,border-color .18s}
+.card:hover{box-shadow:var(--sh-lift);transform:translateY(-2px)}
+.card.crit{border-left-color:var(--crit)} .card.warn{border-left-color:var(--warn)} .card.good{border-left-color:var(--good)}
+.card.crit:hover{box-shadow:var(--sh-lift),0 0 20px rgba(255,77,99,.18)}
+.card .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.card .seller{font-weight:700;font-size:15px;letter-spacing:-.1px} .card .addr{font-size:12px;color:var(--muted);margin-top:2px}
+.chipstage{font-size:11px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;background:var(--surface-2);border:1px solid var(--border-2);color:var(--muted);height:fit-content}
+.meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:11px;font-size:12.5px;color:var(--muted);align-items:center}
+.meta b{color:var(--ink);font-weight:600}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;border-radius:6px;padding:2px 8px}
+.badge.crit{background:var(--crit-bg);color:var(--crit)} .badge.warn{background:var(--warn-bg);color:var(--warn)} .badge.good{background:var(--good-bg);color:var(--good)}
+.na{font-size:13px;margin-top:11px;padding:8px 10px;background:var(--surface-2);border-radius:var(--r-xs);display:flex;gap:7px}
+.na .arrow{color:var(--brand-2);font-weight:700}
+.result{font-size:12px;color:var(--muted);margin-top:8px;display:flex;gap:6px}
+.result span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.flag{font-size:12px;color:var(--crit);background:var(--crit-bg);border-radius:var(--r-xs);padding:6px 9px;margin-top:9px}
+.acts{margin-top:12px;display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.btn2{font-size:12px;border:1px solid var(--border-2);color:var(--ink);background:var(--surface);border-radius:var(--r-xs);padding:6px 11px;cursor:pointer;font-weight:600}
+.btn2.primary{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-color:transparent;box-shadow:var(--glow)}
+.btn2:hover{border-color:var(--brand)} .btn2.primary:hover{filter:brightness(1.06)}
+a.rei{margin-left:auto;font-size:12px;color:var(--brand-2);text-decoration:none;font-weight:600}
+.empty{color:var(--faint);font-size:13px;padding:14px;text-align:center;background:var(--surface);border:1px dashed var(--border-2);border-radius:var(--r)}
+.pager{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:12px 2px 4px}
+.pinfo{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pbtns{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.pbtn{min-width:30px;height:30px;padding:0 9px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums}
+.pbtn.dot{padding:0}
+.pbtn:hover:not(:disabled):not(.on){border-color:var(--brand);color:var(--brand)}
+.pbtn.on{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+.pbtn:disabled{opacity:.4;cursor:default}
+.pgap{color:var(--faint);padding:0 2px;font-size:12.5px}
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 17px;box-shadow:var(--sh);position:relative;overflow:hidden;transition:transform .18s,box-shadow .18s}
+.kpi:hover{transform:translateY(-2px);box-shadow:var(--sh-lift)}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--brand)}
+.kpi.crit::before{background:var(--crit)} .kpi.warn::before{background:var(--warn)} .kpi.good::before{background:var(--good)}
+.kpi .k-ico{font-size:16px;opacity:.9} .kpi .k-v{font-size:34px;font-weight:800;letter-spacing:-1.2px;line-height:1.05;margin-top:4px;background:linear-gradient(135deg,var(--ink),var(--muted));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent} .kpi .k-l{font-size:12.5px;color:var(--ink);font-weight:600;margin-top:6px} .kpi .k-s{font-size:11px;color:var(--faint);margin-top:2px}
+.kpi.crit .k-v{background:linear-gradient(135deg,var(--crit),#ff8a97);-webkit-background-clip:text;background-clip:text}
+.kpi.warn .k-v{background:linear-gradient(135deg,var(--warn),#ffd27a);-webkit-background-clip:text;background-clip:text}
+.kpi.good .k-v{background:linear-gradient(135deg,var(--good),#7cf3bf);-webkit-background-clip:text;background-clip:text}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:17px 18px 8px;box-shadow:var(--sh)}
+.panel h3{margin:0 0 15px;font-size:12.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.brow{display:grid;grid-template-columns:150px 1fr 40px;align-items:center;gap:12px;margin-bottom:11px;font-size:12.5px}
+.brow .lab{color:var(--ink);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track{background:var(--surface-2);border-radius:6px;height:16px;overflow:hidden;border:1px solid var(--border)}
+.fill{height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-2));border-radius:6px;min-width:3px}
+.brow .val{text-align:right;color:var(--muted);font-weight:700}
+/* Data */
+.datahead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px}
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);box-shadow:var(--sh)}
+.tablewrap.scroll{max-height:calc(100vh - 230px);overflow-y:auto}
+.tablewrap.scroll{scrollbar-width:thin;scrollbar-color:var(--border-2) transparent}
+.tablewrap.scroll::-webkit-scrollbar{width:12px}
+.tablewrap.scroll::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:8px;border:3px solid var(--surface)}
+.tablewrap.scroll::-webkit-scrollbar-thumb:hover{background:var(--brand)}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;table-layout:fixed}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top;overflow:hidden;text-overflow:ellipsis}
+th{background:var(--surface-2);font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);cursor:pointer;position:sticky;top:0;font-weight:700;white-space:nowrap}
+th:hover{color:var(--ink)} tbody tr:hover{background:var(--surface-2)}
+td{white-space:normal;word-break:break-word}
+td.addr{color:var(--muted)}
+tbody tr[data-detail]{cursor:pointer}
+.slink{color:inherit;text-decoration:none;border-bottom:1px solid rgba(110,166,255,.45)}
+.slink:hover{color:var(--brand-2);border-bottom-color:var(--brand-2)}
+.slink .ext{font-size:.82em;color:var(--brand-2);opacity:.8}
+/* column widths so the 8-col table fills any desktop with no ugly h-scroll */
+col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{width:12%} col.c-lead{width:15%} col.c-stage{width:14%} col.c-owner{width:8%} col.c-due{width:9%} col.c-overdue{width:8%} col.c-dq{width:8%}
+.dnote{font-size:12px;color:var(--muted);flex:1}
+.card .top{cursor:pointer;border-radius:8px;margin:-4px;padding:4px;transition:background .12s}
+.card .top:hover{background:var(--surface-2)}
+.dq{font-size:11px;font-weight:600;border-radius:6px;padding:2px 9px} .dq.OK{background:var(--good-bg);color:var(--good)} .dq.Incomplete{background:var(--warn-bg);color:var(--warn)} .dq.Exception{background:var(--crit-bg);color:var(--crit)}
+.fab{position:fixed;right:22px;bottom:22px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border:none;border-radius:999px;padding:15px 22px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:var(--sh-lift),var(--glow);z-index:15}
+.modal-bg{position:fixed;inset:0;background:rgba(8,16,26,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:16px;z-index:30}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:480px;max-height:90vh;overflow:auto;box-shadow:var(--sh-lift)}
+.modal h3{margin:0 0 4px;font-size:17px} .modal .cap{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px} .field label{font-size:12px;color:var(--muted);font-weight:600} .row2{display:flex;gap:11px}.row2>*{flex:1}
+.modal .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
+.modal.detail{max-width:760px;padding:0}
+.detail .dhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:linear-gradient(135deg,var(--brand-soft),var(--surface));z-index:1;border-radius:16px 16px 0 0}
+.detail .d-seller{font-size:18px;font-weight:700} .detail .d-addr{color:var(--muted);font-size:13px;margin-top:2px}
+.detail .dbody{padding:8px 24px 4px}
+.dl-grp{margin:16px 0} .dl-grp h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--brand);font-weight:700}
+.dl-grp dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.dl-row{background:var(--surface);display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 12px;font-size:12.5px}
+.dl-row dt{color:var(--muted);font-weight:600} .dl-row dd{margin:0;color:var(--ink);word-break:break-word}
+.dl-row.empty dd{color:var(--faint)}
+.detail .foot{padding:14px 24px;border-top:1px solid var(--border);position:sticky;bottom:0;background:var(--surface);border-radius:0 0 16px 16px}
+@media(max-width:620px){.dl-grp dl{grid-template-columns:1fr}.dl-row{grid-template-columns:130px 1fr}}
+.btn{border:1px solid var(--border-2);background:var(--surface);color:var(--ink);border-radius:var(--r-xs);padding:10px 16px;cursor:pointer;font:inherit;font-weight:600}
+.btn.p{background:var(--brand);color:var(--on-brand);border-color:var(--brand)} .btn:disabled{opacity:.5;cursor:not-allowed}
+#toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:40;box-shadow:var(--sh-lift)}
+@media (prefers-reduced-motion:no-preference){#toast{animation:pop .2s ease}.card,.kpi{transition:box-shadow .18s,transform .18s}.grid,.kpis,.panels,.tablewrap{animation:rise .28s ease both}.modal{animation:rise .2s ease both}}
+@keyframes pop{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@media(max-width:640px){.ribbon{width:100%;margin-left:0;order:3}.subbar .inner{gap:11px}}
+/* Reports */
+.repctrl{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.seg.small button{padding:6px 13px;font-size:12.5px}
+.report{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:26px 30px;box-shadow:var(--sh);max-width:900px;margin:0 auto}
+.rhead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:2px solid var(--brand);padding-bottom:14px;margin-bottom:8px}
+.rlead{display:flex;align-items:center;gap:12px}
+.rmark{width:40px;height:40px;display:grid;place-items:center;font-size:22px;background:linear-gradient(135deg,var(--brand),var(--brand-2));border-radius:11px}
+.rco{font-size:19px;font-weight:800;letter-spacing:-.3px} .rtag{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.2px;text-transform:uppercase}
+.rmeta{text-align:right} .rtitle{font-size:16px;font-weight:800;letter-spacing:-.2px} .rdate{font-size:13px;font-weight:700;margin-top:2px} .rsmall{font-size:11px;color:var(--muted);font-weight:500;margin-top:2px}
+.rfoot{display:flex;justify-content:space-between;gap:12px;margin-top:26px;padding-top:12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--faint)}
+.rtiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:18px 0 6px}
+.rtile{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--surface-2)}
+.rtv{font-size:26px;font-weight:800;letter-spacing:-1px} .rtl{font-size:11.5px;color:var(--muted);margin-top:3px}
+.rsec{margin-top:22px;break-inside:avoid} .rsec h3{margin:0 0 2px;font-size:14px;display:flex;align-items:center;gap:8px}
+.rcount{background:var(--brand);color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 9px}
+.rrule{margin:0 0 8px;font-size:11.5px;color:var(--muted)}
+.rtab{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.rtab col.cprop{width:26%} .rtab col.cstage{width:15%} .rtab col.cnext{width:22%} .rtab col.cowner{width:9%} .rtab col.cdue{width:11%} .rtab col.cover{width:8%} .rtab col.cblk{width:9%}
+.rtab th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1.5px solid var(--border-2);padding:6px 9px}
+.rtab td{border-bottom:1px solid var(--border);padding:6px 9px;vertical-align:top;line-height:1.3;overflow:hidden;text-overflow:ellipsis}
+.rtab tbody tr:nth-child(even){background:var(--surface-2)}
+.rsub{font-size:10.5px;color:var(--muted);line-height:1.25;margin-top:1px} .rover{color:var(--crit)}
+.rnone{font-size:12px;color:var(--faint);padding:4px 2px;margin:0}
+.rmore{font-size:11px;color:var(--muted);margin:6px 2px 0;font-style:italic}
+@media print{
+  :root{--bg:#fff;--surface:#fff;--surface-2:#f4f6fb;--ink:#0b1016;--muted:#556;--faint:#889;--border:#d5dbe6;--brand:#1746a6;--brand-2:#1746a6;--glow:none}
+  body{background:#fff;background-image:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .rmark,.rcount,.rtile,.rhead{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .appbar,.subbar,.filters,.fab,.repctrl,#toast{display:none !important}
+  .wrap{padding:0;max-width:none}
+  .report{border:none;box-shadow:none;max-width:none;padding:0;animation:none}
+  .rsec,.rtile,tr{break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+}
+</style>
+
+<div class="appbar">
+  <div class="brand"><span class="logo">🏠</span><h1>Twin Visit Logger</h1><span class="env" id="env">Live · saving to the sheet</span></div>
+  <div class="right"><span class="live"><span class="dot"></span>Live board</span><span id="who">cherry@equitytrack.org</span></div>
+</div>
+<div class="subbar"><div class="inner">
+  <div class="seg" role="tablist">
+    <button class="on" data-v="board">Board</button><button data-v="kpi">KPIs</button><button data-v="data">Data</button><button data-v="reports">Reports</button>
+  </div>
+  <div class="ribbon" id="ribbon"></div>
+</div></div>
+<div class="filters" id="filters"><div class="inner">
+  <span class="chip on" data-f="all">All</span>
+  <span class="chip" data-f="today">Due Today</span>
+  <span class="chip" data-f="overdue">Overdue</span>
+  <span class="chip" data-f="stalled">Stalled</span>
+  <span class="chip" data-f="norei">REI link missing</span>
+  <select id="owner"><option value="">All owners</option></select>
+  <input id="search" placeholder="Search seller or address…" style="flex:1;min-width:180px">
+</div></div>
+<div class="wrap" id="wrap"></div>
+<button class="fab" id="add">＋ Add property</button>
+<div id="toast" style="display:none"></div>
+
+<script>
+"use strict";
+var TODAY=new Date(); TODAY.setHours(0,0,0,0);
+var OWNERS=['Jonathan','Kyle','Cherry','Juan','JM'];
+var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
+var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
+var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
+
+var RECS=[];
+
+function dayb(a,b){return Math.round((b-a)/86400000);}
+function parse(d){return d?new Date(d+'T00:00:00'):null;}
+function compute(r){
+  r.daysOverdue=Number(r.daysOverdue)||0;
+  if(r.dq==null||r.dq==='')r.dq='OK';
+  r.exception=r.exception||''; r.missing=r.missing||'';
+  return r;
+}
+function sev(r){if(r.daysOverdue>0||r.dq==='Exception')return 'crit';if(r.stalled||r.dq==='Incomplete')return 'warn';if(r.stage==='Contract Signed')return 'good';return '';}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function money(n){return n?'$'+Number(n).toLocaleString():'';}
+function sellerLink(r,txt){var t=esc(txt||r.seller||'(no name)');return r.rei?('<a class="slink" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">'+t+' <span class="ext">↗</span></a>'):t;}
+/* Full 61-column sheet schema, grouped. [shortKey, "Sheet Column Label"] — keys we don't carry in preview data render as "—". */
+var SCHEMA=[
+ ['Property & lead',[['id','Property ID'],['address','Property Address'],['normAddr','Normalized Address'],['seller','Seller Name'],['phone','Phone'],['email','Email'],['lead','Lead Source'],['rei','REI BlackBook Link']]],
+ ['Visit',[['visitDate','Visit Date'],['visitTime','Visit Time'],['visitStatus','Visit Status'],['visitor','Assigned Visitor'],['visitNotes','Visit Notes'],['condition','Property Condition'],['occupancy','Occupancy Status'],['photos','Photos Link'],['video','Video Link'],['file','File Link']]],
+ ['Seller details',[['motivation','Seller Motivation'],['timeline','Seller Timeline'],['asking','Asking Price'],['priceExp','Price Expectation'],['concerns','Seller Concerns']]],
+ ['Offer',[['offer','Approved Offer Amount'],['offerStatus','Offer Status'],['offerPrep','Offer Prepared Date'],['offerSent','Offer Sent Date'],['offerConfirm','Offer Received Confirmation'],['counter','Counteroffer Amount']]],
+ ['Follow-up',[['lastContact','Last Contact Date'],['lastResult','Last Contact Result'],['next','Next Action'],['due','Next Action Due Date'],['owner','Assigned Owner'],['blocker','Blocker'],['daysSince','Days Since Last Activity'],['daysOverdue','Days Overdue'],['stalled','Stalled Status']]],
+ ['Gift',[['giftStatus','Gift Status'],['giftReason','Gift Recommendation Reason'],['giftOwner','Gift Approval Owner'],['giftSent','Gift Sent Date'],['giftApprovedBy','Gift Approved By'],['giftApprovalDate','Gift Approval Date']]],
+ ['Stage & close',[['stage','Current Stage'],['disposition','Final Disposition'],['closeoutReason','Closeout Reason'],['contractSent','Contract Sent Date'],['contractSigned','Contract Signed Date'],['handoff','Transaction Handoff Status']]],
+ ['System / data quality',[['missing','Missing Required Fields'],['dupFlag','Duplicate Address Flag'],['priority','Opportunity Priority'],['created','Created Date'],['lastUpdated','Last Updated Date'],['updatedBy','Updated By'],['source','Source'],['dq','Data Quality Status'],['exceptionReason','Exception Reason'],['reiUpdateReq','REI Update Required'],['reiUpdateDone','REI Update Completed']]]
+];
+function valOf(r,k){var v=r[k];
+  if(k==='stalled')return r.stalled?'Yes':'No';
+  if(k==='daysOverdue')return r.daysOverdue>0?r.daysOverdue+' days':'0';
+  if(k==='daysSince')return (r.daysSince===''||r.daysSince==null)?'':r.daysSince+' days';
+  if(k==='dq')return r.dq||'';
+  if(k==='offer'||k==='counter'||k==='asking')return v?money(v):'';
+  return (v==null||v==='')?'':String(v);}
+function openDetail(id){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;
+  var host=document.createElement('div');host.className='modal-bg';
+  var body=SCHEMA.map(function(g){
+    var rows=g[1].map(function(f){var v=(r.full&&r.full[f[1]]!=null&&r.full[f[1]]!=='')?String(r.full[f[1]]):valOf(r,f[0]);var link=(f[0]==='rei'&&v)?'<a href="'+esc(v)+'" target="_blank" rel="noreferrer">Open REI ↗</a>':esc(v||'—');
+      return '<div class="dl-row'+(v?'':' empty')+'"><dt>'+esc(f[1])+'</dt><dd>'+link+'</dd></div>';}).join('');
+    return '<div class="dl-grp"><h4>'+esc(g[0])+'</h4><dl>'+rows+'</dl></div>';}).join('');
+  host.innerHTML='<div class="modal detail"><div class="dhead"><div><div class="d-seller">'+sellerLink(r)+'</div><div class="d-addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div><div class="dbody">'+body+'</div><div class="foot"><button class="btn p" data-x>Close</button></div></div>';
+  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;}
+function todayISO(){return '2026-07-23';}
+
+var SECTIONS=[
+  ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
+  ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
+  ['Offer Sent — Follow-Up Due',function(r){return r.stage==='Offer Sent';}],
+  ['Stalled Deals',function(r){return r.stalled;}],
+  ['Overdue Tasks',function(r){return r.daysOverdue>0;}],
+  ['Negotiation Decisions',function(r){return r.stage==='Active Negotiation';}],
+  ['Contract Handoffs',function(r){return r.stage==='Contract Signed'&&r.handoff!=='JM Confirmed';}],
+  ['Gift Review',function(r){return r.gift==='Recommended';}],
+  ['Revival Opportunities',function(r){return r.disposition==='Lost'&&r.daysSince!==''&&r.daysSince>=45;}],
+  ['Exceptions Requiring Review',function(r){return r.dq==='Incomplete'||r.dq==='Exception';}]
+];
+var VIEW='board',FILTER='all';
+var PSIZE=6,PAGE={};
+function keep(r){var own=document.getElementById('owner').value,q=document.getElementById('search').value.trim().toLowerCase();
+  if(own&&r.owner!==own)return false; if(q&&(r.seller+' '+r.address).toLowerCase().indexOf(q)<0)return false;
+  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; return true;}
+function actionsFor(r){var a=[];
+  if(r.visitStatus!=='Completed'&&r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
+  if(r.stage==='Visit Completed — Needs Review'){a.push(['recordOfferSent','Record offer sent',1]);a.push(['nurture','Move to nurture',0]);}
+  if(r.stage==='Offer Sent'){a.push(['logContact','Log follow-up',1]);a.push(['sellerCounter','Seller countered',0]);a.push(['contractSent','Contract sent',0]);}
+  if(r.stage==='Active Negotiation'){a.push(['logContact','Log follow-up',1]);a.push(['contractSent','Contract sent',0]);}
+  if(r.stage==='Verbal Agreement'||r.stage==='Contract Sent'){a.push(['contractSigned','Contract signed',1]);a.push(['logContact','Log follow-up',0]);}
+  a.push(['setNextAction','Set next action',0]); return a;}
+function cardHTML(r){
+  var over=r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d overdue</span>':'';
+  var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.id)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
+  h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
+  if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
+  if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
+  h+='</div>';
+  if(r.next)h+='<div class="na"><span class="arrow">➜</span><span>'+esc(r.next)+'</span></div>';
+  var note=r.lastResult||r.visitNotes; if(note)h+='<div class="result">🗒 <span>'+esc(note)+'</span></div>';
+  if(r.exception||r.missing)h+='<div class="flag">⚠ '+esc(r.exception||('Missing: '+r.missing))+'</div>';
+  h+='<div class="acts">';
+  actionsFor(r).forEach(function(a){h+='<button class="btn2'+(a[2]?' primary':'')+'" data-act="'+a[0]+'" data-id="'+esc(r.id)+'">'+a[1]+'</button>';});
+  h+='<button class="btn2" data-detail="'+esc(r.id)+'">🔎 Full record</button>';
+  if(r.rei)h+='<a class="rei" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">REI ↗</a>';
+  return h+'</div></div>';
+}
+function rowsFor(si,live){var s=SECTIONS[si];var rows=live.filter(s[1]).filter(keep);rows.sort(function(a,b){return b.daysOverdue-a.daysOverdue;});return rows;}
+function sectionInner(si,live){
+  var s=SECTIONS[si], rows=rowsFor(si,live);
+  var pages=Math.max(1,Math.ceil(rows.length/PSIZE)); var pg=Math.min(PAGE[si]||0,pages-1); if(pg<0)pg=0; PAGE[si]=pg;
+  var start=pg*PSIZE, shown=rows.slice(start,start+PSIZE);
+  var html='<div class="sec"><h2>'+esc(s[0])+'</h2><span class="n">'+rows.length+'</span><span class="rule"></span></div>';
+  if(!rows.length){return html+'<div class="empty">Nothing here right now.</div>';}
+  html+='<div class="grid">'+shown.map(cardHTML).join('')+'</div>';
+  if(pages>1){
+    html+='<div class="pager"><span class="pinfo">'+(start+1)+'–'+(start+shown.length)+' of '+rows.length+'</span>'
+      +'<div class="pbtns"><button class="pbtn" data-pg="'+si+'" data-to="'+(pg-1)+'"'+(pg===0?' disabled':'')+'>‹ Prev</button>';
+    html+=pageDots(pg,pages,si);
+    html+='<button class="pbtn" data-pg="'+si+'" data-to="'+(pg+1)+'"'+(pg>=pages-1?' disabled':'')+'>Next ›</button></div></div>';
+  }
+  return html;
+}
+/* Compact windowed page numbers: first · … · current±1 · … · last (≤ ~6 buttons). */
+function pageDots(pg,pages,si){
+  var out='',rad=1,lo=Math.max(0,pg-rad),hi=Math.min(pages-1,pg+rad);
+  function dot(p){return '<button class="pbtn dot'+(p===pg?' on':'')+'" data-pg="'+si+'" data-to="'+p+'">'+(p+1)+'</button>';}
+  if(lo>0){out+=dot(0); if(lo>1)out+='<span class="pgap">…</span>';}
+  for(var p=lo;p<=hi;p++)out+=dot(p);
+  if(hi<pages-1){if(hi<pages-2)out+='<span class="pgap">…</span>'; out+=dot(pages-1);}
+  return out;
+}
+function bindSection(el,si,live){
+  el.querySelectorAll('[data-act]').forEach(function(b){b.onclick=function(){openAction(b.getAttribute('data-act'),b.getAttribute('data-id'));};});
+  el.querySelectorAll('[data-detail]').forEach(function(b){b.onclick=function(e){e.stopPropagation();openDetail(b.getAttribute('data-detail'));};});
+  el.querySelectorAll('.slink').forEach(function(a){a.onclick=function(e){e.stopPropagation();};});
+  el.querySelectorAll('[data-pg]').forEach(function(b){b.onclick=function(){if(b.disabled)return;PAGE[si]=+b.getAttribute('data-to');el.innerHTML=sectionInner(si,live);bindSection(el,si,live);};});
+}
+function renderBoard(live){
+  var html='';
+  SECTIONS.forEach(function(s,si){var rows=rowsFor(si,live); if(!rows.length&&FILTER!=='all')return;
+    html+='<div class="secblock" id="sb_'+si+'">'+sectionInner(si,live)+'</div>';});
+  var wrap=document.getElementById('wrap'); wrap.innerHTML=html;
+  SECTIONS.forEach(function(s,si){var el=document.getElementById('sb_'+si); if(el)bindSection(el,si,live);});
+}
+function kpi(ico,v,l,s,cls){return '<div class="kpi '+(cls||'')+'"><div class="k-ico">'+ico+'</div><div class="k-v num">'+v+'</div><div class="k-l">'+l+'</div>'+(s?'<div class="k-s">'+s+'</div>':'')+'</div>';}
+function bars(title,pairs){var max=Math.max.apply(null,pairs.map(function(p){return p[1];}).concat([1]));
+  var h='<div class="panel"><h3>'+esc(title)+'</h3>';
+  pairs.forEach(function(p){var w=Math.round(p[1]/max*100);h+='<div class="brow"><div class="lab" title="'+esc(p[0])+'">'+esc(p[0])+'</div><div class="track"><div class="fill" style="width:'+w+'%"></div></div><div class="val num">'+p[1]+'</div></div>';});
+  return h+'</div>';}
+function renderKPI(live){
+  var c=function(f){return live.filter(f).length;};
+  var html='<div class="sec"><h2>Pipeline health</h2><span class="rule"></span></div><div class="kpis">';
+  html+=kpi('📇',c(function(r){return r.stage!=='Lost / Closed Out';}),'Active pipeline','not closed out','');
+  html+=kpi('📝',c(function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}),'Contracts possible','this week','good');
+  html+=kpi('✉️',c(function(r){return r.stage==='Offer Sent';}),'Offers to follow up','awaiting reply','');
+  html+=kpi('🔍',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need offer decision','review now','warn');
+  html+=kpi('⏰',c(function(r){return r.daysOverdue>0;}),'Overdue tasks','past due date','crit');
+  html+=kpi('🐌',c(function(r){return r.stalled;}),'Stalled deals','3+ business days','warn');
+  html+=kpi('⚠️',c(function(r){return r.dq==='Incomplete'||r.dq==='Exception';}),'Exceptions','need clean-up','crit');
+  html+=kpi('✅',c(function(r){return r.stage==='Contract Signed';}),'Signed / contracted','','good');
+  html+='</div>';
+  var byStage=STAGES.map(function(s){return [s,live.filter(function(r){return r.stage===s;}).length];}).filter(function(p){return p[1]>0;});
+  var sm={};live.forEach(function(r){var k=r.lead||'(none)';sm[k]=(sm[k]||0)+1;});
+  var bySrc=Object.keys(sm).map(function(k){return [k,sm[k]];}).sort(function(a,b){return b[1]-a[1];});
+  var vm={};live.forEach(function(r){var k=r.visitStatus||'(none)';vm[k]=(vm[k]||0)+1;});
+  var byVs=Object.keys(vm).map(function(k){return [k,vm[k]];}).sort(function(a,b){return b[1]-a[1];});
+  html+='<div class="sec"><h2>Roll-ups</h2><span class="rule"></span></div><div class="panels">'+bars('Pipeline by current stage',byStage)+bars('By lead source',bySrc)+bars('Visits by status',byVs)+'</div>';
+  document.getElementById('wrap').innerHTML=html;
+}
+var SORT={k:'id',dir:1};var DPAGE=0,DSIZE=10;
+function dataRows(live){return live.filter(keep).slice().sort(function(a,b){var x=a[SORT.k],y=b[SORT.k];x=x==null?'':x;y=y==null?'':y;if(SORT.k==='daysOverdue'||SORT.k==='offer'){x=+x||0;y=+y||0;}return (x>y?1:x<y?-1:0)*SORT.dir;});}
+var DATACOLS=[['id','Property ID'],['seller','Seller'],['address','Property Address'],['phone','Phone'],['lead','Lead Source'],['stage','Current Stage'],['owner','Owner'],['due','Due Date']];
+function renderData(live){
+  var cols=DATACOLS,rows=dataRows(live);
+  var h='<div class="datahead"><div class="sec" style="margin:6px 0"><h2>All records</h2><span class="n">'+rows.length+'</span></div><div class="dnote">Scroll the list ↓ · click any row to open the full record (all 61 columns)</div><button class="btn2" id="csv">⬇ Export CSV</button></div>';
+  h+='<div class="tablewrap scroll"><table><colgroup>'+cols.map(function(c){return '<col class="c-'+c[0]+'">';}).join('')+'</colgroup><thead><tr>';
+  cols.forEach(function(c){h+='<th data-k="'+c[0]+'">'+esc(c[1])+(SORT.k===c[0]?(SORT.dir>0?' ▲':' ▼'):'')+'</th>';}); h+='</tr></thead><tbody>';
+  rows.forEach(function(r){h+='<tr data-detail="'+esc(r.id)+'">'+cols.map(function(c){var k=c[0];
+    if(k==='id')return '<td class="num">'+esc(r.id)+(r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d</span>':'')+'</td>';
+    if(k==='seller')return '<td><b>'+sellerLink(r)+'</b></td>';
+    if(k==='address')return '<td class="addr">'+esc(r.address||'—')+'</td>';
+    if(k==='due')return '<td class="num">'+esc(r[k]||'—')+'</td>';
+    return '<td>'+esc(r[k]||'—')+'</td>';}).join('')+'</tr>';});
+  h+='</tbody></table></div>';
+  var wrap=document.getElementById('wrap');wrap.innerHTML=h;
+  wrap.querySelectorAll('th[data-k]').forEach(function(th){th.onclick=function(){var k=th.getAttribute('data-k');if(SORT.k===k)SORT.dir*=-1;else{SORT.k=k;SORT.dir=1;}draw();};});
+  wrap.querySelectorAll('tr[data-detail]').forEach(function(tr){tr.onclick=function(){openDetail(tr.getAttribute('data-detail'));};});
+  wrap.querySelectorAll('.slink').forEach(function(a){a.onclick=function(e){e.stopPropagation();};});
+  document.getElementById('csv').onclick=function(){exportCSV(rows,cols);};
+}
+function exportCSV(rows,cols){
+  var head=cols.map(function(c){return '"'+c[1]+'"';}).join(',');
+  var body=rows.map(function(r){return cols.map(function(c){var v=r[c[0]];v=v==null?'':String(v);return '"'+v.replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+  var blob=new Blob([head+'\n'+body],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='twin-visit-logger.csv';a.click();toast('CSV downloaded');
+}
+/* ---------- Reports (Daily + Monthly), print / save-as-PDF ---------- */
+var REPORTKIND='daily';
+var MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function longDate(d){return MONTHS[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();}
+var RLIM=8;
+function repTable(rows){
+  if(!rows.length)return '<p class="rnone">— none —</p>';
+  var shown=rows.slice(0,RLIM), extra=rows.length-shown.length;
+  var h='<table class="rtab"><colgroup><col class="cprop"><col class="cstage"><col class="cnext"><col class="cowner"><col class="cdue"><col class="cover"><col class="cblk"></colgroup><thead><tr><th>Property / Seller</th><th>Stage</th><th>Next action</th><th>Owner</th><th>Due</th><th>Overdue</th><th>Blocker</th></tr></thead><tbody>';
+  shown.forEach(function(r){h+='<tr><td><b>'+esc(r.seller||'—')+'</b><div class="rsub">'+esc(r.address||'')+'</div></td><td>'+esc(r.stage||'—')+'</td><td>'+esc(r.next||'—')+'</td><td>'+esc(r.owner||'—')+'</td><td class="num">'+esc(r.due||'—')+'</td><td class="num">'+(r.daysOverdue>0?('<b class="rover">'+r.daysOverdue+'d</b>'):'—')+'</td><td>'+esc(r.blocker||'—')+'</td></tr>';});
+  h+='</tbody></table>';
+  if(extra>0)h+='<p class="rmore">+ '+extra+' more — see the Board tab for the full list.</p>';
+  return h;
+}
+function repSection(title,rule,rows){return '<section class="rsec"><h3>'+esc(title)+' <span class="rcount">'+rows.length+'</span></h3><p class="rrule">'+esc(rule)+'</p>'+repTable(rows)+'</section>';}
+function repHead(title,dateStr,subtitle){
+  return '<header class="rhead">'
+    +'<div class="rlead"><div class="rmark">🏠</div><div><div class="rco">Twin Home Buyer</div><div class="rtag">Equity Track · Property Acquisitions</div></div></div>'
+    +'<div class="rmeta"><div class="rtitle">'+esc(title)+'</div><div class="rdate">'+esc(dateStr)+'</div><div class="rsmall">'+esc(subtitle)+'</div></div></header>';
+}
+function repFoot(){return '<footer class="rfoot"><span>Twin Visit Logger · Confidential — internal use only</span><span>Generated '+longDate(TODAY)+'</span></footer>';}
+function renderReports(live){
+  var kindDaily=REPORTKIND==='daily';
+  var ctrl='<div class="repctrl"><div class="seg small"><button class="'+(kindDaily?'on':'')+'" data-rk="daily">Daily report</button><button class="'+(kindDaily?'':'on')+'" data-rk="monthly">Monthly report</button></div>'
+    +'<button class="btn2 primary" id="print">🖨 Print / Save as PDF</button></div>';
+  var body;
+  if(kindDaily) body=dailyReport(live); else body=monthlyReport(live);
+  document.getElementById('wrap').innerHTML=ctrl+'<div class="report" id="report">'+body+'</div>';
+  document.querySelectorAll('[data-rk]').forEach(function(b){b.onclick=function(){REPORTKIND=b.getAttribute('data-rk');renderReports(live);};});
+  document.getElementById('print').onclick=function(){window.print();};
+}
+function dailyReport(live){
+  var f=function(fn){return live.filter(fn).sort(function(a,b){return b.daysOverdue-a.daysOverdue;});};
+  var head=repHead('Daily Opportunity Report',longDate(TODAY),'Read-only preview · '+live.length+' records');
+  var s='';
+  s+=repSection('Contracts Possible This Week','Seller engaged, offer active, realistic path to signature.',f(function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}));
+  s+=repSection('Visited — No Offer Decision','Visit completed but no offer/pass decision recorded.',f(function(r){return r.stage==='Visit Completed — Needs Review';}));
+  s+=repSection('Offer Sent — Follow-Up Due','Offer sent; follow-up due today or overdue.',f(function(r){return r.stage==='Offer Sent';}));
+  s+=repSection('Stalled Deals','No meaningful movement for 3+ business days.',f(function(r){return r.stalled;}));
+  s+=repSection('Gift Review','Relationship gift may be appropriate — approval still required.',f(function(r){return r.giftStatus==='Recommended';}));
+  s+=repSection('Revival Opportunities','Previously visited; may be worth another call or updated offer.',f(function(r){return r.stage==='Long-Term Nurture';}));
+  s+=repSection('Overdue Tasks','Action past its due date.',f(function(r){return r.daysOverdue>0;}));
+  return head+s+repFoot();
+}
+function monthlyReport(live){
+  var cnt=function(fn){return live.filter(fn).length;};
+  var head=repHead('Monthly Summary Report',MONTHS[TODAY.getMonth()]+' '+TODAY.getFullYear(),'Snapshot of current pipeline · '+live.length+' records');
+  var tiles=[
+    ['Active pipeline',cnt(function(r){return r.stage!=='Lost / Closed Out';})],
+    ['Visits completed',cnt(function(r){return r.visitStatus==='Completed';})],
+    ['Offers sent',cnt(function(r){return r.stage==='Offer Sent';})],
+    ['In negotiation',cnt(function(r){return r.stage==='Active Negotiation';})],
+    ['Contracts signed',cnt(function(r){return r.stage==='Contract Signed';})],
+    ['Long-term nurture',cnt(function(r){return r.stage==='Long-Term Nurture';})],
+    ['Lost / closed out',cnt(function(r){return r.stage==='Lost / Closed Out';})],
+    ['Stalled',cnt(function(r){return r.stalled;})],
+    ['Overdue',cnt(function(r){return r.daysOverdue>0;})],
+    ['REI link missing',cnt(function(r){return !r.rei&&r.stage!=='Lost / Closed Out';})]
+  ];
+  var grid='<div class="rtiles">'+tiles.map(function(t){return '<div class="rtile"><div class="rtv">'+t[1]+'</div><div class="rtl">'+esc(t[0])+'</div></div>';}).join('')+'</div>';
+  // pipeline by stage
+  var byStage=STAGES.map(function(st){return [st,cnt(function(r){return r.stage===st;})];}).filter(function(p){return p[1]>0;});
+  var st='<section class="rsec"><h3>Pipeline by stage</h3><table class="rtab"><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>'
+    +byStage.map(function(p){return '<tr><td>'+esc(p[0])+'</td><td class="num">'+p[1]+'</td></tr>';}).join('')+'</tbody></table></section>';
+  // by lead source
+  var sm={};live.forEach(function(r){var k=r.lead||'(none)';sm[k]=(sm[k]||0)+1;});
+  var bySrc=Object.keys(sm).map(function(k){return [k,sm[k]];}).sort(function(a,b){return b[1]-a[1];});
+  var ls='<section class="rsec"><h3>By lead source</h3><table class="rtab"><thead><tr><th>Source</th><th>Count</th></tr></thead><tbody>'
+    +bySrc.map(function(p){return '<tr><td>'+esc(p[0])+'</td><td class="num">'+p[1]+'</td></tr>';}).join('')+'</tbody></table></section>';
+  return head+grid+st+ls+repFoot();
+}
+function ribbon(live){
+  var c=function(f){return live.filter(f).length;};
+  var items=[
+    ['crit','overdue',c(function(r){return r.daysOverdue>0;}),'Overdue'],
+    ['warn','needs',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need decision'],
+    ['brand','offers',c(function(r){return r.stage==='Offer Sent';}),'Offers to follow up'],
+    ['warn','stalled',c(function(r){return r.stalled;}),'Stalled'],
+    ['brand','norei',c(function(r){return !r.rei&&r.stage!=='Lost / Closed Out';}),'REI link missing']
+  ];
+  document.getElementById('ribbon').innerHTML=items.map(function(it){return '<div class="rchip '+it[0]+'" data-jump="'+it[1]+'"><span class="rv num">'+it[2]+'</span><span class="rl">'+it[3]+'</span></div>';}).join('');
+  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else setFilter('all');};});
+}
+function draw(){
+  RECS.forEach(compute); var live=RECS;
+  ribbon(live);
+  document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports')?'none':'block';
+  if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else renderData(live);
+}
+function setView(v){VIEW=v;PAGE={};DPAGE=0;function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Number(x.daysOverdue)||0,stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,full:x.full};}
+function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
+function onData(d){RECS=(d.records||[]).map(hydrate);if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
+function refresh(){google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}
+function runAction(act,id,params,after){google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
+document.querySelectorAll('.seg button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v);});draw();window.scrollTo(0,0);}
+function setFilter(f){FILTER=f;PAGE={};DPAGE=0;document.querySelectorAll('.chip[data-f]').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-f')===f);});draw();}
+function drawReset(){PAGE={};DPAGE=0;draw();}
+
+/* actions + add (same behavior the live app performs on the sheet) */
+var AF={recordOfferSent:{t:'Record offer sent',f:[['offer','Approved offer amount','number',1],['offerSent','Offer sent date','date',1]]},
+  sellerCounter:{t:'Seller countered',f:[['counter','Counteroffer amount','number',1],['lastResult','What the seller said','text',0]]},
+  contractSent:{t:'Contract sent',f:[['contractSent','Contract sent date','date',1]]},
+  contractSigned:{t:'Contract signed',f:[['contractSigned','Contract signed date','date',1]]},
+  logContact:{t:'Log follow-up',f:[['lastResult','Result of contact','text',1],['next','Next action','text',0],['due','Next action due date','date',0]]},
+  nurture:{t:'Move to long-term nurture',f:[['due','Future follow-up date','date',1],['next','Next action','text',0]]},
+  setNextAction:{t:'Set next action',f:[['next','Next action','text',1],['due','Due date','date',0],['owner','Assigned owner','owner',0]]},
+  visitCompleted:{t:'Mark visit completed',f:[]}};
+function applyAction(act,r,v){
+  if(act==='visitCompleted'){r.stage='Visit Completed — Needs Review';r.visitStatus='Completed';r.owner=r.owner||'Jonathan';r.due=todayISO();r.next=r.next||'Decide: make offer or pass';}
+  else if(act==='recordOfferSent'){r.offer=+v.offer||r.offer;r.offerSent=v.offerSent;r.stage='Offer Sent';r.next='Follow up on sent offer';}
+  else if(act==='sellerCounter'){r.counter=+v.counter||r.counter;r.stage='Active Negotiation';r.owner=r.owner||'Cherry';if(v.lastResult)r.lastResult=v.lastResult;r.next=r.next||'Decide counter response';}
+  else if(act==='contractSent'){r.contractSent=v.contractSent;r.stage='Contract Sent';r.next='Confirm signature';}
+  else if(act==='contractSigned'){r.contractSigned=v.contractSigned;r.stage='Contract Signed';r.disposition='Contracted';r.handoff='Ready for Handoff';r.owner='JM';r.next='Hand off signed contract to JM';}
+  else if(act==='nurture'){r.stage='Long-Term Nurture';if(v.due)r.due=v.due;if(v.next)r.next=v.next;}
+  else if(act==='logContact'){r.lastContact=todayISO();if(v.lastResult)r.lastResult=v.lastResult;if(v.next)r.next=v.next;if(v.due)r.due=v.due;}
+  else if(act==='setNextAction'){if(v.next)r.next=v.next;if(v.due)r.due=v.due;if(v.owner)r.owner=v.owner;}
+}
+function openAction(act,id){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;var spec=AF[act];
+  function fire(v){var pmap={recordOfferSent:{amount:v.offer,date:v.offerSent},sellerCounter:{amount:v.counter,result:v.lastResult},contractSent:{date:v.contractSent},contractSigned:{date:v.contractSigned},logContact:{result:v.lastResult,nextAction:v.next,due:v.due},nurture:{due:v.due,nextAction:v.next},setNextAction:{nextAction:v.next,due:v.due,owner:v.owner},visitCompleted:{}};toast('Saving…');runAction(act,id,pmap[act]||{});}
+  if(!spec.f.length){fire({});return;}
+  modal(spec.t+' — '+r.seller,spec.f,fire);}
+function field(f,val){var k=f[0],label=f[1],type=f[2],req=f[3],inp;
+  if(type==='owner')inp='<select data-k="'+k+'"><option value="">(keep current)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select>';
+  else inp='<input data-k="'+k+'" type="'+(type==='number'?'number':type==='date'?'date':'text')+'" value="'+esc(val||'')+'">';
+  return '<div class="field"><label>'+esc(label)+(req?' *':'')+'</label>'+inp+'</div>';}
+function modal(title,fields,onSave,cap){var host=document.createElement('div');host.className='modal-bg';var today=todayISO();
+  host.innerHTML='<div class="modal"><h3>'+esc(title)+'</h3>'+(cap?'<p class="cap">'+esc(cap)+'</p>':'')+fields.map(function(f){return field(f,f[2]==='date'?today:'');}).join('')+'<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
+  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
+  host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');v[f[0]]=el.value;if(f[3]&&!String(el.value).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
+function openAdd(){var host=document.createElement('div');host.className='modal-bg';
+  host.innerHTML='<div class="modal"><h3>Add a property visit</h3><p class="cap">In the live app this saves straight to the Google Sheet.</p>'+
+   '<div class="field"><label>Property Address *</label><input data-k="address"></div>'+
+   '<div class="row2"><div class="field"><label>Seller Name</label><input data-k="seller"></div><div class="field"><label>Phone</label><input data-k="phone"></div></div>'+
+   '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
+   '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'+
+   '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
+   '<div class="row2"><div class="field"><label>Next Action</label><input data-k="next" value="Conduct scheduled visit & log outcome"></div><div class="field"><label>Due Date</label><input data-k="due" type="date" value="'+todayISO()+'"></div></div>'+
+   '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Add property</button></div></div>';
+  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
+  host.querySelector('[data-ok]').onclick=function(){var g=function(k){return host.querySelector('[data-k="'+k+'"]').value;};if(!g('address').trim()){toast('Property Address is required');return;}
+    var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
+    toast('Adding…');runAction('addRecord',null,params,close);};}
+
+document.querySelectorAll('.seg button').forEach(function(b){b.onclick=function(){setView(b.getAttribute('data-v'));};});
+document.querySelectorAll('.chip[data-f]').forEach(function(c){c.setAttribute('tabindex','0');c.onclick=function(){setFilter(c.getAttribute('data-f'));};});
+var os=document.getElementById('owner');OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});
+os.onchange=drawReset;document.getElementById('search').oninput=drawReset;document.getElementById('add').onclick=openAdd;
+document.getElementById('wrap').innerHTML='<div class="empty">Loading live data\u2026</div>';
+refresh();
+</script>

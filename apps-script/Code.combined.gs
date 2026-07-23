@@ -1089,7 +1089,10 @@ function doGet(e) {
     if (p.api === 'data') return apiJson_({ ok: true, data: webGetData() });
     return apiJson_({ ok: false, error: 'unknown api endpoint' });
   }
-  return HtmlService.createHtmlOutput(dashboardHtml_())   // built-in HTML dashboard (org-internal)
+  var out;
+  try { out = HtmlService.createHtmlOutputFromFile('Dashboard'); }
+  catch (e) { out = HtmlService.createHtmlOutput(dashboardHtml_()); }
+  return out
     .setTitle('Twin Visit Logger')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -1120,17 +1123,24 @@ function webGetData() {
     vals.forEach(function(v, i){
       const rec = {}; HEADERS.forEach(function(h, j){ rec[h] = v[j]; });
       if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return; // live records only
+      const full = {}; HEADERS.forEach(function(h){ var val = rec[h]; full[h] = (val instanceof Date) ? fmt_(val) : (val == null ? '' : val); });
       rows.push({
         rowNum: CFG.FIRST_DATA_ROW + i,
         id: rec['Property ID'] || '',
         address: rec['Property Address'] || '',
         seller: rec['Seller Name'] || '',
         phone: rec['Phone'] || '',
+        email: rec['Email'] || '',
+        lead: rec['Lead Source'] || '',
         stage: rec['Current Stage'] || '',
         owner: rec['Assigned Owner'] || '',
         visitStatus: rec['Visit Status'] || '',
+        visitDate: fmt_(rec['Visit Date']),
+        visitor: rec['Assigned Visitor'] || '',
+        visitNotes: rec['Visit Notes'] || '',
         nextAction: rec['Next Action'] || '',
         due: fmt_(rec['Next Action Due Date']),
+        lastContact: fmt_(rec['Last Contact Date']),
         daysOverdue: rec['Days Overdue'] === '' ? 0 : Number(rec['Days Overdue']) || 0,
         stalled: rec['Stalled Status'] === 'Yes',
         blocker: rec['Blocker'] || '',
@@ -1144,7 +1154,8 @@ function webGetData() {
         daysSince: rec['Days Since Last Activity'] === '' ? '' : Number(rec['Days Since Last Activity']),
         disposition: rec['Final Disposition'] || '',
         handoff: rec['Transaction Handoff Status'] || '',
-        gift: rec['Gift Status'] || ''
+        gift: rec['Gift Status'] || '',
+        full: full
       });
     });
   }
@@ -1165,7 +1176,8 @@ function webGetData() {
   ].map(function(s){ return { title: s[0], rows: s[1] }; });
 
   const owners = DROPDOWNS['Assigned Owner'];
-  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, totalLive: rows.length };
+  var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, records: rows, userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
