@@ -298,6 +298,7 @@ function todayISO(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth
 
 var SECTIONS=[
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
+  ['Upcoming Visits (Scheduled)',function(r){return r.stage==='Visit Scheduled';}],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
   ['Offer Sent — Follow-Up Due',function(r){return r.stage==='Offer Sent';}],
   ['Stalled Deals',function(r){return r.stalled;}],
