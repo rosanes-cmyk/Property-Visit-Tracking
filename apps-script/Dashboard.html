@@ -246,7 +246,7 @@ var SCHEMA=[
  ['Property & lead',[['id','Property ID'],['address','Property Address'],['normAddr','Normalized Address'],['seller','Seller Name'],['phone','Phone'],['email','Email'],['lead','Lead Source'],['rei','REI BlackBook Link']]],
  ['Visit',[['visitDate','Visit Date'],['visitTime','Visit Time'],['visitStatus','Visit Status'],['visitor','Assigned Visitor'],['visitNotes','Visit Notes'],['condition','Property Condition'],['occupancy','Occupancy Status'],['photos','Photos Link'],['video','Video Link'],['file','File Link']]],
  ['Seller details',[['motivation','Seller Motivation'],['timeline','Seller Timeline'],['asking','Asking Price'],['priceExp','Price Expectation'],['concerns','Seller Concerns']]],
- ['Offer',[['offer','Approved Offer Amount'],['offerStatus','Offer Status'],['offerPrep','Offer Prepared Date'],['offerSent','Offer Sent Date'],['offerConfirm','Offer Received Confirmation'],['counter','Counteroffer Amount']]],
+ ['Offer',[['offerPromised','Offer Promised Date'],['offer','Approved Offer Amount'],['offerStatus','Offer Status'],['offerPrep','Offer Prepared Date'],['offerSent','Offer Sent Date'],['offerConfirm','Offer Received Confirmation'],['counter','Counteroffer Amount']]],
  ['Follow-up',[['lastContact','Last Contact Date'],['lastResult','Last Contact Result'],['next','Next Action'],['due','Next Action Due Date'],['owner','Assigned Owner'],['blocker','Blocker'],['daysSince','Days Since Last Activity'],['daysOverdue','Days Overdue'],['stalled','Stalled Status']]],
  ['Gift',[['giftStatus','Gift Status'],['giftReason','Gift Recommendation Reason'],['giftOwner','Gift Approval Owner'],['giftSent','Gift Sent Date'],['giftApprovedBy','Gift Approved By'],['giftApprovalDate','Gift Approval Date']]],
  ['Stage & close',[['stage','Current Stage'],['disposition','Final Disposition'],['closeoutReason','Closeout Reason'],['contractSent','Contract Sent Date'],['contractSigned','Contract Signed Date'],['handoff','Transaction Handoff Status']]],
@@ -298,6 +298,7 @@ function openDetail(id,edit){var r=RECS.filter(function(x){return x.id===id;})[0
 function todayISO(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 
 var SECTIONS=[
+  ['⚠ SLA / Service Failures',function(r){return !!r.sla;}],
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
   ['Upcoming Visits (Scheduled)',function(r){return r.stage==='Visit Scheduled';}],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
@@ -314,7 +315,7 @@ var VIEW='board',FILTER='all';
 var PSIZE=6,PAGE={};
 function keep(r){var own=document.getElementById('owner').value,q=document.getElementById('search').value.trim().toLowerCase();
   if(own&&r.owner!==own)return false; if(q&&(r.seller+' '+r.address).toLowerCase().indexOf(q)<0)return false;
-  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; return true;}
+  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; return true;}
 function actionsFor(r){var a=[];
   if(r.visitStatus!=='Completed'&&r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
   if(r.stage==='Visit Completed — Needs Review'){a.push(['recordOfferSent','Record offer sent',1]);a.push(['nurture','Move to nurture',0]);}
@@ -327,7 +328,7 @@ function cardHTML(r){
   var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.id)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
   h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
   if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
-  if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
+  if(r.sla)h+='<span class="badge crit">⚠ '+esc(r.sla)+'</span>'; if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
   h+='</div>';
   if(r.next)h+='<div class="na"><span class="arrow">➜</span><span>'+esc(r.next)+'</span></div>';
   var note=r.lastResult||r.visitNotes; if(note)h+='<div class="result">🗒 <span>'+esc(note)+'</span></div>';
@@ -388,6 +389,7 @@ function renderKPI(live){
   html+=kpi('📝',c(function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}),'Contracts possible','this week','good');
   html+=kpi('✉️',c(function(r){return r.stage==='Offer Sent';}),'Offers to follow up','awaiting reply','');
   html+=kpi('🔍',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need offer decision','review now','warn');
+  html+=kpi('🚨',c(function(r){return !!r.sla;}),'SLA / service failures','fix now','crit');
   html+=kpi('⏰',c(function(r){return r.daysOverdue>0;}),'Overdue tasks','past due date','crit');
   html+=kpi('🐌',c(function(r){return r.stalled;}),'Stalled deals','3+ business days','warn');
   html+=kpi('⚠️',c(function(r){return r.dq==='Incomplete'||r.dq==='Exception';}),'Exceptions','need clean-up','crit');
@@ -501,6 +503,7 @@ function monthlyReport(live){
 function ribbon(live){
   var c=function(f){return live.filter(f).length;};
   var items=[
+    ['crit','sla',c(function(r){return !!r.sla;}),'SLA breach'],
     ['crit','overdue',c(function(r){return r.daysOverdue>0;}),'Overdue'],
     ['warn','needs',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need decision'],
     ['brand','offers',c(function(r){return r.stage==='Offer Sent';}),'Offers to follow up'],
@@ -508,7 +511,7 @@ function ribbon(live){
     ['brand','norei',c(function(r){return !r.rei&&r.stage!=='Lost / Closed Out';}),'REI link missing']
   ];
   document.getElementById('ribbon').innerHTML=items.map(function(it){return '<div class="rchip '+it[0]+'" data-jump="'+it[1]+'"><span class="rv num">'+it[2]+'</span><span class="rl">'+it[3]+'</span></div>';}).join('');
-  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else setFilter('all');};});
+  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else if(j==='sla')setFilter('sla');else setFilter('all');};});
 }
 function draw(){
   RECS.forEach(compute); var live=RECS;
@@ -570,7 +573,7 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
     var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
     toast('Adding…');runAction('addRecord',null,params,close);};}
 
-function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,full:x.full};}
+function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
 function onData(d){RECS=(d.records||[]).map(hydrate);TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 var TRASH=[];

@@ -88,6 +88,7 @@ const HEADERS = [
   'Created Date','Last Updated Date','Updated By','Source','Data Quality Status','Exception Reason','REI Update Required','REI Update Completed',
   // Relationship (appended so the original 59 columns keep their positions on the live sheet)
   'Gift Approved By','Gift Approval Date',
+  'Offer Promised Date',
 ];
 
 const DROPDOWNS = {
@@ -357,7 +358,7 @@ function writeFormulas_(sh) {
     sh.getRange(first, c, last - first + 1, 1).setFormulas(formulas);
   });
   // date/currency number formats
-  ['Visit Date','Offer Prepared Date','Offer Sent Date','Last Contact Date','Next Action Due Date',
+  ['Visit Date','Offer Prepared Date','Offer Sent Date','Offer Promised Date','Last Contact Date','Next Action Due Date',
    'Gift Sent Date','Gift Approval Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('yyyy-mm-dd'); });
   ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount']
@@ -1156,6 +1157,8 @@ function webGetData() {
         disposition: rec['Final Disposition'] || '',
         handoff: rec['Transaction Handoff Status'] || '',
         gift: rec['Gift Status'] || '',
+        offerPromised: fmt_(rec['Offer Promised Date']),
+        sla: slaFor_(rec),
         full: full
       });
     });
@@ -1303,6 +1306,27 @@ function webAction(action, id, params) {
   } catch (e) {
     return { ok: false, error: String(e) };
   }
+}
+
+function slaFor_(rec) {
+  var stage = rec['Current Stage'] || '';
+  if (stage === 'Lost / Closed Out' || stage === 'Contract Signed' || stage === 'Long-Term Nurture') return '';
+  var t = today_();
+  function d(v){ return v ? new Date(v) : null; }
+  function maxD(){ var m=null; for (var i=0;i<arguments.length;i++){ var x=d(arguments[i]); if(x&&(!m||x>m)) m=x; } return m; }
+  var reasons = [];
+  var promised = d(rec['Offer Promised Date']), sent = d(rec['Offer Sent Date']);
+  if (promised && !sent && bizDaysBetween_(promised, t) >= 1) reasons.push('Offer promised, not sent');
+  else if (!promised && !sent && (stage === 'Visit Completed — Needs Review' || stage === 'Offer Preparation')) {
+    var since = maxD(rec['Visit Date'], rec['Last Updated Date']);
+    if (since && bizDaysBetween_(since, t) >= 1) reasons.push('Offer decision overdue');
+  }
+  var engage = ['Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Visit Completed — Needs Review'];
+  if (engage.indexOf(stage) >= 0) {
+    var last = maxD(rec['Last Contact Date'], rec['Last Updated Date'], rec['Visit Date']);
+    if (last && bizDaysBetween_(last, t) >= 2) reasons.push('No contact 48h+');
+  }
+  return reasons.join(' · ');
 }
 
 /* ---------------- Trash: soft delete + restore ---------------- */

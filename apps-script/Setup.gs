@@ -223,7 +223,7 @@ function writeFormulas_(sh) {
     sh.getRange(first, c, last - first + 1, 1).setFormulas(formulas);
   });
   // date/currency number formats
-  ['Visit Date','Offer Prepared Date','Offer Sent Date','Last Contact Date','Next Action Due Date',
+  ['Visit Date','Offer Prepared Date','Offer Sent Date','Offer Promised Date','Last Contact Date','Next Action Due Date',
    'Gift Sent Date','Gift Approval Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('yyyy-mm-dd'); });
   ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount']

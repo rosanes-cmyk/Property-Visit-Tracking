@@ -85,6 +85,8 @@ function webGetData() {
         disposition: rec['Final Disposition'] || '',
         handoff: rec['Transaction Handoff Status'] || '',
         gift: rec['Gift Status'] || '',
+        offerPromised: fmt_(rec['Offer Promised Date']),
+        sla: slaFor_(rec),
         full: full
       });
     });
@@ -233,6 +235,35 @@ function webAction(action, id, params) {
   } catch (e) {
     return { ok: false, error: String(e) };
   }
+}
+
+/**
+ * SLA / service-failure detection. Returns a short reason string (or '') for a record.
+ * Thresholds: no contact > 48h (>=2 business days) on active-engagement stages;
+ * offer promised but not sent within 1 business day; backstop when no promised date
+ * is set but the record sits in a decision/prep stage past 1 business day with no offer.
+ */
+function slaFor_(rec) {
+  var stage = rec['Current Stage'] || '';
+  if (stage === 'Lost / Closed Out' || stage === 'Contract Signed' || stage === 'Long-Term Nurture') return '';
+  var t = today_();
+  function d(v){ return v ? new Date(v) : null; }
+  function maxD(){ var m=null; for (var i=0;i<arguments.length;i++){ var x=d(arguments[i]); if(x&&(!m||x>m)) m=x; } return m; }
+  var reasons = [];
+  // 1) offer promised but not sent
+  var promised = d(rec['Offer Promised Date']), sent = d(rec['Offer Sent Date']);
+  if (promised && !sent && bizDaysBetween_(promised, t) >= 1) reasons.push('Offer promised, not sent');
+  else if (!promised && !sent && (stage === 'Visit Completed — Needs Review' || stage === 'Offer Preparation')) {
+    var since = maxD(rec['Visit Date'], rec['Last Updated Date']);       // backstop: no promised date recorded
+    if (since && bizDaysBetween_(since, t) >= 1) reasons.push('Offer decision overdue');
+  }
+  // 2) no contact > 48h on an active-engagement stage
+  var engage = ['Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Visit Completed — Needs Review'];
+  if (engage.indexOf(stage) >= 0) {
+    var last = maxD(rec['Last Contact Date'], rec['Last Updated Date'], rec['Visit Date']);
+    if (last && bizDaysBetween_(last, t) >= 2) reasons.push('No contact 48h+');
+  }
+  return reasons.join(' · ');
 }
 
 /* ---------------- Trash: soft delete + restore ---------------- */

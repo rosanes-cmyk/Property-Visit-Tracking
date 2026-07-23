@@ -53,6 +53,7 @@ const HEADERS = [
   'Created Date','Last Updated Date','Updated By','Source','Data Quality Status','Exception Reason','REI Update Required','REI Update Completed',
   // Relationship (appended so the original 59 columns keep their positions on the live sheet)
   'Gift Approved By','Gift Approval Date',
+  'Offer Promised Date',
 ];
 
 const DROPDOWNS = {
