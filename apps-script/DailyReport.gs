@@ -47,7 +47,7 @@ function reportSections_() {
     { title: 'Negotiation Decisions',
       rows: f(function(r){ return r['Current Stage']==='Active Negotiation'; }) },
     { title: 'Contract Handoffs',
-      rows: f(function(r){ return r['Current Stage']==='Contract Signed' && r['Transaction Handoff Status']!=='JM Confirmed'; }) },
+      rows: f(function(r){ return r['Current Stage']==='Contract Signed' && r['Transaction Handoff Status']!=='Handoff Confirmed'; }) },
     { title: 'Gift Review',
       rows: f(function(r){ return r['Gift Status']==='Recommended'; }) },
     { title: 'Revival Opportunities',

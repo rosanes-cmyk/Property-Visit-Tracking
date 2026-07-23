@@ -29,7 +29,7 @@ const CFG = {
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
 // Set an INTERNAL address to also email that person their tasks. NEVER a seller address.
-const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '', JM: '' };
+const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '' };
 
 // 59 columns, in order. Keep IN SYNC with build/build_workbook.py.
 const HEADERS = [
@@ -59,11 +59,11 @@ const HEADERS = [
 const DROPDOWNS = {
   'Visit Status': ['Scheduled','Completed','Canceled','Reschedule Needed'],
   'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
-  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
-  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan'],
+  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
   'Gift Approved By': ['Cherry','Juan'],
-  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
+  'Updated By': ['Jonathan','Kyle','Cherry','Juan','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
@@ -73,7 +73,7 @@ const DROPDOWNS = {
   'Property Condition': ['Excellent','Good','Fair','Poor','Distressed'],
   'Seller Timeline': ['ASAP','30 days','60 days','90+ days','Unknown'],
   'Offer Received Confirmation': ['Yes','No'],
-  'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off to JM','JM Confirmed'],
+  'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off','Handoff Confirmed'],
   'REI Update Required': ['Yes','No'],
   'REI Update Completed': ['Yes','No'],
   'Source': ['Manual','Apps Script','Import','TEST'],

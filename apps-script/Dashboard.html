@@ -221,11 +221,11 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
 <script>
 "use strict";
 var TODAY=new Date(); TODAY.setHours(0,0,0,0);
-var OWNERS=['Jonathan','Kyle','Cherry','Juan','JM'];
+var OWNERS=['Jonathan','Kyle','Cherry','Juan'];
 var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
 var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
 var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
-var NEXT_ACTIONS=['Conduct scheduled visit & log outcome','Decide: make offer or pass','Follow up on sent offer','Re-attempt contact (no reply)','Decide counter response','Prepare & send contract','Confirm signature','Hand off signed contract to JM','Nurture check-in call','Send requested info to seller'];
+var NEXT_ACTIONS=['Conduct scheduled visit & log outcome','Decide: make offer or pass','Follow up on sent offer','Re-attempt contact (no reply)','Decide counter response','Prepare & send contract','Confirm signature','Hand off signed contract for transaction coordination','Nurture check-in call','Send requested info to seller'];
 
 var RECS=[];
 
@@ -260,7 +260,7 @@ function valOf(r,k){var v=r[k];
   if(k==='offer'||k==='counter'||k==='asking')return v?money(v):'';
   return (v==null||v==='')?'':String(v);}
 var RO_FIELDS=['Property ID','Normalized Address','Days Since Last Activity','Days Overdue','Stalled Status','Missing Required Fields','Duplicate Address Flag','Opportunity Priority','Data Quality Status','Exception Reason','Created Date','Last Updated Date','Updated By'];
-var ENUM_FIELDS={'Visit Status':['','Scheduled','Completed','Canceled','Reschedule Needed'],'Current Stage':['','Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],'Assigned Owner':['','Jonathan','Kyle','Cherry','Juan','JM'],'Assigned Visitor':['','Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],'Final Disposition':['','Contracted','Lost','Long-Term Nurture','Closed Out'],'Gift Status':['','Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],'Blocker':['','Price','Title','Tenant','Family','Access','Timing','Documents','Seller Unresponsive','Other'],'Transaction Handoff Status':['','Not Ready','Ready for Handoff','Handed Off to JM','JM Confirmed'],'Offer Status':['','Not Sent','Sent','Accepted','Countered','Rejected']};
+var ENUM_FIELDS={'Visit Status':['','Scheduled','Completed','Canceled','Reschedule Needed'],'Current Stage':['','Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],'Assigned Owner':['','Jonathan','Kyle','Cherry','Juan'],'Assigned Visitor':['','Juan','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],'Final Disposition':['','Contracted','Lost','Long-Term Nurture','Closed Out'],'Gift Status':['','Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],'Blocker':['','Price','Title','Tenant','Family','Access','Timing','Documents','Seller Unresponsive','Other'],'Transaction Handoff Status':['','Not Ready','Ready for Handoff','Handed Off','Handoff Confirmed'],'Offer Status':['','Not Sent','Sent','Accepted','Countered','Rejected']};
 var NUM_FIELDS=['Approved Offer Amount','Counteroffer Amount','Asking Price','Price Expectation'];
 function cur_(r,f){return (r.full&&r.full[f[1]]!=null&&r.full[f[1]]!=='')?String(r.full[f[1]]):(valOf(r,f[0])||'');}
 function detailField_(r,f,edit){
@@ -306,7 +306,7 @@ var SECTIONS=[
   ['Stalled Deals',function(r){return r.stalled;}],
   ['Overdue Tasks',function(r){return r.daysOverdue>0;}],
   ['Negotiation Decisions',function(r){return r.stage==='Active Negotiation';}],
-  ['Contract Handoffs',function(r){return r.stage==='Contract Signed'&&r.handoff!=='JM Confirmed';}],
+  ['Contract Handoffs',function(r){return r.stage==='Contract Signed'&&r.handoff!=='Handoff Confirmed';}],
   ['Gift Review',function(r){return r.gift==='Recommended';}],
   ['Revival Opportunities',function(r){return r.disposition==='Lost'&&r.daysSince!==''&&r.daysSince>=45;}],
   ['Exceptions Requiring Review',function(r){return r.dq==='Incomplete'||r.dq==='Exception';}]
@@ -537,7 +537,7 @@ function applyAction(act,r,v){
   else if(act==='recordOfferSent'){r.offer=+v.offer||r.offer;r.offerSent=v.offerSent;r.stage='Offer Sent';r.next='Follow up on sent offer';}
   else if(act==='sellerCounter'){r.counter=+v.counter||r.counter;r.stage='Active Negotiation';r.owner=r.owner||'Cherry';if(v.lastResult)r.lastResult=v.lastResult;r.next=r.next||'Decide counter response';}
   else if(act==='contractSent'){r.contractSent=v.contractSent;r.stage='Contract Sent';r.next='Confirm signature';}
-  else if(act==='contractSigned'){r.contractSigned=v.contractSigned;r.stage='Contract Signed';r.disposition='Contracted';r.handoff='Ready for Handoff';r.owner='JM';r.next='Hand off signed contract to JM';}
+  else if(act==='contractSigned'){r.contractSigned=v.contractSigned;r.stage='Contract Signed';r.disposition='Contracted';r.handoff='Ready for Handoff';r.next='Hand off signed contract for transaction coordination';}
   else if(act==='nurture'){r.stage='Long-Term Nurture';if(v.due)r.due=v.due;if(v.next)r.next=v.next;}
   else if(act==='logContact'){r.lastContact=todayISO();if(v.lastResult)r.lastResult=v.lastResult;if(v.next)r.next=v.next;if(v.due)r.due=v.due;}
   else if(act==='setNextAction'){if(v.next)r.next=v.next;if(v.due)r.due=v.due;if(v.owner)r.owner=v.owner;}

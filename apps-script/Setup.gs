@@ -284,7 +284,7 @@ function buildBoard_(ss) {
     ['4. Stalled Deals', stall + "='Yes'", ov + ' desc, ' + prio + ' desc'],
     ['5. Overdue Tasks', ov + '>0', ov + ' desc'],
     ['6. Negotiation Decisions', stage + "='Active Negotiation'", prio + ' desc, ' + due],
-    ['7. Contract Handoffs', '(' + stage + "='Contract Signed' and " + handoff + " <> 'JM Confirmed')", due],
+    ['7. Contract Handoffs', '(' + stage + "='Contract Signed' and " + handoff + " <> 'Handoff Confirmed')", due],
     ['8. Gift Review', gift + "='Recommended'", due],
     ['9. Revival Opportunities', '(' + disp2 + "='Lost' and " + colL('Days Since Last Activity') + '>=45)', colL('Days Since Last Activity') + ' desc'],
     ['10. Exceptions Requiring Review', '(' + dq + "='Exception' or " + dq + "='Incomplete')", stage],

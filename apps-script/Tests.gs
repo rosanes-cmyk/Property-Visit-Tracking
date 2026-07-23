@@ -79,12 +79,12 @@ function runAllTests() {
   f2 = edit(f2, 'Current Stage', 'Verbal Agreement');
   assert('9. Verbal agreement -> Kyle contract task', f2.get('Assigned Owner')==='Kyle', f2.get('Assigned Owner'));
 
-  // 10 & 11 contract sent -> follow-up ; contract signed -> JM handoff
+  // 10 & 11 contract sent -> follow-up ; contract signed -> handoff
   let g2 = newRow({'Property ID':'TEST-A6','Property Address':'6 Auto Test St, Testville, CA','Seller Name':'Auto Six','REI BlackBook Link':'https://rei/test-a6','Source':'TEST'});
   g2 = edit(g2, 'Contract Sent Date', today_());
   assert('10. Contract sent -> Contract Sent + follow-up', g2.get('Current Stage')==='Contract Sent' && !!g2.get('Next Action Due Date'), g2.get('Current Stage'));
   g2 = edit(g2, 'Contract Signed Date', today_());
-  assert('11. Contract signed -> JM handoff + Contracted', g2.get('Current Stage')==='Contract Signed' && g2.get('Assigned Owner')==='JM' && g2.get('Final Disposition')==='Contracted', g2.get('Assigned Owner'));
+  assert('11. Contract signed -> handoff + Contracted', g2.get('Current Stage')==='Contract Signed' && g2.get('Final Disposition')==='Contracted', g2.get('Current Stage'));
 
   // 13 nurture requires future date
   let h2 = newRow({'Property ID':'TEST-A7','Property Address':'7 Auto Test St, Testville, CA','Seller Name':'Auto Seven','REI BlackBook Link':'https://rei/test-a7','Next Action Due Date':today_(),'Source':'TEST'});

@@ -146,12 +146,11 @@ function onContractSigned_(R) {
   R.set('Current Stage', 'Contract Signed');
   R.set('Final Disposition', 'Contracted');
   R.setIfBlank('Transaction Handoff Status', 'Ready for Handoff');
-  R.set('Assigned Owner', 'JM');
-  R.set('Next Action', 'Hand off signed contract to JM');
+  R.set('Next Action', 'Hand off signed contract for transaction coordination');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
   R.set('REI Update Required', 'Yes');
-  enqueueTask_('JM', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
-  logAuto_('TASK', R.get('Property ID'), 'JM HANDOFF created; sales follow-up stopped; REI update required');
+  enqueueTask_('', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
+  logAuto_('TASK', R.get('Property ID'), 'HANDOFF created; sales follow-up stopped; REI update required');
 }
 
 function onGiftRecommended_(R) {

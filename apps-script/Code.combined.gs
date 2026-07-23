@@ -64,7 +64,7 @@ const CFG = {
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
 // Set an INTERNAL address to also email that person their tasks. NEVER a seller address.
-const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '', JM: '' };
+const OWNER_EMAILS = { Jonathan: '', Kyle: '', Cherry: '', Juan: '' };
 
 // 59 columns, in order. Keep IN SYNC with build/build_workbook.py.
 const HEADERS = [
@@ -94,11 +94,11 @@ const HEADERS = [
 const DROPDOWNS = {
   'Visit Status': ['Scheduled','Completed','Canceled','Reschedule Needed'],
   'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
-  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','JM'],
-  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan'],
+  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
   'Gift Approved By': ['Cherry','Juan'],
-  'Updated By': ['Jonathan','Kyle','Cherry','Juan','JM','Apps Script','Import'],
+  'Updated By': ['Jonathan','Kyle','Cherry','Juan','Apps Script','Import'],
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
@@ -108,7 +108,7 @@ const DROPDOWNS = {
   'Property Condition': ['Excellent','Good','Fair','Poor','Distressed'],
   'Seller Timeline': ['ASAP','30 days','60 days','90+ days','Unknown'],
   'Offer Received Confirmation': ['Yes','No'],
-  'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off to JM','JM Confirmed'],
+  'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off','Handoff Confirmed'],
   'REI Update Required': ['Yes','No'],
   'REI Update Completed': ['Yes','No'],
   'Source': ['Manual','Apps Script','Import','TEST'],
@@ -419,7 +419,7 @@ function buildBoard_(ss) {
     ['4. Stalled Deals', stall + "='Yes'", ov + ' desc, ' + prio + ' desc'],
     ['5. Overdue Tasks', ov + '>0', ov + ' desc'],
     ['6. Negotiation Decisions', stage + "='Active Negotiation'", prio + ' desc, ' + due],
-    ['7. Contract Handoffs', '(' + stage + "='Contract Signed' and " + handoff + " <> 'JM Confirmed')", due],
+    ['7. Contract Handoffs', '(' + stage + "='Contract Signed' and " + handoff + " <> 'Handoff Confirmed')", due],
     ['8. Gift Review', gift + "='Recommended'", due],
     ['9. Revival Opportunities', '(' + disp2 + "='Lost' and " + colL('Days Since Last Activity') + '>=45)', colL('Days Since Last Activity') + ' desc'],
     ['10. Exceptions Requiring Review', '(' + dq + "='Exception' or " + dq + "='Incomplete')", stage],
@@ -549,7 +549,7 @@ var SEED = [
   {"Property ID":"TVL-0010", "Property Address":"1323 Oxford St, Berkeley, CA 94709", "Seller Name":"Mark Lempert", "Phone":"(510) 816-1221", "Lead Source":"Direct Mail - Postcard", "Visit Date":new Date(2026,6,13), "Visit Status":"Completed", "Assigned Visitor":"Cesar", "Visit Notes":"SERVICE FAILURE: walkthrough done 7/13 but no offer ever sent; seller displeased.", "Seller Motivation":"Was open to offer; lost due to our delay/no-offer", "Current Stage":"Lost / Closed Out", "Final Disposition":"Lost", "Closeout Reason":"Did Not Proceed — service failure (no offer sent)", "Blocker":"Documents", "Created Date":new Date(2026,6,13), "Last Updated Date":new Date(2026,6,15), "Updated By":"Import", "Source":"Import"},
   {"Property ID":"TEST-01", "Property Address":"100 Test Verbal Ln, Testville, CA 90001", "Seller Name":"Val Verbal", "Phone":"(000) 000-0001", "Lead Source":"PPC", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test01", "Visit Date":new Date(2026,6,18), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Great condition; seller keen.", "Seller Motivation":"Relocating for job — motivated", "Approved Offer Amount":640000, "Offer Status":"Accepted", "Offer Sent Date":new Date(2026,6,19), "Current Stage":"Verbal Agreement", "Next Action":"Prepare purchase contract", "Next Action Due Date":new Date(2026,6,23), "Assigned Owner":"Kyle", "Last Contact Date":new Date(2026,6,21), "Last Contact Result":"Seller verbally agreed to $640k", "Created Date":new Date(2026,6,18), "Last Updated Date":new Date(2026,6,21), "Updated By":"Cherry", "Source":"TEST", "REI Update Required":"Yes"},
   {"Property ID":"TEST-02", "Property Address":"200 Test Contract Sent Ave, Testville, CA 90002", "Seller Name":"Sam Sent", "Phone":"(000) 000-0002", "Lead Source":"TV", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test02", "Visit Date":new Date(2026,6,15), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Clean title; ready to move.", "Seller Motivation":"Downsizing — motivated", "Approved Offer Amount":720000, "Offer Status":"Accepted", "Offer Sent Date":new Date(2026,6,16), "Current Stage":"Contract Sent", "Contract Sent Date":new Date(2026,6,20), "File Link":"https://drive.google.com/test02-contract", "Next Action":"Confirm signature", "Next Action Due Date":new Date(2026,6,22), "Assigned Owner":"Cherry", "Last Contact Date":new Date(2026,6,21), "Last Contact Result":"Seller reviewing contract", "Created Date":new Date(2026,6,15), "Last Updated Date":new Date(2026,6,21), "Updated By":"Cherry", "Source":"TEST", "REI Update Required":"Yes"},
-  {"Property ID":"TEST-03", "Property Address":"300 Test Signed Blvd, Testville, CA 90003", "Seller Name":"Sid Signed", "Phone":"(000) 000-0003", "Lead Source":"Direct Mail", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test03", "Visit Date":new Date(2026,6,10), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Signed.", "Seller Motivation":"Estate sale — motivated", "Approved Offer Amount":555000, "Offer Status":"Accepted", "Offer Sent Date":new Date(2026,6,11), "Current Stage":"Contract Signed", "Final Disposition":"Contracted", "Contract Sent Date":new Date(2026,6,14), "Contract Signed Date":new Date(2026,6,18), "Transaction Handoff Status":"Ready for Handoff", "Next Action":"Hand off signed contract to JM", "Next Action Due Date":new Date(2026,6,20), "Assigned Owner":"JM", "Last Contact Date":new Date(2026,6,18), "Last Contact Result":"Contract signed", "Created Date":new Date(2026,6,10), "Last Updated Date":new Date(2026,6,18), "Updated By":"Cherry", "Source":"TEST", "REI Update Required":"Yes"},
+  {"Property ID":"TEST-03", "Property Address":"300 Test Signed Blvd, Testville, CA 90003", "Seller Name":"Sid Signed", "Phone":"(000) 000-0003", "Lead Source":"Direct Mail", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test03", "Visit Date":new Date(2026,6,10), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Signed.", "Seller Motivation":"Estate sale — motivated", "Approved Offer Amount":555000, "Offer Status":"Accepted", "Offer Sent Date":new Date(2026,6,11), "Current Stage":"Contract Signed", "Final Disposition":"Contracted", "Contract Sent Date":new Date(2026,6,14), "Contract Signed Date":new Date(2026,6,18), "Transaction Handoff Status":"Ready for Handoff", "Next Action":"Hand off signed contract for transaction coordination", "Next Action Due Date":new Date(2026,6,20), "Assigned Owner":"Cherry", "Last Contact Date":new Date(2026,6,18), "Last Contact Result":"Contract signed", "Created Date":new Date(2026,6,10), "Last Updated Date":new Date(2026,6,18), "Updated By":"Cherry", "Source":"TEST", "REI Update Required":"Yes"},
   {"Property ID":"TEST-04", "Property Address":"400 Test Needs Review St, Testville, CA 90004", "Seller Name":"Nia Needs-Review", "Phone":"(000) 000-0004", "Lead Source":"PPC", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test04", "Visit Date":new Date(2026,6,21), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Visit done; needs offer/pass decision.", "Seller Motivation":"Job relocation", "Current Stage":"Visit Completed — Needs Review", "Next Action":"Decide: make offer or pass", "Next Action Due Date":new Date(2026,6,21), "Assigned Owner":"Jonathan", "Last Contact Date":new Date(2026,6,21), "Last Contact Result":"Walkthrough complete", "Created Date":new Date(2026,6,21), "Last Updated Date":new Date(2026,6,21), "Updated By":"Jonathan", "Source":"TEST", "REI Update Required":"Yes"},
   {"Property ID":"TEST-05", "Property Address":"500 Test Nurture Way, Testville, CA 90005", "Seller Name":"Nora Nurture", "Phone":"(000) 000-0005", "Lead Source":"SEO", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test05", "Visit Date":new Date(2026,5,20), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Not ready yet; call back in ~60 days.", "Seller Motivation":"Will sell later this year", "Current Stage":"Long-Term Nurture", "Next Action":"Nurture check-in call", "Next Action Due Date":new Date(2026,8,20), "Assigned Owner":"Cherry", "Last Contact Date":new Date(2026,5,20), "Last Contact Result":"Asked for callback in 60 days", "Gift Status":"Recommended", "Gift Recommendation Reason":"Strong rapport; long-term seller", "Created Date":new Date(2026,5,20), "Last Updated Date":new Date(2026,5,20), "Updated By":"Cherry", "Source":"TEST", "REI Update Required":"Yes"},
   {"Property ID":"TEST-06", "Property Address":"600 Test Stalled Ct, Testville, CA 90006", "Seller Name":"Stan Stalled", "Phone":"(000) 000-0006", "Lead Source":"PPC", "REI BlackBook Link":"https://app.reiblackbook.com/lead/test06", "Visit Date":new Date(2026,6,1), "Visit Status":"Completed", "Assigned Visitor":"Juan", "Visit Notes":"Offer sent; seller gone quiet.", "Seller Motivation":"Was motivated; now unresponsive", "Approved Offer Amount":500000, "Offer Status":"Sent", "Offer Sent Date":new Date(2026,6,2), "Current Stage":"Offer Sent", "Next Action":"Re-attempt contact", "Next Action Due Date":new Date(2026,6,8), "Assigned Owner":"Juan", "Blocker":"Seller Unresponsive", "Last Contact Date":new Date(2026,6,2), "Last Contact Result":"Offer sent; no reply since", "Created Date":new Date(2026,6,1), "Last Updated Date":new Date(2026,6,2), "Updated By":"Juan", "Source":"TEST", "REI Update Required":"Yes"},
@@ -809,12 +809,11 @@ function onContractSigned_(R) {
   R.set('Current Stage', 'Contract Signed');
   R.set('Final Disposition', 'Contracted');
   R.setIfBlank('Transaction Handoff Status', 'Ready for Handoff');
-  R.set('Assigned Owner', 'JM');
-  R.set('Next Action', 'Hand off signed contract to JM');
+  R.set('Next Action', 'Hand off signed contract for transaction coordination');
   R.setIfBlank('Next Action Due Date', addBiz_(today_(), 1));
   R.set('REI Update Required', 'Yes');
-  enqueueTask_('JM', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
-  logAuto_('TASK', R.get('Property ID'), 'JM HANDOFF created; sales follow-up stopped; REI update required');
+  enqueueTask_('', R.get('Property ID'), R.get('Property Address'), 'Contract handoff — signed; also confirm REI BlackBook update', R.get('Next Action Due Date'));
+  logAuto_('TASK', R.get('Property ID'), 'HANDOFF created; sales follow-up stopped; REI update required');
 }
 
 function onGiftRecommended_(R) {
@@ -1003,7 +1002,7 @@ function reportSections_() {
     { title: 'Negotiation Decisions',
       rows: f(function(r){ return r['Current Stage']==='Active Negotiation'; }) },
     { title: 'Contract Handoffs',
-      rows: f(function(r){ return r['Current Stage']==='Contract Signed' && r['Transaction Handoff Status']!=='JM Confirmed'; }) },
+      rows: f(function(r){ return r['Current Stage']==='Contract Signed' && r['Transaction Handoff Status']!=='Handoff Confirmed'; }) },
     { title: 'Gift Review',
       rows: f(function(r){ return r['Gift Status']==='Recommended'; }) },
     { title: 'Revival Opportunities',
@@ -1173,7 +1172,7 @@ function webGetData() {
     ['Stalled Deals', by(function(r){ return r.stalled; }, ovSort)],
     ['Overdue Tasks', by(function(r){ return r.daysOverdue > 0; }, ovSort)],
     ['Negotiation Decisions', by(function(r){ return r.stage === 'Active Negotiation'; }, prSort)],
-    ['Contract Handoffs', by(function(r){ return r.stage === 'Contract Signed' && r.handoff !== 'JM Confirmed'; })],
+    ['Contract Handoffs', by(function(r){ return r.stage === 'Contract Signed' && r.handoff !== 'Handoff Confirmed'; })],
     ['Gift Review', by(function(r){ return r.gift === 'Recommended'; })],
     ['Revival Opportunities', by(function(r){ return r.disposition === 'Lost' && r.daysSince !== '' && r.daysSince >= 45; }, ovSort)],
     ['Exceptions Requiring Review', by(function(r){ return r.dq === 'Incomplete' || r.dq === 'Exception'; })]
@@ -1460,7 +1459,7 @@ function dashboardHtml_() {
 '  else if(action==="contractSigned"){p.date=prompt("Contract signed date (YYYY-MM-DD):",todayStr());if(p.date===null)return;}',
 '  else if(action==="logContact"){p.result=prompt("Result of contact:","");if(p.result===null)return;p.nextAction=prompt("Next action:","");p.due=prompt("Next action due date (YYYY-MM-DD):",todayStr());}',
 '  else if(action==="nurture"){p.due=prompt("Future follow-up date (YYYY-MM-DD):","");if(!p.due)return;p.nextAction=prompt("Next action:","Nurture check-in");}',
-'  else if(action==="setNextAction"){p.nextAction=prompt("Next action:","");if(p.nextAction===null)return;p.due=prompt("Due date (YYYY-MM-DD):",todayStr());p.owner=prompt("Assigned owner (Jonathan/Kyle/Cherry/Juan/JM), blank=keep:","");}',
+'  else if(action==="setNextAction"){p.nextAction=prompt("Next action:","");if(p.nextAction===null)return;p.due=prompt("Due date (YYYY-MM-DD):",todayStr());p.owner=prompt("Assigned owner (Jonathan/Kyle/Cherry/Juan), blank=keep:","");}',
 '  toast("Saving…");google.script.run.withSuccessHandler(function(res){if(res&&res.ok){DATA=res.data;draw();toast("Saved ✔");}else{toast("Error: "+(res&&res.error));}}).withFailureHandler(function(e){toast("Error: "+e.message);}).webAction(action,id,p);}',
 'loadData();',
 '</script></body></html>'
@@ -1550,12 +1549,12 @@ function runAllTests() {
   f2 = edit(f2, 'Current Stage', 'Verbal Agreement');
   assert('9. Verbal agreement -> Kyle contract task', f2.get('Assigned Owner')==='Kyle', f2.get('Assigned Owner'));
 
-  // 10 & 11 contract sent -> follow-up ; contract signed -> JM handoff
+  // 10 & 11 contract sent -> follow-up ; contract signed -> handoff
   let g2 = newRow({'Property ID':'TEST-A6','Property Address':'6 Auto Test St, Testville, CA','Seller Name':'Auto Six','REI BlackBook Link':'https://rei/test-a6','Source':'TEST'});
   g2 = edit(g2, 'Contract Sent Date', today_());
   assert('10. Contract sent -> Contract Sent + follow-up', g2.get('Current Stage')==='Contract Sent' && !!g2.get('Next Action Due Date'), g2.get('Current Stage'));
   g2 = edit(g2, 'Contract Signed Date', today_());
-  assert('11. Contract signed -> JM handoff + Contracted', g2.get('Current Stage')==='Contract Signed' && g2.get('Assigned Owner')==='JM' && g2.get('Final Disposition')==='Contracted', g2.get('Assigned Owner'));
+  assert('11. Contract signed -> handoff + Contracted', g2.get('Current Stage')==='Contract Signed' && g2.get('Final Disposition')==='Contracted', g2.get('Current Stage'));
 
   // 13 nurture requires future date
   let h2 = newRow({'Property ID':'TEST-A7','Property Address':'7 Auto Test St, Testville, CA','Seller Name':'Auto Seven','REI BlackBook Link':'https://rei/test-a7','Next Action Due Date':today_(),'Source':'TEST'});
