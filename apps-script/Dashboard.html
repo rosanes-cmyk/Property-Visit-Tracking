@@ -299,6 +299,7 @@ function todayISO(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth
 
 var SECTIONS=[
   ['⚠ SLA / Service Failures',function(r){return !!r.sla;}],
+  ['🗓 Scheduling Conflicts',function(r){return r.conflict;}],
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
   ['Upcoming Visits (Scheduled)',function(r){return r.stage==='Visit Scheduled';}],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
@@ -315,7 +316,7 @@ var VIEW='board',FILTER='all';
 var PSIZE=6,PAGE={};
 function keep(r){var own=document.getElementById('owner').value,q=document.getElementById('search').value.trim().toLowerCase();
   if(own&&r.owner!==own)return false; if(q&&(r.seller+' '+r.address).toLowerCase().indexOf(q)<0)return false;
-  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; if(FILTER==='gap')return r.gap>0; return true;}
+  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; if(FILTER==='gap')return r.gap>0; if(FILTER==='conflict')return r.conflict; return true;}
 function actionsFor(r){var a=[];
   if(r.visitStatus!=='Completed'&&r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
   if(r.stage==='Visit Completed — Needs Review'){a.push(['recordOfferSent','Record offer sent',1]);a.push(['nurture','Move to nurture',0]);}
@@ -328,7 +329,7 @@ function cardHTML(r){
   var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.id)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
   h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
   if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
-  if(r.sla)h+='<span class="badge crit">⚠ '+esc(r.sla)+'</span>'; if(r.gap>0)h+='<span class="badge crit">⚖ Gap '+money(r.gap)+'</span>'; if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
+  if(r.sla)h+='<span class="badge crit">⚠ '+esc(r.sla)+'</span>'; if(r.conflict)h+='<span class="badge crit">🗓 Double-booked</span>'; if(r.gap>0)h+='<span class="badge crit">⚖ Gap '+money(r.gap)+'</span>'; if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
   h+='</div>';
   if(r.next)h+='<div class="na"><span class="arrow">➜</span><span>'+esc(r.next)+'</span></div>';
   var note=r.lastResult||r.visitNotes; if(note)h+='<div class="result">🗒 <span>'+esc(note)+'</span></div>';
@@ -391,6 +392,7 @@ function renderKPI(live){
   html+=kpi('🔍',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need offer decision','review now','warn');
   html+=kpi('🚨',c(function(r){return !!r.sla;}),'SLA / service failures','fix now','crit');
   html+=kpi('⚖',c(function(r){return r.gap>0;}),'Price gaps','floor > our max','warn');
+  html+=kpi('🗓',c(function(r){return r.conflict;}),'Scheduling conflicts','same visitor, same day','crit');
   html+=kpi('⏰',c(function(r){return r.daysOverdue>0;}),'Overdue tasks','past due date','crit');
   html+=kpi('🐌',c(function(r){return r.stalled;}),'Stalled deals','3+ business days','warn');
   html+=kpi('⚠️',c(function(r){return r.dq==='Incomplete'||r.dq==='Exception';}),'Exceptions','need clean-up','crit');
@@ -505,6 +507,7 @@ function ribbon(live){
   var c=function(f){return live.filter(f).length;};
   var items=[
     ['crit','sla',c(function(r){return !!r.sla;}),'SLA breach'],
+    ['crit','conflict',c(function(r){return r.conflict;}),'Double-booked'],
     ['warn','gap',c(function(r){return r.gap>0;}),'Price gap'],
     ['crit','overdue',c(function(r){return r.daysOverdue>0;}),'Overdue'],
     ['warn','needs',c(function(r){return r.stage==='Visit Completed — Needs Review';}),'Need decision'],
@@ -513,10 +516,18 @@ function ribbon(live){
     ['brand','norei',c(function(r){return !r.rei&&r.stage!=='Lost / Closed Out';}),'REI link missing']
   ];
   document.getElementById('ribbon').innerHTML=items.map(function(it){return '<div class="rchip '+it[0]+'" data-jump="'+it[1]+'"><span class="rv num">'+it[2]+'</span><span class="rl">'+it[3]+'</span></div>';}).join('');
-  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else if(j==='sla')setFilter('sla');else if(j==='gap')setFilter('gap');else setFilter('all');};});
+  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else if(j==='sla')setFilter('sla');else if(j==='gap')setFilter('gap');else if(j==='conflict')setFilter('conflict');else setFilter('all');};});
+}
+function computeConflicts(live){
+  var byKey={};
+  live.forEach(function(r){ r.conflict=false;
+    if(r.visitStatus!=='Scheduled'||!r.visitDate||!r.visitor)return;
+    var k=(r.visitor||'').toLowerCase()+'|'+r.visitDate; (byKey[k]=byKey[k]||[]).push(r); });
+  Object.keys(byKey).forEach(function(k){ if(byKey[k].length>1) byKey[k].forEach(function(r){ r.conflict=true; }); });
 }
 function draw(){
   RECS.forEach(compute); var live=RECS;
+  computeConflicts(live);
   ribbon(live);
   document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports'||VIEW==='trash')?'none':'block';
   if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else if(VIEW==='trash')renderTrash(); else renderData(live);
