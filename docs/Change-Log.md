@@ -1,5 +1,12 @@
 # Change Log — Twin Visit Logger
 
+> **⚠️ Maintenance rule — the bound script is NOT auto-linked to this repo.**
+> The Google Sheet's Apps Script (`Code.gs`) is a manual copy of `apps-script/Code.combined.gs`.
+> **Every code change means: (1) re-paste the latest `Code.combined.gs` into the bound `Code.gs`
+> and Save, then (2) Deploy → Manage deployments → New version.** Skipping either step leaves a
+> stale snapshot live (e.g. the first web-app deploy shipped the pre-WebApp build and lacked the
+> JSON API until it was re-synced). The `/exec` URL stays the same across new versions.
+
 ## v3.1 — 2026-07-23 (Web dashboard DEPLOYED)
 
 The Apps Script Web App dashboard was deployed on the DEV COPY and verified live.
