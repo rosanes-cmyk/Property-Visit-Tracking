@@ -60,6 +60,9 @@ const CFG = {
   // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
   API_TOKEN: '',
+  SANDBOX: true,
+  VISIT_CALENDAR_ID: '',
+  OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',
 };
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
@@ -1106,6 +1109,7 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return apiJson_({ ok: false, error: 'bad JSON' }); }
   if (!apiAuthed_(body)) return apiJson_({ ok: false, error: 'unauthorized' });
   if (body.action === 'data') return apiJson_({ ok: true, data: webGetData() });
+  if (body.action === 'intake') return apiJson_(webIntake_(body.lead || body.params || body));
   return apiJson_(webAction(body.action, body.id, body.params || {}));
 }
 
@@ -1330,6 +1334,97 @@ function slaFor_(rec) {
     if (last && bizDaysBetween_(last, t) >= 2) reasons.push('No contact 48h+');
   }
   return reasons.join(' · ');
+}
+
+/* ---------------- Lead intake (REI BlackBook webhook → tracker + calendar) ---------------- */
+function intakeNorm_(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 24); }
+function intakeDigits_(s){ return String(s || '').replace(/\D/g, ''); }
+function findByAddressOrPhone_(addr, phone) {
+  const sh = dataSheet_(); const last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return null;
+  const n = last - CFG.FIRST_DATA_ROW + 1;
+  const A = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), n, 1).getValues();
+  const P = sh.getRange(CFG.FIRST_DATA_ROW, col('Phone'), n, 1).getValues();
+  const ID = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), n, 1).getValues();
+  const na = intakeNorm_(addr), np = intakeDigits_(phone);
+  for (var i = 0; i < n; i++) {
+    if ((na && intakeNorm_(A[i][0]) === na) || (np && np.length >= 7 && intakeDigits_(P[i][0]) === np))
+      return { rowNum: CFG.FIRST_DATA_ROW + i, id: ID[i][0] };
+  }
+  return null;
+}
+function driveMinutes_(dest) {
+  try {
+    const d = Maps.newDirectionFinder().setOrigin(CFG.OFFICE_ORIGIN).setDestination(dest).getDirections();
+    return Math.ceil(d.routes[0].legs[0].duration.value / 60);
+  } catch (e) { return 0; }
+}
+function maybeCreateVisitEvent_(map, addr) {
+  if (CFG.SANDBOX) return 'skipped (sandbox on)';
+  if (!CFG.VISIT_CALENDAR_ID) return 'skipped (no calendar configured)';
+  try {
+    const cal = CalendarApp.getCalendarById(CFG.VISIT_CALENDAR_ID);
+    if (!cal) return 'calendar not found / not shared';
+    if (!map['Visit Date']) return 'no visit date — event skipped';
+    const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);
+    const end = new Date(start.getTime() + 60 * 60000);
+    const desc = 'Seller: ' + (map['Seller Name'] || '') + '\nPhone: ' + (map['Phone'] || '') +
+                 '\nREI: ' + (map['REI BlackBook Link'] || '') + '\nLead source: ' + (map['Lead Source'] || '');
+    const ev = cal.createEvent('Property Visit - ' + addr, start, end, { description: desc, location: addr });
+    const mins = driveMinutes_(addr);
+    ev.removeAllReminders();
+    if (mins) ev.addPopupReminder(mins);
+    ev.addPopupReminder(30);
+    return 'event created (' + (mins ? mins + 'm drive reminder' : '30m only') + ')';
+  } catch (e) { return 'error: ' + e; }
+}
+function webIntake_(lead) {
+  lead = lead || {};
+  const g = function(a, b){ return lead[a] != null && lead[a] !== '' ? lead[a] : (lead[b] != null ? lead[b] : ''); };
+  const addr = g('Property Address', 'address'), phone = g('Phone', 'phone');
+  if (!addr) return { ok: false, error: 'Property Address is required' };
+  const dup = findByAddressOrPhone_(addr, phone);
+  if (dup) return { ok: true, duplicate: true, id: dup.id };
+  const sh = dataSheet_(); ensureRows_(sh, CFG.MAX_ROWS);
+  var row = 0;
+  const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < addrs.length; i++) { if (String(addrs[i][0]).trim() === '') { row = CFG.FIRST_DATA_ROW + i; break; } }
+  if (!row) return { ok: false, error: 'No empty rows available (increase MAX_ROWS)' };
+  const map = {
+    'Property Address': addr, 'Seller Name': g('Seller Name', 'seller'), 'Phone': phone,
+    'Email': g('Email', 'email'), 'Lead Source': g('Lead Source', 'lead'),
+    'REI BlackBook Link': g('REI BlackBook Link', 'rei'),
+    'Visit Date': g('Visit Date', 'visitDate'), 'Visit Time': g('Visit Time', 'visitTime'),
+    'Assigned Visitor': g('Assigned Visitor', 'visitor'),
+    'Visit Status': 'Scheduled', 'Current Stage': 'Visit Scheduled',
+    'Next Action': 'Conduct scheduled visit & log outcome',
+    'Next Action Due Date': g('Visit Date', 'visitDate')
+  };
+  const R = new RowAccessor_(sh, row);
+  Object.keys(map).forEach(function(h){ var v = map[h]; if (v === '' || v == null) return; if (h.indexOf('Date') >= 0) R.set(h, new Date(v)); else R.set(h, v); });
+  R.set('Property ID', nextPropertyId_());
+  R.set('Source', CFG.SANDBOX ? 'Intake-Sandbox' : 'Intake');
+  R.set('Created Date', today_());
+  stamp_(R); R.flush();
+  const cal = maybeCreateVisitEvent_(map, addr);
+  SpreadsheetApp.flush();
+  return { ok: true, created: true, id: R.get('Property ID'), sandbox: !!CFG.SANDBOX, calendar: cal };
+}
+function testIntake() {
+  const sample = {
+    'Property Address': '123 Sandbox Test Ave, Testville, CA 90000',
+    'Seller Name': 'Intake Test', 'Phone': '(000) 000-1234', 'Lead Source': 'PPC',
+    'Visit Date': Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+  };
+  var res = webIntake_(sample);
+  Logger.log('INTAKE RESULT: ' + JSON.stringify(res));
+  var res2 = webIntake_(sample);
+  Logger.log('DEDUPE CHECK (should say duplicate:true): ' + JSON.stringify(res2));
+  if (res.ok && res.created) { var rn = findRowById_(res.id); if (rn) clearRecordRow_(dataSheet_(), rn); }
+  SpreadsheetApp.getActive().toast(
+    'Intake test: ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · created ' + (res.id || '-') +
+    ' · calendar: ' + (res.calendar || '-') + ' · dedupe: ' + (res2.duplicate ? 'OK' : 'FAILED') +
+    ' · test row cleaned up.', 'testIntake', 12);
 }
 
 /* ---------------- Trash: soft delete + restore ---------------- */

@@ -25,6 +25,10 @@ const CFG = {
   // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
   API_TOKEN: '',
+  // ---- Lead intake automation (REI BlackBook webhook → doPost action:'intake') ----
+  SANDBOX: true,                 // true = write leads to the DEV COPY but DO NOT create real calendar events (report only)
+  VISIT_CALENDAR_ID: '',         // Juan's calendar id (e.g. pecuniary2@gmail.com) once shared with edit rights; blank = no events
+  OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',   // drive-time origin for the "leave office by" reminder
 };
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
