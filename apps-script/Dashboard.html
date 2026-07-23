@@ -225,6 +225,7 @@ var OWNERS=['Jonathan','Kyle','Cherry','Juan','JM'];
 var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
 var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
 var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
+var NEXT_ACTIONS=['Conduct scheduled visit & log outcome','Decide: make offer or pass','Follow up on sent offer','Re-attempt contact (no reply)','Decide counter response','Prepare & send contract','Confirm signature','Hand off signed contract to JM','Nurture check-in call','Send requested info to seller'];
 
 var RECS=[];
 
@@ -524,9 +525,9 @@ var AF={recordOfferSent:{t:'Record offer sent',f:[['offer','Approved offer amoun
   sellerCounter:{t:'Seller countered',f:[['counter','Counteroffer amount','number',1],['lastResult','What the seller said','text',0]]},
   contractSent:{t:'Contract sent',f:[['contractSent','Contract sent date','date',1]]},
   contractSigned:{t:'Contract signed',f:[['contractSigned','Contract signed date','date',1]]},
-  logContact:{t:'Log follow-up',f:[['lastResult','Result of contact','text',1],['next','Next action','text',0],['due','Next action due date','date',0]]},
-  nurture:{t:'Move to long-term nurture',f:[['due','Future follow-up date','date',1],['next','Next action','text',0]]},
-  setNextAction:{t:'Set next action',f:[['next','Next action','text',1],['due','Due date','date',0],['owner','Assigned owner','owner',0]]},
+  logContact:{t:'Log follow-up',f:[['lastResult','Result of contact','text',1],['next','Next action','nextaction',0],['due','Next action due date','date',0]]},
+  nurture:{t:'Move to long-term nurture',f:[['due','Future follow-up date','date',1],['next','Next action','nextaction',0]]},
+  setNextAction:{t:'Set next action',f:[['next','Next action','nextaction',1],['due','Due date','date',0],['owner','Assigned owner','owner',0]]},
   visitCompleted:{t:'Mark visit completed',f:[]}};
 function applyAction(act,r,v){
   if(act==='visitCompleted'){r.stage='Visit Completed — Needs Review';r.visitStatus='Completed';r.owner=r.owner||'Jonathan';r.due=todayISO();r.next=r.next||'Decide: make offer or pass';}
@@ -544,13 +545,15 @@ function openAction(act,id){var r=RECS.filter(function(x){return x.id===id;})[0]
   modal(spec.t+' — '+r.seller,spec.f,fire);}
 function field(f,val){var k=f[0],label=f[1],type=f[2],req=f[3],inp;
   if(type==='owner')inp='<select data-k="'+k+'"><option value="">(keep current)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select>';
+  else if(type==='nextaction')inp='<select data-k="'+k+'" data-na="1"><option value="">— choose an action —</option>'+NEXT_ACTIONS.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'<option value="__custom__">✍️ Type a custom action…</option></select><input data-k="'+k+'__custom" placeholder="Type the next action" style="display:none;margin-top:8px">';
   else inp='<input data-k="'+k+'" type="'+(type==='number'?'number':type==='date'?'date':'text')+'" value="'+esc(val||'')+'">';
   return '<div class="field"><label>'+esc(label)+(req?' *':'')+'</label>'+inp+'</div>';}
 function modal(title,fields,onSave,cap){var host=document.createElement('div');host.className='modal-bg';var today=todayISO();
   host.innerHTML='<div class="modal"><h3>'+esc(title)+'</h3>'+(cap?'<p class="cap">'+esc(cap)+'</p>':'')+fields.map(function(f){return field(f,f[2]==='date'?today:'');}).join('')+'<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
-  host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');v[f[0]]=el.value;if(f[3]&&!String(el.value).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
+  host.querySelectorAll('select[data-na]').forEach(function(sel){var c=host.querySelector('[data-k="'+sel.getAttribute('data-k')+'__custom"]');sel.onchange=function(){if(sel.value==='__custom__'){c.style.display='block';c.focus();}else{c.style.display='none';}};});
+  host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');var val=el?el.value:'';if(f[2]==='nextaction'&&val==='__custom__'){var c=host.querySelector('[data-k="'+f[0]+'__custom"]');val=c?c.value:'';}v[f[0]]=val;if(f[3]&&!String(val).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
 function openAdd(){var host=document.createElement('div');host.className='modal-bg';
   host.innerHTML='<div class="modal"><h3>Add a property visit</h3><p class="cap">In the live app this saves straight to the Google Sheet.</p>'+
