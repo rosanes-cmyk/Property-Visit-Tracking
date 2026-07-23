@@ -210,6 +210,20 @@ function webAction(action, id, params) {
         if (params.due) R.set('Next Action Due Date', new Date(params.due));
         if (params.owner) R.set('Assigned Owner', params.owner);
         stamp_(R); R.flush(); break;
+      case 'updateRecord': {
+        // edit any INPUT field from the full-record view (computed columns are ignored)
+        var locked = COMPUTED_HEADERS.concat(['Property ID','Created Date','Last Updated Date','Updated By']);
+        Object.keys(params).forEach(function(h){
+          if (HEADERS.indexOf(h) < 0 || locked.indexOf(h) >= 0) return;
+          var val = params[h];
+          if (h.indexOf('Date') >= 0) R.set(h, val ? new Date(val) : '');
+          else if (h === 'Approved Offer Amount' || h === 'Counteroffer Amount' || h === 'Asking Price' || h === 'Price Expectation') R.set(h, val === '' || val == null ? '' : Number(val));
+          else R.set(h, val == null ? '' : val);
+        });
+        stamp_(R); R.flush(); break;
+      }
+      case 'deleteRecord':
+        clearRecordRow_(sh, rowNum); break;      // clears the row in place; formulas restored, grid unchanged
       default:
         return { ok: false, error: 'Unknown action: ' + action };
     }

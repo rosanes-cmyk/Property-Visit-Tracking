@@ -143,6 +143,10 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
 .dl-row{background:var(--surface);display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 12px;font-size:12.5px}
 .dl-row dt{color:var(--muted);font-weight:600} .dl-row dd{margin:0;color:var(--ink);word-break:break-word}
 .dl-row.empty dd{color:var(--faint)}
+.dl-row.edit{align-items:center} .dl-row.edit dd input,.dl-row.edit dd select{width:100%;padding:6px 8px;font-size:12.5px}
+.btn.danger{background:var(--crit-bg);color:var(--crit);border-color:transparent}
+.btn.danger:hover{filter:brightness(1.08)}
+.detail .foot{display:flex;align-items:center;gap:10px}
 .detail .foot{padding:14px 24px;border-top:1px solid var(--border);position:sticky;bottom:0;background:var(--surface);border-radius:0 0 16px 16px}
 @media(max-width:620px){.dl-grp dl{grid-template-columns:1fr}.dl-row{grid-template-columns:130px 1fr}}
 .btn{border:1px solid var(--border-2);background:var(--surface);color:var(--ink);border-radius:var(--r-xs);padding:10px 16px;cursor:pointer;font:inherit;font-weight:600}
@@ -254,16 +258,43 @@ function valOf(r,k){var v=r[k];
   if(k==='dq')return r.dq||'';
   if(k==='offer'||k==='counter'||k==='asking')return v?money(v):'';
   return (v==null||v==='')?'':String(v);}
-function openDetail(id){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;
+var RO_FIELDS=['Property ID','Normalized Address','Days Since Last Activity','Days Overdue','Stalled Status','Missing Required Fields','Duplicate Address Flag','Opportunity Priority','Data Quality Status','Exception Reason','Created Date','Last Updated Date','Updated By'];
+var ENUM_FIELDS={'Visit Status':['','Scheduled','Completed','Canceled','Reschedule Needed'],'Current Stage':['','Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],'Assigned Owner':['','Jonathan','Kyle','Cherry','Juan','JM'],'Assigned Visitor':['','Juan','Kyle','Cherry','Jonathan','JM','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],'Final Disposition':['','Contracted','Lost','Long-Term Nurture','Closed Out'],'Gift Status':['','Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],'Blocker':['','Price','Title','Tenant','Family','Access','Timing','Documents','Seller Unresponsive','Other'],'Transaction Handoff Status':['','Not Ready','Ready for Handoff','Handed Off to JM','JM Confirmed'],'Offer Status':['','Not Sent','Sent','Accepted','Countered','Rejected']};
+var NUM_FIELDS=['Approved Offer Amount','Counteroffer Amount','Asking Price','Price Expectation'];
+function cur_(r,f){return (r.full&&r.full[f[1]]!=null&&r.full[f[1]]!=='')?String(r.full[f[1]]):(valOf(r,f[0])||'');}
+function detailField_(r,f,edit){
+  var label=f[1], v=cur_(r,f);
+  if(!edit||RO_FIELDS.indexOf(label)>=0){
+    var link=(f[0]==='rei'&&v)?'<a href="'+esc(v)+'" target="_blank" rel="noreferrer">Open REI ↗</a>':esc(v||'—');
+    return '<div class="dl-row'+(v?'':' empty')+'"><dt>'+esc(label)+'</dt><dd>'+link+'</dd></div>';
+  }
+  var inp;
+  if(ENUM_FIELDS[label]){var opts=ENUM_FIELDS[label].slice();if(v&&opts.indexOf(v)<0)opts.push(v);inp='<select data-h="'+esc(label)+'">'+opts.map(function(o){return '<option'+(o===v?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
+  else if(label.indexOf('Date')>=0)inp='<input data-h="'+esc(label)+'" type="date" value="'+esc(v)+'">';
+  else if(NUM_FIELDS.indexOf(label)>=0)inp='<input data-h="'+esc(label)+'" type="number" value="'+esc(v)+'">';
+  else inp='<input data-h="'+esc(label)+'" type="text" value="'+esc(v)+'">';
+  return '<div class="dl-row edit"><dt>'+esc(label)+'</dt><dd>'+inp+'</dd></div>';
+}
+function openDetail(id,edit){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;
   var host=document.createElement('div');host.className='modal-bg';
   var body=SCHEMA.map(function(g){
-    var rows=g[1].map(function(f){var v=(r.full&&r.full[f[1]]!=null&&r.full[f[1]]!=='')?String(r.full[f[1]]):valOf(r,f[0]);var link=(f[0]==='rei'&&v)?'<a href="'+esc(v)+'" target="_blank" rel="noreferrer">Open REI ↗</a>':esc(v||'—');
-      return '<div class="dl-row'+(v?'':' empty')+'"><dt>'+esc(f[1])+'</dt><dd>'+link+'</dd></div>';}).join('');
+    var rows=g[1].map(function(f){return detailField_(r,f,edit);}).join('');
     return '<div class="dl-grp"><h4>'+esc(g[0])+'</h4><dl>'+rows+'</dl></div>';}).join('');
-  host.innerHTML='<div class="modal detail"><div class="dhead"><div><div class="d-seller">'+sellerLink(r)+'</div><div class="d-addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div><div class="dbody">'+body+'</div><div class="foot"><button class="btn p" data-x>Close</button></div></div>';
+  var foot=edit
+    ? '<button class="btn" data-x>Cancel</button><button class="btn p" data-save>Save changes</button>'
+    : '<button class="btn danger" data-del>🗑 Delete</button><span style="flex:1"></span><button class="btn" data-edit>✏️ Edit</button><button class="btn p" data-x>Close</button>';
+  host.innerHTML='<div class="modal detail"><div class="dhead"><div><div class="d-seller">'+sellerLink(r)+'</div><div class="d-addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div><div class="dbody">'+body+'</div><div class="foot">'+foot+'</div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
-  host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;}
-function todayISO(){return '2026-07-23';}
+  host.addEventListener('click',function(e){if(e.target===host)close();});
+  host.querySelector('[data-x]').onclick=close;
+  if(!edit){
+    host.querySelector('[data-edit]').onclick=function(){close();openDetail(id,true);};
+    host.querySelector('[data-del]').onclick=function(){if(window.confirm('Delete this record permanently? It will be cleared from the sheet.')){toast('Deleting…');runAction('deleteRecord',id,{},close);}};
+  } else {
+    host.querySelector('[data-save]').onclick=function(){var params={};host.querySelectorAll('[data-h]').forEach(function(el){params[el.getAttribute('data-h')]=el.value;});toast('Saving…');runAction('updateRecord',id,params,close);};
+  }
+}
+function todayISO(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 
 var SECTIONS=[
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
