@@ -1,5 +1,21 @@
 # Change Log — Twin Visit Logger
 
+## v3.0 — 2026-07-22 (PILOT ACTIVATED in dev copy)
+
+Pilot automation went live in the DEV COPY. Original *Property Visit Tracking* workbook untouched.
+- **Triggers installed & confirmed active (4):** `onEditInstallable` (on edit), `checkNoDecision`
+  (hourly), `checkStalled` (daily), `sendDailyReport` (daily). `installTriggers` completed 4:53:46 PM.
+- **`CFG.REPORT_TO`** set to an internal Twin Home Buyer address; Daily Report previewed.
+- **Real-update test PASS:** TVL-0002 (Steve Giorgi) Visit Status → Completed correctly set
+  Current Stage = Visit Completed — Needs Review, Owner = Jonathan, Next Action + same-day Due Date,
+  created one Task Queue row, surfaced on the Board — no duplicates, no seller contact.
+- **Exception Queue = 4** Cherry-approved documented exceptions (TVL-0001/0002/0003/0009); missing
+  REI values intentionally left blank (not invented).
+- **Kill switch** `removeAllTriggers()` available. See `docs/Pilot-Go-Live-Report.md`.
+
+Pilot scope only: existing 10 real records; no full REI BlackBook load; no automatic pricing,
+negotiation, gift, or seller contact.
+
 ## v2.3-final — 2026-07-22 (INDEPENDENTLY VERIFIED in dev copy; triggers still OFF)
 
 Final verified status of the development copy (independent review):
