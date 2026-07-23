@@ -4,7 +4,9 @@
  * ================================================================
  *  Setup:  paste into the DEV COPY's Apps Script -> Save -> reload sheet.
  *  Sheet menu "🏠 Twin Visit Logger" runs setup / load / tests / triggers.
- *  WEB DASHBOARD: Deploy -> New deployment -> Web app (Execute as: Me).
+ *  WEB DASHBOARD (built-in): Deploy -> New deployment -> Web app.
+ *  JSON API (for the external Vercel website): set CFG.API_TOKEN, deploy Web app access "Anyone",
+ *    then GET ?api=data&token=... and POST {token,action,id,params}.
  *  Concatenation of Config/Setup/LoadData/Automation/DailyReport/WebApp/Tests.
  *  Never contacts sellers. Original workbook never modified. Triggers never auto-install.
  * ================================================================
@@ -54,6 +56,9 @@ const CFG = {
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
+  // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
+  // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
+  API_TOKEN: '',
 };
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).
@@ -1077,11 +1082,31 @@ function readAllRows_() {
  *   Execute as: Me | Who has access: (your choice, e.g. anyone in your org). Open the /exec URL.
  */
 
-function doGet() {
-  return HtmlService.createHtmlOutput(dashboardHtml_())
+function doGet(e) {
+  e = e || {}; const p = e.parameter || {};
+  if (p.api) {                                   // JSON API for the external website
+    if (!apiAuthed_(p)) return apiJson_({ ok: false, error: 'unauthorized' });
+    if (p.api === 'data') return apiJson_({ ok: true, data: webGetData() });
+    return apiJson_({ ok: false, error: 'unknown api endpoint' });
+  }
+  return HtmlService.createHtmlOutput(dashboardHtml_())   // built-in HTML dashboard (org-internal)
     .setTitle('Twin Visit Logger')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/** JSON API for writes from the website's serverless proxy. Body: {token, action, id, params}. */
+function doPost(e) {
+  var body = {};
+  try { body = JSON.parse(e.postData.contents); } catch (err) { return apiJson_({ ok: false, error: 'bad JSON' }); }
+  if (!apiAuthed_(body)) return apiJson_({ ok: false, error: 'unauthorized' });
+  if (body.action === 'data') return apiJson_({ ok: true, data: webGetData() });
+  return apiJson_(webAction(body.action, body.id, body.params || {}));
+}
+
+function apiAuthed_(o) { return !!CFG.API_TOKEN && o && String(o.token) === String(CFG.API_TOKEN); }
+function apiJson_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
 /* ---------------- server: read ---------------- */
@@ -1160,8 +1185,50 @@ function findRowById_(id) {
  * The dashboard only records values the user supplies — it never sets prices/decisions itself
  * and never messages a seller.
  */
+/** Next TVL-#### id based on existing ids. */
+function nextPropertyId_() {
+  const sh = dataSheet_();
+  const last = sh.getLastRow();
+  var max = 0;
+  if (last >= CFG.FIRST_DATA_ROW) {
+    const ids = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), last - CFG.FIRST_DATA_ROW + 1, 1).getValues();
+    ids.forEach(function(r){ const m = String(r[0]).match(/TVL-(\d+)/); if (m) max = Math.max(max, Number(m[1])); });
+  }
+  return 'TVL-' + ('000' + (max + 1)).slice(-4);
+}
+
+/** Create a NEW record from the website. Writes into the first empty row (grid never shrinks),
+ *  stamps Property ID + Source=Manual + Created Date, then runs the visit-status handler so the
+ *  same automation fires. Never contacts sellers. */
+function webAddRecord_(params) {
+  const sh = dataSheet_();
+  ensureRows_(sh, CFG.MAX_ROWS);
+  var row = 0;
+  const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
+  for (var i = 0; i < addrs.length; i++) { if (String(addrs[i][0]).trim() === '') { row = CFG.FIRST_DATA_ROW + i; break; } }
+  if (!row) return { ok: false, error: 'No empty rows available (increase MAX_ROWS).' };
+  if (!params['Property Address']) return { ok: false, error: 'Property Address is required.' };
+  const R = new RowAccessor_(sh, row);
+  const map = ['Property Address','Seller Name','Phone','Email','Lead Source','Visit Date','Visit Time',
+    'Visit Status','Assigned Visitor','Visit Notes','Seller Motivation','Current Stage','Assigned Owner',
+    'Next Action','Next Action Due Date','REI BlackBook Link'];
+  map.forEach(function(h){
+    if (params[h] === undefined || params[h] === '') return;
+    if (h.indexOf('Date') >= 0) R.set(h, new Date(params[h])); else R.set(h, params[h]);
+  });
+  R.set('Property ID', nextPropertyId_());
+  R.set('Source', 'Manual');
+  R.set('Created Date', today_());
+  stamp_(R);
+  R.flush();
+  if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
+  SpreadsheetApp.flush();
+  return { ok: true, data: webGetData(), newId: R.get('Property ID') };
+}
+
 function webAction(action, id, params) {
   params = params || {};
+  if (action === 'addRecord') { try { return webAddRecord_(params); } catch (e) { return { ok: false, error: String(e) }; } }
   const sh = dataSheet_();
   const rowNum = findRowById_(id);
   if (!rowNum) return { ok: false, error: 'Record not found: ' + id };
