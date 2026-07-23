@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Twin Visit Logger</title>
 <style>
 /* Single rich near-black theme with vibrant, lively accents (black-only) */
@@ -182,6 +187,9 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
   a{color:inherit;text-decoration:none}
 }
 </style>
+</head>
+<body>
+
 
 <div class="appbar">
   <div class="brand"><span class="logo">🏠</span><h1>Twin Visit Logger</h1><span class="env" id="env">Live · saving to the sheet</span></div>
@@ -479,8 +487,8 @@ function setView(v){VIEW=v;PAGE={};DPAGE=0;function hydrate(x){return {id:x.id,s
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
 function onData(d){RECS=(d.records||[]).map(hydrate);if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
-function refresh(){google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}
-function runAction(act,id,params,after){google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
+function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
+function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
 document.querySelectorAll('.seg button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v);});draw();window.scrollTo(0,0);}
 function setFilter(f){FILTER=f;PAGE={};DPAGE=0;document.querySelectorAll('.chip[data-f]').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-f')===f);});draw();}
 function drawReset(){PAGE={};DPAGE=0;draw();}
@@ -540,3 +548,5 @@ os.onchange=drawReset;document.getElementById('search').oninput=drawReset;docume
 document.getElementById('wrap').innerHTML='<div class="empty">Loading live data\u2026</div>';
 refresh();
 </script>
+</body>
+</html>
