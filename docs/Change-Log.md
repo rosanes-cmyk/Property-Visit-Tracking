@@ -1,5 +1,16 @@
 # Change Log — Twin Visit Logger
 
+## v3.1 — 2026-07-23 (Web dashboard DEPLOYED)
+
+The Apps Script Web App dashboard was deployed on the DEV COPY and verified live.
+- URL: `https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbx13gEK5suKTAnQztKFAJWViZSrL40edm3CpC25RnQC_rHoUl37VQRbIBB5QLtU0aBXjg/exec`
+- Version 1 · Execute as rosanes@twinhomebuyer.com · Access: Anyone within **equitytrack.org**
+  (org-internal; twinhomebuyer.com is an alias on that Workspace org).
+- Verified: 10 live records, real sellers only, no TEST/Auto rows, sections render correctly.
+- The DEV COPY's bound script was updated to the full latest `Code.combined.gs` (it had lacked the
+  dashboard section); original workbook untouched; no scope/trigger changes during deploy.
+- Sheet remains the database; dashboard is a live view + guarded quick-action layer.
+
 ## v3.0 — 2026-07-22 (PILOT ACTIVATED in dev copy)
 
 Pilot automation went live in the DEV COPY. Original *Property Visit Tracking* workbook untouched.

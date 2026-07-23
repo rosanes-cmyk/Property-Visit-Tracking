@@ -5,6 +5,19 @@ the **database / source of truth**; the dashboard reads it live and its quick-ac
 through the **same automation + validation** as a manual edit. It never contacts sellers and never
 shows Source = TEST records.
 
+## Live deployment (2026-07-23)
+- **Web app URL (/exec):**
+  `https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbx13gEK5suKTAnQztKFAJWViZSrL40edm3CpC25RnQC_rHoUl37VQRbIBB5QLtU0aBXjg/exec`
+- **Deployment:** Version 1 · **Execute as:** rosanes@twinhomebuyer.com · **Access:** Anyone within
+  **equitytrack.org** (the Workspace org; twinhomebuyer.com is an alias on it — org-internal, not
+  "anyone with the link").
+- **Verified:** loads "🏠 Twin Visit Logger — 2026-07-23 · 10 live records"; sections render with real
+  sellers (James White, Carmen Green, Steve Giorgi); **no TEST/Auto rows**; no action buttons clicked.
+- The DEV COPY's bound script now runs the full latest `Code.combined.gs` (includes the dashboard).
+  Original workbook untouched; no scope/trigger changes made during deploy.
+- **To update after code changes:** Deploy → Manage deployments → ✏️ → Version: *New version* → Deploy
+  (URL stays the same).
+
 ## What it shows
 The same 10 sections as the Cherry Opportunity Board — Contracts Possible This Week, Visited — No
 Offer Decision, Offer Sent — Follow-Up Due, Stalled Deals, Overdue Tasks, Negotiation Decisions,
