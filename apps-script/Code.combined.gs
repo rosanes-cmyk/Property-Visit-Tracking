@@ -992,6 +992,10 @@ function reportSections_() {
   const ov = function(r){ return Number(r['Days Overdue']) || 0; };
 
   return [
+    { title: 'SLA / Service Failures',
+      rows: f(function(r){ return !!slaFor_(r); }).sort(byOverdue_) },
+    { title: 'Scheduling Conflicts',
+      rows: conflictRows_(active) },
     { title: 'Contracts Possible This Week',
       rows: f(function(r){ return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r['Current Stage'])>=0; })
               .sort(function(a,b){ return (Number(b['Opportunity Priority'])||0)-(Number(a['Opportunity Priority'])||0); }) },
@@ -1016,6 +1020,16 @@ function reportSections_() {
   ];
 }
 function byOverdue_(a,b){ return (Number(b['Days Overdue'])||0)-(Number(a['Days Overdue'])||0); }
+function conflictRows_(active){
+  var byKey={}, flagged=[];
+  active.forEach(function(r){
+    if(r['Visit Status']!=='Scheduled' || !r['Visit Date'] || !r['Assigned Visitor']) return;
+    var k=String(r['Assigned Visitor']).toLowerCase()+'|'+fmt_(r['Visit Date']);
+    (byKey[k]=byKey[k]||[]).push(r);
+  });
+  Object.keys(byKey).forEach(function(k){ if(byKey[k].length>1) byKey[k].forEach(function(r){ flagged.push(r); }); });
+  return flagged;
+}
 
 function renderReportHtml_(sections, total) {
   const cols = ['Property Address','Seller Name','Current Stage','Next Action','Assigned Owner','Next Action Due Date','Days Overdue','Blocker'];
