@@ -32,12 +32,36 @@ before loading, so we don't have to reload. Re-running is safe (it clears + relo
 
 ---
 
-## TASK 3 — Deploy the Web App (short path) ⏸️ HOLD until Task 1 passes + Jonathan says go
+## TASK 3 — Deploy the polished Web App (short path) ⏸️ after Task 1 passes + Jonathan says go
 
-> When approved: in the DEV COPY's Apps Script → **Deploy → New deployment** → type
-> **Web app** → Execute as **Me** → Who has access **Anyone within twinhomebuyer.com** →
-> **Deploy**. Copy the `/exec` URL and send it to Jonathan. (No token / OAuth / Netlify
-> needed on this path — Google handles the company sign-in.)
+This puts the full polished dashboard online, saving live to the DEV COPY. No token,
+no OAuth client, no Netlify — Google handles the company sign-in.
+
+**3a. Update the code file**
+> In the DEV COPY → **Extensions → Apps Script**. Open the main code file (the one holding
+> the project code) and **replace its entire contents** with `apps-script/Code.combined.gs`
+> from the repo (branch `claude/twin-visit-logger-audit-klfeyo`). **Save**.
+
+**3b. Add the dashboard HTML file**
+> Click **＋ → HTML**. Name it exactly **`Dashboard`** (Apps Script adds `.html` itself).
+> Delete the placeholder content and paste the entire contents of `apps-script/Dashboard.html`.
+> **Save**.
+
+**3c. Deploy**
+> **Deploy → New deployment** → gear ⚙ → **Web app**.
+> • Description: `Twin Visit Logger dashboard`
+> • Execute as: **Me**
+> • Who has access: **Anyone within twinhomebuyer.com**
+> → **Deploy** → approve the permission prompt → **copy the `/exec` URL** and send it to Jonathan.
+
+**3d. Smoke test (report results)**
+> Open the `/exec` URL. Confirm: (1) it loads the board with real leads, (2) your email
+> shows top-right, (3) click **＋ Add property**, add a test address → a "Saved ✔" toast
+> appears → open the DEV COPY Data sheet and confirm the new row is there. Then delete that
+> test row. Report: does add-from-dashboard show up in the sheet? (yes/no + screenshot)
+
+> Later revisions: edit code/HTML → **Deploy → Manage deployments → Edit ✏️ → Version: New
+> version → Deploy**. Same URL stays.
 
 ---
 
