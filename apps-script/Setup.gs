@@ -226,7 +226,7 @@ function writeFormulas_(sh) {
   ['Visit Date','Offer Prepared Date','Offer Sent Date','Offer Promised Date','Last Contact Date','Next Action Due Date',
    'Gift Sent Date','Gift Approval Date','Contract Sent Date','Contract Signed Date','Created Date','Last Updated Date']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('yyyy-mm-dd'); });
-  ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount']
+  ['Asking Price','Price Expectation','Approved Offer Amount','Counteroffer Amount','Seller Floor','Our Max']
     .forEach(function(h){ sh.getRange(first, col(h), last-first+1, 1).setNumberFormat('$#,##0'); });
   // integer columns (must NOT inherit a date format)
   ['Days Since Last Activity','Days Overdue','Opportunity Priority']

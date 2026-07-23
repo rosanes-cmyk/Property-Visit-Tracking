@@ -54,6 +54,7 @@ const HEADERS = [
   // Relationship (appended so the original 59 columns keep their positions on the live sheet)
   'Gift Approved By','Gift Approval Date',
   'Offer Promised Date',
+  'Seller Floor','Our Max',
 ];
 
 const DROPDOWNS = {

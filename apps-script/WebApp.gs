@@ -86,6 +86,9 @@ function webGetData() {
         handoff: rec['Transaction Handoff Status'] || '',
         gift: rec['Gift Status'] || '',
         offerPromised: fmt_(rec['Offer Promised Date']),
+        sellerFloor: rec['Seller Floor'] || '',
+        ourMax: rec['Our Max'] || '',
+        priceGap: (Number(rec['Seller Floor']) && Number(rec['Our Max']) && Number(rec['Seller Floor']) > Number(rec['Our Max'])) ? (Number(rec['Seller Floor']) - Number(rec['Our Max'])) : 0,
         sla: slaFor_(rec),
         full: full
       });
