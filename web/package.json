@@ -2,7 +2,7 @@
   "name": "twin-visit-logger-web",
   "private": true,
   "version": "1.0.0",
-  "description": "Twin Visit Logger web dashboard (Next.js on Vercel). Google Sheet stays the database via the Apps Script JSON API.",
+  "description": "Twin Visit Logger web dashboard (Next.js, deploy on Netlify or Vercel). Google Sheet stays the database via the Apps Script JSON API.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
