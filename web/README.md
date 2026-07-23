@@ -1,4 +1,10 @@
-# Twin Visit Logger — Web App (Next.js on Vercel)
+# Twin Visit Logger — Web App (Next.js)
+
+> **Chosen free host: Netlify** (free tier allows small commercial use). Deploy steps for a coworker/
+> Cowork: [`../docs/Coworker-Netlify-Deploy-Runbook.md`](../docs/Coworker-Netlify-Deploy-Runbook.md).
+> `netlify.toml` (repo root) already points the build at this `web/` folder. Vercel also works — the
+> steps below list Vercel, but the env vars and Google-OAuth setup are identical for Netlify.
+
 
 A standalone website for the pilot: Google sign-in (equitytrack.org / twinhomebuyer.com only), shows
 every section (Contracts Possible, Needs Offer Decision, Offer Follow-Up, Stalled, Overdue,

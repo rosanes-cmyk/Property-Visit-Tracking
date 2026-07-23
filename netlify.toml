@@ -1,0 +1,10 @@
+# Netlify configuration — deploys the Next.js app located in web/.
+# The official Next.js runtime turns the App Router API routes (/api/data, /api/action,
+# /api/auth/*) into Netlify Functions automatically — no separate function code needed.
+
+[build]
+  base = "web"
+  command = "npm run build"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
