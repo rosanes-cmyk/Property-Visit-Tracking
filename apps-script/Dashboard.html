@@ -483,13 +483,7 @@ function draw(){
   document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports')?'none':'block';
   if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else renderData(live);
 }
-function setView(v){VIEW=v;PAGE={};DPAGE=0;function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Number(x.daysOverdue)||0,stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,full:x.full};}
-function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
-function onData(d){RECS=(d.records||[]).map(hydrate);if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
-function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
-function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
-function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
-document.querySelectorAll('.seg button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v);});draw();window.scrollTo(0,0);}
+function setView(v){VIEW=v;PAGE={};DPAGE=0;document.querySelectorAll('.seg button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v);});draw();window.scrollTo(0,0);}
 function setFilter(f){FILTER=f;PAGE={};DPAGE=0;document.querySelectorAll('.chip[data-f]').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-f')===f);});draw();}
 function drawReset(){PAGE={};DPAGE=0;draw();}
 
@@ -541,6 +535,12 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
     var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
     toast('Adding…');runAction('addRecord',null,params,close);};}
 
+function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Number(x.daysOverdue)||0,stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,full:x.full};}
+function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
+function onData(d){RECS=(d.records||[]).map(hydrate);if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
+function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
+function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
 document.querySelectorAll('.seg button').forEach(function(b){b.onclick=function(){setView(b.getAttribute('data-v'));};});
 document.querySelectorAll('.chip[data-f]').forEach(function(c){c.setAttribute('tabindex','0');c.onclick=function(){setFilter(c.getAttribute('data-f'));};});
 var os=document.getElementById('owner');OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});
