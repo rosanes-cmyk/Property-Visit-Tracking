@@ -60,7 +60,8 @@ function processIntakeInbox_() {
     try { res = webIntake_(lead); } catch (e) { res = { ok: false, error: String(e) }; }
     var rowNum = 2 + r;
     sh.getRange(rowNum, idx['Status'] + 1).setValue(
-      res.ok ? (res.created ? 'Logged (new)' : 'Logged (updated)') : ('Error: ' + res.error));
+      res.ok ? ((res.created ? 'Logged (new)' : 'Logged (updated)') + ' · cal: ' + (res.calendar || '-'))
+             : ('Error: ' + res.error));
     if (idx['Property ID'] != null) sh.getRange(rowNum, idx['Property ID'] + 1).setValue(res.ok ? (res.id || '') : '');
     if (idx['Processed At'] != null) sh.getRange(rowNum, idx['Processed At'] + 1).setValue(new Date());
     processed++; if (res.ok) logged++; else errors++;
