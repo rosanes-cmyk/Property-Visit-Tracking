@@ -123,6 +123,8 @@ function processReiTaskEmails_() {
           'Property Address': p.address,
           'Visit Date': p.visitDate || '',
           'Visit Time': p.visitTime || '',
+          'Visit Status': 'Scheduled',          // a booking is always a scheduled visit...
+          'Current Stage': 'Visit Scheduled',   // ...so it shows on the dashboard even on an update
           'Lead Source': GMAIL_CFG.LEAD_SOURCE,
           'Task Body': title
         };
