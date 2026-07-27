@@ -26,8 +26,8 @@ const CFG = {
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
   API_TOKEN: '',
   // ---- Lead intake automation (REI BlackBook webhook → doPost action:'intake') ----
-  SANDBOX: true,                 // true = write leads to the DEV COPY but DO NOT create real calendar events (report only)
-  VISIT_CALENDAR_ID: '',         // Juan's calendar id (e.g. pecuniary2@gmail.com) once shared with edit rights; blank = no events
+  SANDBOX: true,                 // tags intake rows Source='Intake-Sandbox' (isolates test loads). Calendar is controlled separately below.
+  VISIT_CALENDAR_ID: 'rosanes@twinhomebuyer.com',  // calendar that gets the "Property Visit" events. '' = off; 'default' = script owner's primary. (Using your own calendar for now instead of Juan's.)
   OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',   // drive-time origin for the "leave office by" reminder
 };
 

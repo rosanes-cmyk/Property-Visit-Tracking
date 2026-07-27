@@ -299,11 +299,15 @@ function driveMinutes_(dest) {
 }
 
 /** Create Juan's calendar event with a drive-time "leave by" reminder. Sandbox-gated. */
+function visitCalendar_() {
+  var id = CFG.VISIT_CALENDAR_ID;
+  if (!id) return null;
+  return (id === 'default' || id === 'me') ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id);
+}
 function maybeCreateVisitEvent_(map, addr) {
-  if (CFG.SANDBOX) return 'skipped (sandbox on)';
   if (!CFG.VISIT_CALENDAR_ID) return 'skipped (no calendar configured)';
   try {
-    const cal = CalendarApp.getCalendarById(CFG.VISIT_CALENDAR_ID);
+    const cal = visitCalendar_();
     if (!cal) return 'calendar not found / not shared';
     if (!map['Visit Date']) return 'no visit date — event skipped';
     const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);   // default 9:00 window if no time given
@@ -385,6 +389,7 @@ function testIntake() {
   var res2 = webIntake_(sample);   // second call should dedupe
   Logger.log('UPSERT CHECK (should say updated:true): ' + JSON.stringify(res2));
   if (res.ok && res.created) { var rn = findRowById_(res.id); if (rn) clearRecordRow_(dataSheet_(), rn); }
+  try { var cal = visitCalendar_(); if (cal) cal.getEventsForDay(new Date()).forEach(function(e){ if (e.getTitle().indexOf('123 Sandbox Test Ave') >= 0) e.deleteEvent(); }); } catch (e) {}
   SpreadsheetApp.getActive().toast(
     'Intake test: ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · created ' + (res.id || '-') +
     ' · calendar: ' + (res.calendar || '-') + ' · upsert: ' + ((res2.updated||res2.duplicate) ? 'OK' : 'FAILED') +
