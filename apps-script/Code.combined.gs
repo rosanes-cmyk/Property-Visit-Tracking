@@ -1398,6 +1398,27 @@ function maybeCreateVisitEvent_(map, addr) {
     return 'event created (' + (mins ? mins + 'm drive reminder' : '30m only') + ')';
   } catch (e) { return 'error: ' + e; }
 }
+
+/**
+ * Delete the "Property Visit - <addr>" event(s) from the calendar (used when a record is
+ * deleted in the dashboard). Searches a window around the visit date (±2 days to absorb any
+ * timezone offset); falls back to a broad search if no visit date. Only removes exact-title matches.
+ */
+function deleteVisitEvents_(addr, visitDate) {
+  if (!CFG.VISIT_CALENDAR_ID || !addr) return 'no calendar / address';
+  try {
+    var cal = visitCalendar_();
+    if (!cal) return 'calendar not found';
+    var title = 'Property Visit - ' + addr;
+    var from, to;
+    if (visitDate) { var d = new Date(visitDate); from = new Date(d.getTime() - 2*864e5); to = new Date(d.getTime() + 3*864e5); }
+    else { var n = new Date(); from = new Date(n.getTime() - 120*864e5); to = new Date(n.getTime() + 365*864e5); }
+    var evs = cal.getEvents(from, to, { search: addr });
+    var removed = 0;
+    evs.forEach(function(e){ if (e.getTitle() === title) { e.deleteEvent(); removed++; } });
+    return removed ? ('removed ' + removed + ' event(s)') : 'no matching event';
+  } catch (e) { return 'error: ' + e; }
+}
 function webIntake_(lead) {
   lead = lead || {};
   const g = function(a, b){ return lead[a] != null && lead[a] !== '' ? lead[a] : (lead[b] != null ? lead[b] : ''); };
@@ -1503,6 +1524,7 @@ function softDelete_(sh, rowNum) {
   if (!vals[col('Property Address') - 1]) return;
   var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
   trashSheet_().appendRow([new Date(), email].concat(vals));
+  deleteVisitEvents_(vals[col('Property Address') - 1], vals[col('Visit Date') - 1]);   // also remove its calendar event
   clearRecordRow_(sh, rowNum);
 }
 function restoreFromTrash_(trashRow) {
@@ -1519,6 +1541,12 @@ function restoreFromTrash_(trashRow) {
   HEADERS.forEach(function(h, j){ if (COMPUTED_HEADERS.indexOf(h) < 0 && row[j] !== '' && row[j] != null) R.set(h, row[j]); });
   R.flush();
   t.deleteRow(trashRow);
+  var addr = row[col('Property Address') - 1];
+  if (addr && row[col('Visit Date') - 1]) {   // put the calendar event back
+    maybeCreateVisitEvent_({ 'Property Address': addr, 'Seller Name': row[col('Seller Name') - 1],
+      'Phone': row[col('Phone') - 1], 'REI BlackBook Link': row[col('REI BlackBook Link') - 1],
+      'Lead Source': row[col('Lead Source') - 1], 'Visit Date': row[col('Visit Date') - 1] }, addr);
+  }
   SpreadsheetApp.flush();
   return { ok: true };
 }
