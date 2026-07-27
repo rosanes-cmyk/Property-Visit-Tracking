@@ -1386,9 +1386,11 @@ function maybeCreateVisitEvent_(map, addr) {
     if (!map['Visit Date']) return 'no visit date — event skipped';
     const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);
     const end = new Date(start.getTime() + 60 * 60000);
+    const title = 'Property Visit - ' + addr;
+    if (cal.getEventsForDay(start).some(function(e){ return e.getTitle() === title; })) return 'event already on calendar (no duplicate)';
     const desc = 'Seller: ' + (map['Seller Name'] || '') + '\nPhone: ' + (map['Phone'] || '') +
                  '\nREI: ' + (map['REI BlackBook Link'] || '') + '\nLead source: ' + (map['Lead Source'] || '');
-    const ev = cal.createEvent('Property Visit - ' + addr, start, end, { description: desc, location: addr });
+    const ev = cal.createEvent(title, start, end, { description: desc, location: addr });
     const mins = driveMinutes_(addr);
     ev.removeAllReminders();
     if (mins) ev.addPopupReminder(mins);
@@ -1416,8 +1418,12 @@ function webIntake_(lead) {
     up('Assigned Visitor', g('Assigned Visitor', 'visitor'));
     U.set('Last Contact Date', today_());
     U.set('Updated By', 'Apps Script'); U.set('Last Updated Date', today_());
-    U.flush(); SpreadsheetApp.flush();
-    return { ok: true, updated: true, id: dup.id, fields: updated };
+    U.flush();
+    var calMap = { 'Property Address': addr, 'Seller Name': U.get('Seller Name'), 'Phone': U.get('Phone'),
+                   'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'), 'Visit Date': U.get('Visit Date') };
+    var calU = maybeCreateVisitEvent_(calMap, addr);
+    SpreadsheetApp.flush();
+    return { ok: true, updated: true, id: dup.id, fields: updated, calendar: calU };
   }
   var row = 0;
   const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
@@ -1454,11 +1460,10 @@ function testIntake() {
   var res2 = webIntake_(sample);
   Logger.log('UPSERT CHECK (should say updated:true): ' + JSON.stringify(res2));
   if (res.ok && res.created) { var rn = findRowById_(res.id); if (rn) clearRecordRow_(dataSheet_(), rn); }
-  try { var cal = visitCalendar_(); if (cal) cal.getEventsForDay(new Date()).forEach(function(e){ if (e.getTitle().indexOf('123 Sandbox Test Ave') >= 0) e.deleteEvent(); }); } catch (e) {}
   SpreadsheetApp.getActive().toast(
     'Intake test: ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · created ' + (res.id || '-') +
     ' · calendar: ' + (res.calendar || '-') + ' · upsert: ' + ((res2.updated||res2.duplicate) ? 'OK' : 'FAILED') +
-    ' · test row cleaned up.', 'testIntake', 12);
+    ' · CHECK YOUR CALENDAR today for "Property Visit - 123 Sandbox Test Ave" (delete it after).', 'testIntake', 15);
 }
 
 /* ---------------- Trash: soft delete + restore ---------------- */
