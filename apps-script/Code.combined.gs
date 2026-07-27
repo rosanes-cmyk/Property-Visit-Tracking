@@ -115,7 +115,7 @@ const DROPDOWNS = {
   'Transaction Handoff Status': ['Not Ready','Ready for Handoff','Handed Off','Handoff Confirmed'],
   'REI Update Required': ['Yes','No'],
   'REI Update Completed': ['Yes','No'],
-  'Source': ['Manual','Apps Script','Import','TEST'],
+  'Source': ['Manual','Apps Script','Import','Intake','Intake-Sandbox','TEST'],
 };
 
 /** column index (1-based) for a header name */
