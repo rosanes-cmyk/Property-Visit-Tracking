@@ -10,19 +10,33 @@
  */
 
 var INTAKE_INBOX_HEADERS = ['Timestamp', 'Seller Name', 'Phone', 'Email', 'Property Address',
-  'Visit Date', 'Visit Time', 'Assigned Visitor', 'Lead Source', 'Task Body',
+  'Visit Date', 'Visit Time', 'Assigned Visitor', 'Lead Source', 'Task Body', 'Tags',
   'Status', 'Property ID', 'Processed At'];
 
-/** Create/repair the Intake Inbox tab (headers Zapier maps into). */
+// Contacts carrying any of these tags are NEVER auto-logged. Only an explicit hands-off flag.
+// (Empty this array to log everything.)
+var INTAKE_SKIP_TAGS = ['do not automate'];
+
+/** Create/repair the Intake Inbox tab. Adds any missing headers to an existing tab (non-destructive). */
 function ensureIntakeInbox_() {
   var ss = SpreadsheetApp.getActive();
   var sh = ss.getSheetByName(CFG.INTAKE_INBOX_SHEET);
   if (!sh) { sh = ss.insertSheet(CFG.INTAKE_INBOX_SHEET); sh.setTabColor('#34a853'); }
-  if (String(sh.getRange(1, 1).getValue()).trim() !== 'Timestamp') {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var existing = sh.getLastRow() >= 1
+    ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); })
+    : [];
+  if (!existing.length || existing[0] !== 'Timestamp') {
     sh.getRange(1, 1, 1, INTAKE_INBOX_HEADERS.length).setValues([INTAKE_INBOX_HEADERS])
       .setFontWeight('bold').setBackground('#e6f4ea');
     sh.setFrozenRows(1);
     sh.setColumnWidth(5, 240); sh.setColumnWidth(10, 300); sh.setColumnWidth(11, 130);
+  } else {
+    var missing = INTAKE_INBOX_HEADERS.filter(function (h) { return existing.indexOf(h) < 0; });
+    if (missing.length) {
+      sh.getRange(1, existing.length + 1, 1, missing.length).setValues([missing])
+        .setFontWeight('bold').setBackground('#e6f4ea');
+    }
   }
   return sh;
 }
@@ -38,13 +52,22 @@ function processIntakeInbox_() {
   var idx = {}; headers.forEach(function (h, i) { idx[String(h).trim()] = i; });
   if (idx['Status'] == null) return { processed: 0, logged: 0, errors: 0, note: 'no Status column' };
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
-  var processed = 0, logged = 0, errors = 0;
+  var processed = 0, logged = 0, errors = 0, skipped = 0;
   for (var r = 0; r < vals.length; r++) {
     var row = vals[r];
+    var rowNum = 2 + r;
     if (String(row[idx['Status']]).trim()) continue;                 // already handled
     var addr = String(inboxGet_(row, idx, 'Property Address')).trim();
     var body = String(inboxGet_(row, idx, 'Task Body')).trim();
     if (!addr && !body) continue;                                    // blank row — skip
+    // Respect hands-off tags — never auto-log these contacts.
+    var tags = String(inboxGet_(row, idx, 'Tags')).toLowerCase();
+    var blocked = INTAKE_SKIP_TAGS.filter(function (t) { return tags.indexOf(t) >= 0; });
+    if (blocked.length) {
+      sh.getRange(rowNum, idx['Status'] + 1).setValue('Skipped: ' + blocked.join(', '));
+      if (idx['Processed At'] != null) sh.getRange(rowNum, idx['Processed At'] + 1).setValue(new Date());
+      processed++; skipped++; continue;
+    }
     var lead = {
       'Seller Name': inboxGet_(row, idx, 'Seller Name'),
       'Phone': inboxGet_(row, idx, 'Phone'),
@@ -58,7 +81,6 @@ function processIntakeInbox_() {
     };
     var res;
     try { res = webIntake_(lead); } catch (e) { res = { ok: false, error: String(e) }; }
-    var rowNum = 2 + r;
     sh.getRange(rowNum, idx['Status'] + 1).setValue(
       res.ok ? ((res.created ? 'Logged (new)' : 'Logged (updated)') + ' · cal: ' + (res.calendar || '-'))
              : ('Error: ' + res.error));
@@ -67,8 +89,8 @@ function processIntakeInbox_() {
     processed++; if (res.ok) logged++; else errors++;
   }
   SpreadsheetApp.flush();
-  if (processed) logAuto_('INTAKE', '', 'Intake Inbox processed ' + processed + ' row(s): ' + logged + ' logged, ' + errors + ' error(s).');
-  return { processed: processed, logged: logged, errors: errors };
+  if (processed) logAuto_('INTAKE', '', 'Intake Inbox processed ' + processed + ' row(s): ' + logged + ' logged, ' + skipped + ' skipped, ' + errors + ' error(s).');
+  return { processed: processed, logged: logged, skipped: skipped, errors: errors };
 }
 
 /* ---------- menu-facing wrappers ---------- */
@@ -83,7 +105,7 @@ function setupIntakeInbox() {
 function checkIntakeInboxNow() {
   var r = processIntakeInbox_();
   SpreadsheetApp.getActive().toast(
-    'Intake Inbox: ' + r.processed + ' new · ' + r.logged + ' logged · ' + r.errors + ' error(s).', 'Intake Inbox', 8);
+    'Intake Inbox: ' + r.processed + ' new · ' + r.logged + ' logged · ' + (r.skipped || 0) + ' skipped (Do Not Automate) · ' + r.errors + ' error(s).', 'Intake Inbox', 8);
 }
 
 /** Menu: install the every-10-minutes auto-check (approved cadence). Removes any prior copy first. */
