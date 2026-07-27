@@ -41,16 +41,54 @@ Your deployed Web App `/exec` URL (from Deploy → Manage deployments). Same URL
   the calendar event is removed too; restore it → the event comes back.
 - **Never** creates duplicates; **never** sends anything to a seller.
 
-## 4. Wire it in REI BlackBook
-Use REI's **Automation / Workflow → Webhook** (or Zapier "Webhooks by Zapier → POST"):
-1. Trigger: contact tagged **"Appointment Booked"** (and/or task/appointment updated).
-2. Action: **POST** to the `/exec` URL, `Content-Type: application/json`, body as above,
-   mapping REI merge fields into the `lead` object.
-3. Use REI's **"Send test"** to fire one → a row appears in the DEV COPY.
+## 4. Wire it via Zapier (chosen path — instant, no REI API key)
 
-## 5. Test first (no REI needed)
-In the Apps Script editor run **`testIntake`** → log should show a create, then an update
-("upsert: OK"), and it cleans up its own test row.
+> Note: REI's *email* notifications only contain the task **title + due date** (verified) — not the
+> address/appointment — so email polling can't fill the logger. Zapier reads the task **fields**
+> directly, so it gets the full data. This is why we use Zapier, not email.
+
+Our endpoint accepts a **flat** payload (token + action + fields at the top level), so no nested
+JSON is needed in Zapier.
+
+**Zap steps:**
+1. **Trigger** — App: **REI BlackBook**. Event: the one that fires when an appointment task is
+   created — look for **"New Task" / "Task Created" / "Task Assigned"** (or, if REI only offers
+   contact triggers, **"Tag Added"** and tag appointment contacts `Appointment Booked`).
+   Connect your REI account and pick a recent task as the test record.
+2. **Filter** (recommended) — add *Filter by Zapier*: only continue if **Task Title contains
+   "Booked appointment"** (or Task Type = appointment). Keeps calls/texts/other tasks out.
+3. **Action** — App: **Webhooks by Zapier**. Event: **POST**. Configure:
+   - **URL:** your deployed `/exec` URL
+   - **Payload Type:** `json`
+   - **Data** (key → value; map REI fields with the picker):
+
+     | Key | Value |
+     |---|---|
+     | `token` | `ORP9pfVWhZQKHuSYW9HMnoqYFwASBpy` |
+     | `action` | `intake` |
+     | `Seller Name` | REI contact name |
+     | `Phone` | REI contact phone |
+     | `Email` | REI contact email |
+     | `Assigned Owner` | REI task assignee |
+     | `Lead Source` | REI lead source (if available) |
+     | `REI BlackBook Link` | REI contact URL (if available) |
+     | `Property Address` | REI property address field (if available; else leave blank) |
+     | `Task Body` | REI **task description / body** ← important: the parser pulls address + appt time from this |
+
+   - **Wrap Request In Array:** No · **Unflatten:** No · **Headers:** (none needed)
+4. **Test** the action → a row appears in the DEV COPY, an event on your calendar, and an
+   `INTAKE` line in the Automation Log. **Turn the Zap ON.**
+
+Why `Task Body` matters: REI tasks put the property address + real appointment time inside the
+body text ("Property address: … / Booked appointment / visit scheduled: Friday, Jul 24, 11:00 AM").
+`parseReiTaskBody_` extracts those automatically, so even if the clean fields above are blank, the
+row still gets the address and visit date.
+
+## 5. Test first (no REI/Zapier needed)
+In the Apps Script editor:
+- **`testReiTaskIntake`** → simulates a real REI task (parses address + appt from the body), keeps
+  the row so you can see it in the dashboard. Delete it there when done.
+- **`testIntake`** → create + upsert self-test that cleans up its own row.
 
 ## 6. Go-live toggles (later, when you resume calendar/notify)
 - `CFG.SANDBOX = false` + `CFG.VISIT_CALENDAR_ID = 'pecuniary2@gmail.com'` → turns on Juan's
