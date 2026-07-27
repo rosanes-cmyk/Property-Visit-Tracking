@@ -2165,22 +2165,30 @@ function parseReiTaskTitle_(title) {
   return out;
 }
 
+var GMAIL_SEEN_PROP = 'PV_SEEN_MSG_IDS';   // Script Property: comma-joined processed message IDs
+
 /**
  * Scan Gmail for REI task-assignment emails and log any booked-appointment titles.
+ * Dedups per MESSAGE (not per conversation) via Script Properties — REI reuses one subject for
+ * every assignment, so Gmail threads them together; a per-thread label would skip later bookings.
  * Returns { scanned, logged, skipped, errors }.
  */
 function processReiTaskEmails_() {
-  var label = getOrCreateLabel_(GMAIL_CFG.LABEL);
+  var props = PropertiesService.getScriptProperties();
+  var seen = {};
+  (props.getProperty(GMAIL_SEEN_PROP) || '').split(',').forEach(function (id) { if (id) seen[id] = true; });
+  var label = getOrCreateLabel_(GMAIL_CFG.LABEL);   // visual marker in Gmail only (not used to skip)
   var q = 'from:' + GMAIL_CFG.SENDER +
           ' subject:("' + GMAIL_CFG.SUBJECT + '")' +
-          ' newer_than:' + GMAIL_CFG.LOOKBACK +
-          ' -label:' + GMAIL_CFG.LABEL;
+          ' newer_than:' + GMAIL_CFG.LOOKBACK;
   var threads = GmailApp.search(q, 0, 50);
-  var scanned = 0, logged = 0, skipped = 0, errors = 0;
+  var scanned = 0, logged = 0, skipped = 0, errors = 0, added = 0;
 
   for (var i = 0; i < threads.length; i++) {
     var msgs = threads[i].getMessages();
     for (var j = 0; j < msgs.length; j++) {
+      var mid = msgs[j].getId();
+      if (seen[mid]) continue;                 // this exact email was already handled
       var titles = extractReiTaskTitles_(msgs[j].getBody());
       for (var k = 0; k < titles.length; k++) {
         var title = titles[k];
@@ -2200,8 +2208,14 @@ function processReiTaskEmails_() {
         try { res = webIntake_(lead); } catch (e) { res = { ok: false, error: String(e) }; }
         if (res.ok) logged++; else errors++;
       }
+      seen[mid] = true; added++;               // remember this email so we never rescan it
     }
-    threads[i].addLabel(label);   // mark processed (upsert-by-address guards against any re-log)
+    threads[i].addLabel(label);
+  }
+  if (added) {
+    var ids = Object.keys(seen);
+    if (ids.length > 800) ids = ids.slice(ids.length - 800);   // keep the list bounded
+    props.setProperty(GMAIL_SEEN_PROP, ids.join(','));
   }
   if (scanned) {
     logAuto_('GMAIL', '', 'REI task emails: ' + scanned + ' booking title(s) — ' + logged +
@@ -2244,6 +2258,12 @@ function removeGmailTrigger() {
     if (t.getHandlerFunction() === 'processReiTaskEmails_') { ScriptApp.deleteTrigger(t); n++; }
   });
   SpreadsheetApp.getActive().toast('Gmail auto-reader OFF (' + n + ' trigger removed).', 'Gmail Intake', 6);
+}
+
+/** Run from the editor to forget which emails were processed, so the next scan re-reads them. */
+function resetGmailSeen() {
+  PropertiesService.getScriptProperties().deleteProperty(GMAIL_SEEN_PROP);
+  SpreadsheetApp.getActive().toast('Gmail reader reset — the next scan will re-read recent REI emails.', 'Gmail Intake', 6);
 }
 
 /** Editor test: parse a sample title without touching Gmail. Run and read the log. */
