@@ -213,3 +213,60 @@ A property lands in the **Exception Queue** (and Board section 10) when **Data Q
 
 > These are computed columns — never type into Missing Required Fields, Data Quality Status, or
 > Exception Reason. Fix the source fields and they clear themselves.
+
+---
+
+## How bookings log themselves automatically (Gmail auto-reader)
+
+You do **not** have to type visits into the sheet. When you book an appointment in REI BlackBook,
+the visit logs itself — as long as you **name the task correctly**. Here is why and how.
+
+### Why the task title matters
+REI BlackBook does not let any outside tool read a task's *description*. The only part of a task
+that leaves REI automatically is the **task title**, which rides along in the
+"You have 1 new task assignment" email from `noreply@reiblackbook.com`. Our script reads that email
+from Gmail every 10 minutes and logs the visit. So **whatever you put in the title is all the system
+can see.**
+
+### The one rule when booking
+Title the booked-appointment task in this exact order, separated by the pipe character `|`:
+
+```
+Booked appointment | Seller Name | Property Address | Date Time
+```
+
+**Example:**
+
+```
+Booked appointment | Cyn Ku | 2607 Gimelli Place #115, San Jose | Jul 24 11:00 AM
+```
+
+- The title **must contain the words "Booked appointment"** — that is how the script knows it is a
+  visit (other tasks like "Run Comps" are ignored).
+- Put the **address in the title** — without it, the booking is safely skipped (nothing wrong is
+  logged), and it will not appear on the dashboard.
+- Date formats like `Jul 24 11:00 AM`, `July 30, 2026 2:30 PM`, or even `on Jul 24` all work.
+
+### What happens next (fully automatic)
+
+```
+You save the task  →  REI emails it  →  Gmail  →  script reads it (every 10 min)
+   →  dashboard card + calendar event + Automation Log
+```
+
+- The visit shows up on the **Data** sheet and the **Cherry Opportunity Board** within ~10 minutes.
+- Duplicate reminder emails can never create duplicate rows — the system matches on the address and
+  updates the existing record instead.
+- Processed emails get a **`PV-Logged`** label in Gmail so they are never counted twice.
+
+### Turning it on (one time, in the Sheet)
+From the **🏠 Twin Visit Logger** menu:
+
+1. **📧 Set up Gmail auto-reader (REI tasks)** — approve Gmail access when asked (it only reads REI
+   emails and adds the `PV-Logged` label; it never sends anything).
+2. **📧 Turn ON Gmail auto-reader (every 10 min).**
+
+Use **📧 Check REI emails now** any time to run it immediately instead of waiting.
+
+> If a booking does not show up: open the task in REI and check the **title** follows the
+> `Booked appointment | Seller | Address | Date Time` format. A missing address is the usual reason.
