@@ -349,11 +349,41 @@ function deleteVisitEvents_(addr, visitDate) {
  * never creates duplicates, sets stage = Visit Scheduled. In SANDBOX, no real calendar event is
  * created (reported instead). Accepts either sheet-header keys or short keys.
  */
+/**
+ * Parse an REI BlackBook task body ("Booked appointment on Jul 24" style) for the fields that
+ * live in free text: seller name, property address, and the real appointment date/time.
+ * Used as a fallback so intake works even when REI only sends the task text (not clean fields).
+ */
+function parseReiTaskBody_(text) {
+  var t = String(text || '').replace(/<[^>]+>/g, '\n');   // strip HTML tags -> newlines
+  var out = {}, m;
+  m = t.match(/Lead:\s*([^\n<]+)/i);              if (m) out.seller  = m[1].trim();
+  m = t.match(/Property address:\s*([^\n<]+)/i);  if (m) out.address = m[1].trim();
+  m = t.match(/(?:visit scheduled|booked appointment)[^:\n]*:\s*([^\n<]+)/i);   // "...: Friday, Jul 24, 11:00 AM"
+  if (m) {
+    var s = m[1].trim().replace(/^[A-Za-z]+day,\s*/, '');           // drop leading weekday
+    var tm = s.match(/(\d{1,2}:\d{2}\s*[AP]M)/i); if (tm) out.visitTime = tm[1].toUpperCase().replace(/\s+/g, ' ');
+    var dm = s.match(/([A-Za-z]{3,9}\.?\s+\d{1,2})(?:,?\s*(\d{4}))?/);   // "Jul 24" or "July 24, 2026"
+    if (dm) { var yr = dm[2] || String(new Date().getFullYear()); out.visitDate = dm[1] + ', ' + yr + (out.visitTime ? ' ' + out.visitTime : ''); }
+  }
+  out.summary = t.replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
+  return out;
+}
+
 function webIntake_(lead) {
   lead = lead || {};
   const g = function(a, b){ return lead[a] != null && lead[a] !== '' ? lead[a] : (lead[b] != null ? lead[b] : ''); };
-  const addr = g('Property Address', 'address'), phone = g('Phone', 'phone');
-  if (!addr) return { ok: false, error: 'Property Address is required' };
+  // REI tasks carry the appointment time + address inside the task body — parse it as a fallback for missing fields.
+  var _body = g('Task Body', 'body') || g('Description', 'description') || lead.taskBody || '';
+  var _p = _body ? parseReiTaskBody_(_body) : {};
+  if (_p.seller    && !g('Seller Name', 'seller'))   lead['Seller Name'] = _p.seller;
+  if (_p.visitDate && !g('Visit Date', 'visitDate')) lead['Visit Date']  = _p.visitDate;
+  if (_p.visitTime && !g('Visit Time', 'visitTime')) lead['Visit Time']  = _p.visitTime;
+  if (_body && !g('Last Contact Result', 'note') && !g('Notes', 'notes')) lead['Notes'] = _p.summary || _body;
+  const addr = g('Property Address', 'address') || _p.address || '';
+  const phone = g('Phone', 'phone');
+  if (!addr) return { ok: false, error: 'Property Address is required (not in fields or task body)' };
+  if (!lead['Property Address'] && !lead.address) lead['Property Address'] = addr;   // so downstream g() sees it
   const sh = dataSheet_(); ensureRows_(sh, CFG.MAX_ROWS);
   // UPSERT: if this lead already exists, auto-update its note / status / stage (never sends anything)
   const dup = findByAddressOrPhone_(addr, phone);
@@ -442,6 +472,29 @@ function testIntakeKeep() {
     'Intake test (KEPT): ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · ' + (res.id || '-') +
     ' · calendar: ' + (res.calendar || '-') +
     ' · Open the LIVE dashboard — you\'ll see "123 Sandbox Test Ave". Delete it there when done.', 'testIntakeKeep', 15);
+}
+
+/**
+ * Simulate a REAL REI BlackBook task (the "Booked appointment" format), where the address +
+ * appointment time live inside the task body. Proves the body parser. Keeps the row so you can
+ * see it in the dashboard — delete it there when done. Sandbox only; nothing sent to anyone.
+ */
+function testReiTaskIntake() {
+  var lead = {
+    'Seller Name': 'Cyn Ku', 'Phone': '(510) 000-0000', 'Assigned Owner': 'Jonathan',
+    'Lead Source': 'PPL - Property Leads',
+    'Task Body': '<p>Lead: Cyn Ku</p>' +
+      '<p>Booked appointment / visit scheduled: Friday, Jul 24, 11:00 AM</p>' +
+      '<p>Property address: 2607 Gimelli Place #115, San Jose (Berryessa)</p>' +
+      '<ul><li>Create a WhatsApp group</li><li>Add to calendar</li><li>Prepare document - contract</li></ul>'
+  };
+  var res = webIntake_(lead);
+  Logger.log('REI TASK INTAKE: ' + JSON.stringify(res));
+  SpreadsheetApp.getActive().toast(
+    'REI task intake: ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · ' + (res.id || '-') +
+    ' · calendar: ' + (res.calendar || '-') +
+    ' · Parsed address "2607 Gimelli Place #115" + visit Jul 24 from the task body. See it in the dashboard; delete when done.',
+    'testReiTaskIntake', 15);
 }
 
 /* ---------------- Trash: soft delete + restore ---------------- */
