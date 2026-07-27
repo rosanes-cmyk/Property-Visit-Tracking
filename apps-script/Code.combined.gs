@@ -29,7 +29,7 @@ function onOpen() {
     .addSeparator()
     .addItem('📧 Set up Gmail auto-reader (REI tasks)', 'setupGmailIntake')
     .addItem('📧 Check REI emails now', 'checkReiEmailsNow')
-    .addItem('📧 Turn ON Gmail auto-reader (every 10 min)', 'installGmailTrigger')
+    .addItem('📧 Turn ON Gmail auto-reader (every minute)', 'installGmailTrigger')
     .addItem('📧 Turn OFF Gmail auto-reader', 'removeGmailTrigger')
     .addSeparator()
     .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
@@ -2093,7 +2093,7 @@ function removeInboxTrigger() {
  *   The date-only form ("Booked appointment on Jul 24") is recognized too, but without an address
  *   in the title there is nothing to log, so it is counted as "skipped (no address)".
  *
- * FLOW (fully automatic once the 10-min trigger is on)
+ * FLOW (fully automatic once the every-minute trigger is on)
  *   REI emails the task  ->  Gmail  ->  processReiTaskEmails_()  ->  webIntake_()  ->  dashboard
  *   card + calendar event + Automation Log.  Processed threads get the "PV-Logged" label so they
  *   are never re-scanned; webIntake_ upserts by address so reminders can never create duplicates.
@@ -2228,13 +2228,13 @@ function checkReiEmailsNow() {
     r.skipped + ' skipped (no address) · ' + r.errors + ' error(s).', 'Gmail Intake', 8);
 }
 
-/** Menu: install the every-10-minutes Gmail scan. Removes any prior copy first. */
+/** Menu: install the every-minute Gmail scan. Removes any prior copy first. */
 function installGmailTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'processReiTaskEmails_') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('processReiTaskEmails_').timeBased().everyMinutes(10).create();
-  SpreadsheetApp.getActive().toast('Gmail auto-reader ON: scans REI emails every 10 minutes.', 'Gmail Intake', 8);
+  ScriptApp.newTrigger('processReiTaskEmails_').timeBased().everyMinutes(1).create();
+  SpreadsheetApp.getActive().toast('Gmail auto-reader ON: scans REI emails every minute.', 'Gmail Intake', 8);
 }
 
 /** Menu: remove the Gmail scan trigger. */

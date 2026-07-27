@@ -225,7 +225,7 @@ the visit logs itself — as long as you **name the task correctly**. Here is wh
 REI BlackBook does not let any outside tool read a task's *description*. The only part of a task
 that leaves REI automatically is the **task title**, which rides along in the
 "You have 1 new task assignment" email from `noreply@reiblackbook.com`. Our script reads that email
-from Gmail every 10 minutes and logs the visit. So **whatever you put in the title is all the system
+from Gmail every minute and logs the visit. So **whatever you put in the title is all the system
 can see.**
 
 ### The one rule when booking
@@ -250,11 +250,11 @@ Booked appointment | Cyn Ku | 2607 Gimelli Place #115, San Jose | Jul 24 11:00 A
 ### What happens next (fully automatic)
 
 ```
-You save the task  →  REI emails it  →  Gmail  →  script reads it (every 10 min)
+You save the task  →  REI emails it  →  Gmail  →  script reads it (every minute)
    →  dashboard card + calendar event + Automation Log
 ```
 
-- The visit shows up on the **Data** sheet and the **Cherry Opportunity Board** within ~10 minutes.
+- The visit shows up on the **Data** sheet and the **Cherry Opportunity Board** within about a minute.
 - Duplicate reminder emails can never create duplicate rows — the system matches on the address and
   updates the existing record instead.
 - Processed emails get a **`PV-Logged`** label in Gmail so they are never counted twice.
@@ -264,7 +264,7 @@ From the **🏠 Twin Visit Logger** menu:
 
 1. **📧 Set up Gmail auto-reader (REI tasks)** — approve Gmail access when asked (it only reads REI
    emails and adds the `PV-Logged` label; it never sends anything).
-2. **📧 Turn ON Gmail auto-reader (every 10 min).**
+2. **📧 Turn ON Gmail auto-reader (every minute).**
 
 Use **📧 Check REI emails now** any time to run it immediately instead of waiting.
 
