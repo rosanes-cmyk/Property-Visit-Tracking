@@ -399,6 +399,25 @@ function testIntake() {
     ' · CHECK YOUR CALENDAR today for "Property Visit - 123 Sandbox Test Ave" (delete it after).', 'testIntake', 15);
 }
 
+/**
+ * Same as testIntake but KEEPS the sandbox row so you can watch it appear in the LIVE dashboard.
+ * Run it, open the live web-app dashboard, and you'll see the "123 Sandbox Test Ave" card.
+ * Delete it from the dashboard (goes to Trash) when you're done — that also tests soft-delete.
+ */
+function testIntakeKeep() {
+  const sample = {
+    'Property Address': '123 Sandbox Test Ave, Testville, CA 90000',
+    'Seller Name': 'Intake Test (delete me)', 'Phone': '(000) 000-1234', 'Lead Source': 'PPC',
+    'Visit Date': Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+  };
+  var res = webIntake_(sample);   // upserts if it already exists; row is NOT removed
+  Logger.log('INTAKE (kept) RESULT: ' + JSON.stringify(res));
+  SpreadsheetApp.getActive().toast(
+    'Intake test (KEPT): ' + (res.ok ? 'PASS' : 'FAIL ' + res.error) + ' · ' + (res.id || '-') +
+    ' · calendar: ' + (res.calendar || '-') +
+    ' · Open the LIVE dashboard — you\'ll see "123 Sandbox Test Ave". Delete it there when done.', 'testIntakeKeep', 15);
+}
+
 /* ---------------- Trash: soft delete + restore ---------------- */
 function trashSheet_() {
   var ss = SpreadsheetApp.getActive();
