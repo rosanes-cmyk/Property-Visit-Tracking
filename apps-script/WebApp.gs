@@ -374,6 +374,8 @@ function webIntake_(lead) {
                    'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'), 'Visit Date': U.get('Visit Date') };
     var calU = maybeCreateVisitEvent_(calMap, addr);
     SpreadsheetApp.flush();
+    logAuto_('INTAKE', dup.id, 'Lead updated from REI webhook · ' + addr +
+      (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') + ' · calendar: ' + calU);
     return { ok: true, updated: true, id: dup.id, fields: updated, calendar: calU };
   }
   var row = 0;
@@ -399,6 +401,9 @@ function webIntake_(lead) {
   stamp_(R); R.flush();
   const cal = maybeCreateVisitEvent_(map, addr);
   SpreadsheetApp.flush();
+  logAuto_('INTAKE', R.get('Property ID'), 'New lead created from REI webhook · ' + addr +
+    ' · visitor: ' + (map['Assigned Visitor'] || '(none)') + ' · visit: ' + (map['Visit Date'] ? fmt_(new Date(map['Visit Date'])) : '(none)') +
+    ' · source: ' + (CFG.SANDBOX ? 'Intake-Sandbox' : 'Intake') + ' · calendar: ' + cal);
   return { ok: true, created: true, id: R.get('Property ID'), sandbox: !!CFG.SANDBOX, calendar: cal };
 }
 

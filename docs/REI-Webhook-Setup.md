@@ -2,8 +2,10 @@
 
 Goal: when a lead is booked / a task or note updates in REI BlackBook, REI POSTs it to our
 Apps Script endpoint, which **auto-creates or updates the row in the logger** (note, visit
-status, stage, next action). **No calendar events, no notifications, no messages** — logger
-update only. (Calendar + notifications are intentionally paused: `CFG.SANDBOX = true`.)
+status, stage, next action), **puts a "Property Visit" event on the calendar**, and **writes a
+line to the Automation Log**. **No seller messages, no notifications** — internal update only.
+(Sandbox is on: `CFG.SANDBOX = true`, so rows are tagged `Intake-Sandbox`. Calendar goes to
+`CFG.VISIT_CALENDAR_ID = rosanes@twinhomebuyer.com` — your calendar for now.)
 
 ## 1. Endpoint
 Your deployed Web App `/exec` URL (from Deploy → Manage deployments). Same URL as the dashboard.
@@ -34,7 +36,10 @@ Your deployed Web App `/exec` URL (from Deploy → Manage deployments). Same URL
   Source = `Intake` (or `Intake-Sandbox` while sandbox is on).
 - **Existing** (matches by address or phone) → **updates** Last Contact Result (note),
   Visit Status, Current Stage, Next Action, Visit Date, Assigned Visitor; stamps Last Updated.
-- **Never** creates duplicates; **never** sends anything.
+- Either path also: **creates/updates the calendar event** and **writes an `INTAKE` line to the
+  Automation Log** (Timestamp · Level · Property ID · Message). Delete the row in the dashboard →
+  the calendar event is removed too; restore it → the event comes back.
+- **Never** creates duplicates; **never** sends anything to a seller.
 
 ## 4. Wire it in REI BlackBook
 Use REI's **Automation / Workflow → Webhook** (or Zapier "Webhooks by Zapier → POST"):
