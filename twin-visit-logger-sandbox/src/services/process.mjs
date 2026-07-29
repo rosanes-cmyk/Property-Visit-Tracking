@@ -45,7 +45,11 @@ export async function processInbox(auth, logger) {
       try {
         email = await readMessage(auth, messageRef.id);
         const titleData = parseAppointmentTitle(email.subject);
-        const reiLink = email.reiLink || titleData.reiLink;
+        // REI truncates the task title in its emails, so a direct link often does not survive.
+        // Fall back to REI's "View" button — a SendGrid click-tracking URL that redirects to the
+        // real REI page (Playwright follows the redirect; the sandbox browser is already logged in).
+        const viewLink = (email.urls || []).find((u) => /ct\.sendgrid\.net\/ls\/click/i.test(u)) || '';
+        const reiLink = email.reiLink || titleData.reiLink || viewLink;
         partialVisit = {
           gmailMessageId: email.id,
           emailSubject: email.subject,
