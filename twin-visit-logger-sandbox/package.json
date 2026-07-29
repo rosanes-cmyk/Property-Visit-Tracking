@@ -15,7 +15,8 @@
     "setup:sheet": "node scripts/setup-sheet.mjs",
     "once": "node src/run-once.mjs",
     "poll": "node src/poll.mjs",
-    "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs"
+    "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs",
+    "cleanup": "node scripts/cleanup.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",
