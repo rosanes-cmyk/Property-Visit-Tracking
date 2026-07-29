@@ -12,20 +12,30 @@ async function loadSelectorConfig() {
   return JSON.parse(raw);
 }
 
+/**
+ * The REI contact id, used as the identity key for both row and calendar-event matching.
+ *
+ * Only a real REI contact URL yields an id. The previous version took the last path-ish segment of
+ * ANY url, so every SendGrid tracking link ("/ls/click") collapsed to the id "click" — meaning
+ * unrelated contacts shared one identity and overwrote each other's calendar event (which is how a
+ * calendar entry ended up showing a different property's address). Anything else now hashes to a
+ * value unique to that url, so distinct records can never collide.
+ */
 function extractRecordId(url) {
+  const text = String(url || '');
+  const contactMatch = text.match(/reiblackbook\.com\/contacts\/(\d+)/i);
+  if (contactMatch) return contactMatch[1];
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(text);
     const queryId =
-      parsed.searchParams.get('id') ||
       parsed.searchParams.get('contactId') ||
-      parsed.searchParams.get('taskId');
-    if (queryId) return queryId;
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    const candidate = [...segments].reverse().find((segment) => /^[A-Za-z0-9_-]{5,}$/.test(segment));
-    return candidate || crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
+      parsed.searchParams.get('taskId') ||
+      parsed.searchParams.get('id');
+    if (queryId && /^\d+$/.test(queryId)) return queryId;
   } catch {
-    return crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
+    // Not a parseable url — fall through to the hash.
   }
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
 function firstRegex(text, regex) {
