@@ -204,7 +204,11 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
   const page = await context.newPage();
   try {
     await page.goto(reiLink, { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
-    await page.waitForTimeout(1500);
+    // REI is a single-page app; wait for the network to settle and a real contact value to render
+    // (tel:/mailto:) before scraping, otherwise we read the skeleton-loader shell.
+    await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
+    await page.waitForSelector('a[href^="tel:"], a[href^="mailto:"]', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2500);
     await assertAuthenticated(page, selectorConfig.login || {});
 
     const visibleText = normalize(await page.locator('body').innerText().catch(() => ''));
