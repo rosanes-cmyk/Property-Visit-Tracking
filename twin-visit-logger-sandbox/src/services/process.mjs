@@ -36,7 +36,8 @@ function findTaskTitleLine(email) {
     .split(/\r?\n/)
     .map((s) => s.trim())
     .find((l) => /(booked|rescheduled|cancell?ed)\s+appointment/i.test(l));
-  return line || '';
+  // REI appends "Due: <weekday>, <date>" to the same line; strip it so the title parses cleanly.
+  return line ? line.replace(/\bDue:.*$/i, '').trim() : '';
 }
 
 function criticalValidationErrors(visit) {

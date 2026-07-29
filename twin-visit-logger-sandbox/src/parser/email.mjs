@@ -5,9 +5,22 @@ function normalize(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+const MONTH = 'January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+// "Jul 30, 2026 2:00 PM" / "July 30 2:00 PM" / "7/30/2026 2:00 PM" embedded anywhere in a string.
+const EMBEDDED_DATETIME = new RegExp(
+  `(?:${MONTH})\\.?\\s+\\d{1,2}(?:,\\s*\\d{4})?\\s+\\d{1,2}:\\d{2}\\s*[AP]M` +
+  `|\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?,?\\s+\\d{1,2}:\\d{2}\\s*[AP]M`,
+  'i'
+);
+
 function parseDateTime(value) {
-  const text = normalize(value);
+  // REI appends its own "Due: <weekday>, <date>" to the task-title line in the notification body,
+  // so a title segment arrives as "Jul 30, 2026 2:00 PM Due: Thursday, July 30, 2026". Drop that
+  // suffix and pull the date/time out of whatever remains rather than requiring an exact match.
+  let text = normalize(value).replace(/\bDue:.*$/i, '').trim();
   if (!text) return '';
+  const embedded = (text.match(EMBEDDED_DATETIME) || [])[0];
+  if (embedded) text = embedded;
   const formats = [
     'MMMM d, yyyy h:mm a',
     'MMM d, yyyy h:mm a',
