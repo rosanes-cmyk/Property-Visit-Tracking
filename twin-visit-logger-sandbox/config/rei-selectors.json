@@ -3,6 +3,21 @@
     "urlFragments": ["login", "signin", "auth"],
     "passwordSelectors": ["input[type='password']"]
   },
+  "listItemLabels": {
+    "_comment": "Primary strategy. REI renders each field as a leaf [data-testid='list-item'] whose text is Label+Value glued together; the scraper matches these label prefixes and returns the remainder. Verified against a real REI contact page.",
+    "sellerName": ["Name"],
+    "phone": ["Phone (Mobile)", "Phone (Home)", "Phone"],
+    "email": ["Email"],
+    "propertyAddress": ["Property Address"],
+    "appointmentTime": ["Appointment Time"],
+    "appointmentDate": ["Appointment Date"],
+    "assignedOwner": ["Appointment Assigned To", "Sales Agent"],
+    "leadSource": ["Source"],
+    "contactStage": ["Lead Stage", "Category"],
+    "nextAction": ["Next Step"],
+    "callDisposition": ["Call Disposition"],
+    "amountOffer": ["Amount Offer"]
+  },
   "fields": {
     "sellerName": [
       "[data-testid='contact-name']",

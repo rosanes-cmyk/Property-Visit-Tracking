@@ -6,127 +6,19 @@ import { config } from '../config.mjs';
 import { assertAuthenticated } from './browser.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-const unique = (values) => [...new Set(values.map(normalize).filter(Boolean))];
 
 async function loadSelectorConfig() {
   const raw = await fs.readFile(config.reiSelectorConfig, 'utf8');
   return JSON.parse(raw);
 }
 
-async function firstTextFromSelectors(page, selectors = []) {
-  for (const selector of selectors) {
-    try {
-      const locator = page.locator(selector).first();
-      if (!(await locator.count())) continue;
-      const value = await locator.evaluate((element) => {
-        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-          return element.value;
-        }
-        if (element instanceof HTMLAnchorElement) {
-          if (element.href.startsWith('mailto:')) return element.href.replace(/^mailto:/i, '');
-          if (element.href.startsWith('tel:')) return element.href.replace(/^tel:/i, '');
-        }
-        return element.textContent || '';
-      });
-      const cleaned = normalize(value);
-      if (cleaned) return cleaned;
-    } catch {
-      // Candidate selectors are intentionally best-effort.
-    }
-  }
-  return '';
-}
-
-async function valueByLabels(page, labels = []) {
-  if (!labels.length) return '';
-  return page.evaluate((wantedLabels) => {
-    const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-    const lower = (value) => norm(value).toLowerCase().replace(/:$/, '');
-    const wanted = wantedLabels.map(lower);
-    const candidates = [
-      ...document.querySelectorAll('label, dt, th, [class*="label"], [data-testid*="label"], [data-test*="label"]')
-    ];
-
-    const textOf = (element) => {
-      if (!element) return '';
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
-        return norm(element.value);
-      }
-      if (element instanceof HTMLAnchorElement) {
-        if (element.href.startsWith('mailto:')) return element.href.replace(/^mailto:/i, '');
-        if (element.href.startsWith('tel:')) return element.href.replace(/^tel:/i, '');
-      }
-      return norm(element.textContent);
-    };
-
-    for (const candidate of candidates) {
-      const candidateLabel = lower(candidate.textContent);
-      if (!wanted.some((label) => candidateLabel === label || candidateLabel.includes(label))) continue;
-
-      const forId = candidate.getAttribute('for');
-      if (forId) {
-        const target = document.getElementById(forId);
-        const value = textOf(target);
-        if (value && lower(value) !== candidateLabel) return value;
-      }
-
-      const sibling = candidate.nextElementSibling;
-      const siblingValue = textOf(sibling);
-      if (siblingValue && lower(siblingValue) !== candidateLabel) return siblingValue;
-
-      const parent = candidate.parentElement;
-      if (parent) {
-        const children = [...parent.children].filter((child) => child !== candidate);
-        for (const child of children) {
-          const value = textOf(child);
-          if (value && lower(value) !== candidateLabel) return value;
-        }
-      }
-    }
-    return '';
-  }, labels);
-}
-
-async function clickTab(page, names = []) {
-  for (const name of names) {
-    const candidates = [
-      page.getByRole('tab', { name, exact: false }).first(),
-      page.getByRole('button', { name, exact: false }).first(),
-      page.getByRole('link', { name, exact: false }).first(),
-      page.getByText(name, { exact: true }).first()
-    ];
-    for (const locator of candidates) {
-      if (await locator.isVisible().catch(() => false)) {
-        await locator.click().catch(() => {});
-        await page.waitForTimeout(750);
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-async function collectTexts(page, selectors = [], limit = 30) {
-  const values = [];
-  for (const selector of selectors) {
-    try {
-      const locator = page.locator(selector);
-      const count = Math.min(await locator.count(), limit);
-      for (let index = 0; index < count; index += 1) {
-        const text = normalize(await locator.nth(index).textContent().catch(() => ''));
-        if (text) values.push(text);
-      }
-    } catch {
-      // Keep trying alternative candidate selectors.
-    }
-  }
-  return unique(values).slice(0, limit);
-}
-
 function extractRecordId(url) {
   try {
     const parsed = new URL(url);
-    const queryId = parsed.searchParams.get('id') || parsed.searchParams.get('contactId') || parsed.searchParams.get('taskId');
+    const queryId =
+      parsed.searchParams.get('id') ||
+      parsed.searchParams.get('contactId') ||
+      parsed.searchParams.get('taskId');
     if (queryId) return queryId;
     const segments = parsed.pathname.split('/').filter(Boolean);
     const candidate = [...segments].reverse().find((segment) => /^[A-Za-z0-9_-]{5,}$/.test(segment));
@@ -141,46 +33,60 @@ function firstRegex(text, regex) {
   return normalize(match?.[0] || '');
 }
 
-function parseAppointmentDateTime(...candidates) {
+// Parse a date/time string (Pacific). Accepts year-full and year-less month/slash formats.
+function parseDateTimeString(text) {
+  const t = normalize(text)
+    .replace(/\b(?:PST|PDT|Pacific Time|PT)\b/gi, '')
+    .replace(/\bUNITED STATES\b/gi, '')
+    .trim();
+  if (!t) return '';
   const formats = [
-    'MMMM d, yyyy h:mm a',
-    'MMM d, yyyy h:mm a',
-    'M/d/yyyy h:mm a',
-    'MM/dd/yyyy h:mm a',
-    'M/d/yy h:mm a',
-    'M/d/yyyy, h:mm a',
-    'MM/dd/yyyy, h:mm a',
-    "yyyy-MM-dd'T'HH:mm:ss",
-    "yyyy-MM-dd'T'HH:mm",
-    // Year-less variants (e.g. "Jul 28 10:00 AM"); Luxon fills in the current year.
-    'MMMM d h:mm a',
-    'MMM d h:mm a',
-    'M/d h:mm a'
+    'MMMM d, yyyy h:mm a', 'MMM d, yyyy h:mm a',
+    'M/d/yyyy h:mm a', 'MM/dd/yyyy h:mm a', 'M/d/yy h:mm a',
+    'M/d/yyyy, h:mm a', 'MM/dd/yyyy, h:mm a',
+    "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", 'yyyy-MM-dd h:mm a',
+    // Year-less variants ("Jul 28 10:00 AM"); Luxon fills in the current year.
+    'MMMM d h:mm a', 'MMM d h:mm a', 'M/d h:mm a'
   ];
+  for (const format of formats) {
+    const parsed = DateTime.fromFormat(t, format, { zone: config.calendarTimezone, locale: 'en-US' });
+    if (parsed.isValid) return parsed.toISO();
+  }
+  const iso = DateTime.fromISO(t, { zone: config.calendarTimezone });
+  return iso.isValid ? iso.toISO() : '';
+}
 
-  for (const candidate of candidates.flatMap((value) => [value]).filter(Boolean)) {
-    const text = normalize(candidate)
-      .replace(/\b(?:PST|PDT|Pacific Time|PT)\b/gi, '')
-      .trim();
-    const embedded = text.match(
-      /(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)/i
-    );
-    const slash = text.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}\s*(?:AM|PM)\b/i);
-    const options = unique([embedded?.[0], slash?.[0], text]);
+/**
+ * REI BlackBook renders each field as a leaf `[data-testid="list-item"]` whose text is the label
+ * glued directly to its value, e.g. "Property Address26845 Willow Terrace, ...". Collect those leaf
+ * strings once; values are then pulled by matching the label as a prefix.
+ */
+async function extractListItemPairs(page) {
+  return page.evaluate(() => {
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+    const leaves = [...document.querySelectorAll('[data-testid="list-item"]')]
+      .filter((el) => !el.querySelector('[data-testid="list-item"]'));
+    return leaves.map((el) => norm(el.textContent)).filter(Boolean);
+  });
+}
 
-    for (const option of options) {
-      for (const format of formats) {
-        const parsed = DateTime.fromFormat(option, format, {
-          zone: config.calendarTimezone,
-          locale: 'en-US'
-        });
-        if (parsed.isValid) return parsed.toISO();
+function valueForLabel(pairs, labels = []) {
+  for (const label of labels) {
+    const lower = String(label).toLowerCase();
+    for (const text of pairs) {
+      if (text.toLowerCase().startsWith(lower)) {
+        const value = normalize(text.slice(label.length));
+        if (value && value !== '-') return value;
       }
-      const iso = DateTime.fromISO(option, { zone: config.calendarTimezone });
-      if (iso.isValid) return iso.toISO();
     }
   }
   return '';
+}
+
+// Long-form leaf items (the Notes accordion holds call summaries etc.) — anything that is not a
+// short "LabelValue" pair.
+function longTextItems(pairs, minLength = 60, limit = 20) {
+  return [...new Set(pairs.filter((text) => text.length >= minLength))].slice(0, limit);
 }
 
 async function captureDebug(page, prefix, extra = {}) {
@@ -193,97 +99,75 @@ async function captureDebug(page, prefix, extra = {}) {
   await fs.writeFile(`${base}.json`, JSON.stringify({ url: page.url(), ...extra }, null, 2), 'utf8').catch(() => {});
 }
 
-async function extractField(page, selectorConfig, fieldName) {
-  const direct = await firstTextFromSelectors(page, selectorConfig.fields?.[fieldName] || []);
-  if (direct) return direct;
-  return valueByLabels(page, selectorConfig.labels?.[fieldName] || []);
-}
-
 export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
   const selectorConfig = await loadSelectorConfig();
+  const L = selectorConfig.listItemLabels || {};
   const page = await context.newPage();
   try {
     await page.goto(reiLink, { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
-    // REI is a single-page app; wait for the network to settle and a real contact value to render
-    // (tel:/mailto:) before scraping, otherwise we read the skeleton-loader shell.
+    // REI is a single-page app; wait for the network to settle and the field list to render.
     await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
-    await page.waitForSelector('a[href^="tel:"], a[href^="mailto:"]', { timeout: 15000 }).catch(() => {});
+    await page.waitForSelector('[data-testid="list-item"]', { timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(2500);
     await assertAuthenticated(page, selectorConfig.login || {});
 
     const visibleText = normalize(await page.locator('body').innerText().catch(() => ''));
+    const pairs = await extractListItemPairs(page);
 
-    const core = {};
-    for (const field of [
-      'sellerName',
-      'phone',
-      'email',
-      'propertyAddress',
-      'appointmentDateTime',
-      'assignedOwner',
-      'taskTitle',
-      'taskStatus',
-      'contactStage',
-      'leadSource',
-      'nextAction'
-    ]) {
-      core[field] = await extractField(page, selectorConfig, field);
-    }
+    const sellerName = valueForLabel(pairs, L.sellerName || ['Name']);
+    const phone = valueForLabel(pairs, L.phone || ['Phone (Mobile)', 'Phone (Home)', 'Phone']);
+    const email = valueForLabel(pairs, L.email || ['Email']);
+    const propertyAddress = valueForLabel(pairs, L.propertyAddress || ['Property Address']);
+    const apptTime = valueForLabel(pairs, L.appointmentTime || ['Appointment Time']);
+    const apptDateRaw = valueForLabel(pairs, L.appointmentDate || ['Appointment Date']);
+    const assignedOwner = valueForLabel(pairs, L.assignedOwner || ['Appointment Assigned To', 'Sales Agent']);
+    const leadSource = valueForLabel(pairs, L.leadSource || ['Source']);
+    const contactStage = valueForLabel(pairs, L.contactStage || ['Lead Stage', 'Category']);
+    const nextAction = valueForLabel(pairs, L.nextAction || ['Next Step']);
+    const callDisposition = valueForLabel(pairs, L.callDisposition || ['Call Disposition']);
+    const amountOffer = valueForLabel(pairs, L.amountOffer || ['Amount Offer']);
 
-    await clickTab(page, selectorConfig.tabs?.tasks || []);
-    for (const field of ['appointmentDateTime', 'assignedOwner', 'taskTitle', 'taskStatus', 'nextAction']) {
-      const tabValue = await extractField(page, selectorConfig, field);
-      if (tabValue) core[field] = tabValue;
-    }
+    // Appointment = date-part of "Appointment Date" (its clock value is a created-timestamp
+    // artifact) + the separate "Appointment Time" field.
+    const apptDateOnly =
+      (apptDateRaw.match(/[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4}/) || [])[0] ||
+      (apptDateRaw.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || [])[0] ||
+      '';
+    const apptCombined = [apptDateOnly, apptTime].filter(Boolean).join(' ');
+    const appointmentStartIso =
+      parseDateTimeString(apptCombined) ||
+      parseDateTimeString(apptDateRaw) ||
+      parseDateTimeString(emailFallback.appointmentStartIso || '') ||
+      normalize(emailFallback.appointmentStartIso || '');
 
-    await clickTab(page, selectorConfig.tabs?.property || []);
-    for (const field of ['propertyAddress', 'leadSource']) {
-      const tabValue = await extractField(page, selectorConfig, field);
-      if (tabValue) core[field] = tabValue;
-    }
-    const propertyDetails = await collectTexts(
-      page,
-      selectorConfig.collectionSelectors?.propertyDetails || [],
-      20
-    );
+    const notes = longTextItems(pairs);
 
-    await clickTab(page, selectorConfig.tabs?.notes || []);
-    const notes = await collectTexts(page, selectorConfig.collectionSelectors?.notes || [], 30);
-
-    await clickTab(page, selectorConfig.tabs?.activity || []);
-    const activity = await collectTexts(page, selectorConfig.collectionSelectors?.activity || [], 30);
-
-    const title = normalize(core.taskTitle || emailFallback.rawTitle || '');
-    const appointmentStartIso = parseAppointmentDateTime(
-      core.appointmentDateTime,
-      title,
-      emailFallback.appointmentStartIso
-    );
+    // Cancellation is signalled by the notification (subject/title) or a "Canceled Appointment"
+    // tag on the contact. We do NOT infer it from lead stage alone.
+    const cancelText = `${emailFallback.rawTitle || ''} ${visibleText}`.toLowerCase();
+    const cancelled = /cancel(?:l)?ed appointment/.test(cancelText) || /\bcancelled appointment\b/.test(cancelText);
+    const taskStatus = cancelled ? 'Cancelled' : '';
 
     const phoneFallback = firstRegex(visibleText, /(?:\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/);
     const emailPageFallback = firstRegex(visibleText, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-    const addressFallback = firstRegex(
-      visibleText,
-      /\b\d{1,6}\s+[A-Za-z0-9.'#-]+(?:\s+[A-Za-z0-9.'#-]+){0,6},?\s+[A-Za-z .'-]+,?\s+CA\s+\d{5}(?:-\d{4})?\b/i
-    );
 
     const result = {
       reiLink,
       reiRecordId: extractRecordId(reiLink),
-      sellerName: normalize(core.sellerName || emailFallback.sellerName),
-      phone: normalize(core.phone || phoneFallback),
-      email: normalize(core.email || emailPageFallback),
-      propertyAddress: normalize(core.propertyAddress || emailFallback.propertyAddress || addressFallback),
+      sellerName: normalize(sellerName || emailFallback.sellerName),
+      phone: normalize(phone || phoneFallback),
+      email: normalize(email || emailPageFallback),
+      propertyAddress: normalize(propertyAddress || emailFallback.propertyAddress),
       appointmentStartIso,
-      assignedOwner: normalize(core.assignedOwner || emailFallback.assignedOwner),
-      taskTitle: title,
-      taskStatus: normalize(core.taskStatus),
-      contactStage: normalize(core.contactStage),
-      propertyDetails: propertyDetails.join('\n'),
+      assignedOwner: normalize(assignedOwner || emailFallback.assignedOwner),
+      taskTitle: normalize(emailFallback.rawTitle || ''),
+      taskStatus,
+      contactStage: normalize(contactStage),
+      propertyDetails: normalize(amountOffer ? `Amount Offer: ${amountOffer}` : ''),
       notes: notes.join('\n\n'),
-      latestActivity: activity.join('\n\n'),
-      nextAction: normalize(core.nextAction),
-      leadSource: normalize(core.leadSource),
+      latestActivity: '',
+      nextAction: normalize(nextAction),
+      leadSource: normalize(leadSource),
       scrapedAt: DateTime.now().setZone(config.calendarTimezone).toISO(),
       sourceUrl: page.url(),
       warnings: [...(emailFallback.warnings || [])]
@@ -294,7 +178,7 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     if (!result.appointmentStartIso) result.warnings.push('Appointment date/time was not found or could not be parsed.');
     if (!result.assignedOwner) result.warnings.push('Assigned owner was not found.');
 
-    await captureDebug(page, 'rei-success', { extracted: result });
+    await captureDebug(page, cancelled ? 'rei-cancelled' : 'rei-success', { extracted: result, pairCount: pairs.length });
     return result;
   } catch (error) {
     await captureDebug(page, 'rei-error', { error: { name: error.name, message: error.message } });
