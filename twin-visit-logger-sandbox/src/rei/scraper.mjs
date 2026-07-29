@@ -89,6 +89,35 @@ function longTextItems(pairs, minLength = 60, limit = 20) {
   return [...new Set(pairs.filter((text) => text.length >= minLength))].slice(0, limit);
 }
 
+/**
+ * Find a contact's page URL by searching REI for a phone number, then reading the first
+ * /contacts/<numeric-id> result link. Used when the email has no usable direct link (REI
+ * truncates task titles), so the phone number in the title becomes the lookup key.
+ */
+async function findContactUrlByPhone(page, phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  const attempts = [...new Set([String(phone).trim(), digits].filter(Boolean))];
+  await page.goto('https://my.reiblackbook.com/contacts', { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
+  await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
+  const searchSel = 'input[type="search"], input[placeholder*="Search By Name" i], input[placeholder*="Search" i]';
+  await page.waitForSelector(searchSel, { timeout: 20000 });
+  const box = page.locator(searchSel).first();
+  for (const term of attempts) {
+    await box.click().catch(() => {});
+    await box.fill('').catch(() => {});
+    await box.type(term, { delay: 30 }).catch(() => {});
+    await page.keyboard.press('Enter').catch(() => {});
+    await page.waitForTimeout(3500);
+    const href = await page.evaluate(() => {
+      const link = [...document.querySelectorAll('a[href*="/contacts/"]')]
+        .find((a) => /\/contacts\/\d+/.test(a.getAttribute('href') || ''));
+      return link ? link.getAttribute('href') : '';
+    });
+    if (href) return new URL(href, 'https://my.reiblackbook.com').href;
+  }
+  return '';
+}
+
 async function captureDebug(page, prefix, extra = {}) {
   if (!config.debugCapture) return;
   await fs.mkdir(path.resolve('./debug'), { recursive: true });
@@ -104,13 +133,24 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
   const L = selectorConfig.listItemLabels || {};
   const page = await context.newPage();
   try {
-    await page.goto(reiLink, { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
+    // Decide which contact page to open: a direct REI contact URL if we have one, otherwise
+    // locate it by searching REI for the phone number carried in the task title.
+    let targetUrl = /reiblackbook\.com\/contacts\/\d+/i.test(String(reiLink || '')) ? reiLink : '';
+    if (!targetUrl && emailFallback.phone) {
+      targetUrl = await findContactUrlByPhone(page, emailFallback.phone);
+    }
+    if (!targetUrl) {
+      throw new Error('Could not locate the REI contact (no direct contact link and no phone match).');
+    }
+
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
     // REI is a single-page app; wait for the network to settle and the field list to render.
     await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
     await page.waitForSelector('[data-testid="list-item"]', { timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(2500);
     await assertAuthenticated(page, selectorConfig.login || {});
 
+    const effectiveLink = /reiblackbook\.com\/contacts\/\d+/i.test(page.url()) ? page.url() : targetUrl;
     const visibleText = normalize(await page.locator('body').innerText().catch(() => ''));
     const pairs = await extractListItemPairs(page);
 
@@ -152,8 +192,8 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     const emailPageFallback = firstRegex(visibleText, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
 
     const result = {
-      reiLink,
-      reiRecordId: extractRecordId(reiLink),
+      reiLink: effectiveLink,
+      reiRecordId: extractRecordId(effectiveLink),
       sellerName: normalize(sellerName || emailFallback.sellerName),
       phone: normalize(phone || phoneFallback),
       email: normalize(email || emailPageFallback),

@@ -11,6 +11,22 @@ import { parseAppointmentTitle } from '../parser/email.mjs';
 import { launchReiContext, ReiSessionExpiredError } from '../rei/browser.mjs';
 import { scrapeReiVisit } from '../rei/scraper.mjs';
 
+// Pull the phone number out of the REI notification (from the task-title line if possible). REI
+// truncates long titles, so a short "Booked appointment | (707) 484-2558" title survives and the
+// phone becomes the lookup key the scraper searches REI by.
+function extractTaskPhone(email) {
+  const html = String(email.html || '').replace(/<[^>]+>/g, ' ');
+  const text = `${email.subject || ''}\n${email.text || ''}\n${html}`;
+  const phoneRe = /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
+  const apptLine = text.split(/\r?\n/).find((line) => /appointment/i.test(line) && phoneRe.test(line));
+  if (apptLine) {
+    const match = apptLine.match(phoneRe);
+    if (match) return match[0].trim();
+  }
+  const any = text.match(phoneRe);
+  return any ? any[0].trim() : '';
+}
+
 function criticalValidationErrors(visit) {
   const status = String(visit.taskStatus || '').toLowerCase();
   if (status.includes('cancel')) return [];
@@ -45,15 +61,15 @@ export async function processInbox(auth, logger) {
       try {
         email = await readMessage(auth, messageRef.id);
         const titleData = parseAppointmentTitle(email.subject);
-        // REI truncates the task title in its emails, so a direct link often does not survive.
-        // Fall back to REI's "View" button — a SendGrid click-tracking URL that redirects to the
-        // real REI page (Playwright follows the redirect; the sandbox browser is already logged in).
-        const viewLink = (email.urls || []).find((u) => /ct\.sendgrid\.net\/ls\/click/i.test(u)) || '';
-        const reiLink = email.reiLink || titleData.reiLink || viewLink;
+        // REI truncates task titles in emails, so a direct link usually does not survive. Prefer a
+        // genuine direct contact link if present; otherwise locate the contact by phone number.
+        const reiLink = email.reiLink || titleData.reiLink || '';
+        const phone = extractTaskPhone(email);
         partialVisit = {
           gmailMessageId: email.id,
           emailSubject: email.subject,
           reiLink,
+          phone,
           sellerName: titleData.sellerName,
           propertyAddress: titleData.propertyAddress,
           appointmentStartIso: titleData.appointmentStartIso,
@@ -62,15 +78,16 @@ export async function processInbox(auth, logger) {
           warnings: [...(titleData.warnings || [])],
           scrapedAt: new Date().toISOString()
         };
-        if (!reiLink) throw new Error('No REI BlackBook link was found in the Gmail message.');
+        if (!reiLink && !phone) throw new Error('No REI link or phone number was found in the Gmail message.');
 
         logger.info('Opening REI notification.', {
           gmailMessageId: email.id,
           subject: email.subject,
-          reiLink
+          reiLink,
+          phone
         });
 
-        const scraped = await scrapeReiVisit(context, reiLink, titleData);
+        const scraped = await scrapeReiVisit(context, reiLink, { ...titleData, phone });
         partialVisit = {
           ...partialVisit,
           ...scraped,
