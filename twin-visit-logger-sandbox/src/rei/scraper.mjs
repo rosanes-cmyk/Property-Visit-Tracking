@@ -167,18 +167,38 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     const callDisposition = valueForLabel(pairs, L.callDisposition || ['Call Disposition']);
     const amountOffer = valueForLabel(pairs, L.amountOffer || ['Amount Offer']);
 
-    // Appointment = date-part of "Appointment Date" (its clock value is a created-timestamp
-    // artifact) + the separate "Appointment Time" field.
+    /*
+     * Appointment resolution — never guess, and never trust the clock inside "Appointment Date".
+     * REI stores a CREATION timestamp there (observed: "Jul 27, 2026, 8:35 AM" for a visit that was
+     * actually at 11:00 AM), so only its DATE part is usable. The real time lives in the separate
+     * "Appointment Time" field. Priority:
+     *   1. REI date + REI time            (both on the page — most authoritative)
+     *   2. Title date + time              (typed deliberately for this booking)
+     *   3. REI date + time from the title (page date, human-supplied time)
+     * If none yields a full date AND time, leave it empty so the row is flagged for review.
+     */
     const apptDateOnly =
       (apptDateRaw.match(/[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4}/) || [])[0] ||
       (apptDateRaw.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || [])[0] ||
       '';
-    const apptCombined = [apptDateOnly, apptTime].filter(Boolean).join(' ');
-    const appointmentStartIso =
-      parseDateTimeString(apptCombined) ||
-      parseDateTimeString(apptDateRaw) ||
-      parseDateTimeString(emailFallback.appointmentStartIso || '') ||
-      normalize(emailFallback.appointmentStartIso || '');
+    const titleIso = normalize(emailFallback.appointmentStartIso || '');
+    const titleDt = titleIso ? DateTime.fromISO(titleIso, { zone: config.calendarTimezone }) : null;
+    const titleTime = titleDt?.isValid ? titleDt.toFormat('h:mm a') : '';
+
+    let appointmentStartIso = '';
+    let appointmentSource = '';
+    if (apptDateOnly && apptTime) {
+      appointmentStartIso = parseDateTimeString(`${apptDateOnly} ${apptTime}`);
+      appointmentSource = 'REI appointment fields';
+    }
+    if (!appointmentStartIso && titleDt?.isValid) {
+      appointmentStartIso = titleDt.toISO();
+      appointmentSource = 'task title';
+    }
+    if (!appointmentStartIso && apptDateOnly && titleTime) {
+      appointmentStartIso = parseDateTimeString(`${apptDateOnly} ${titleTime}`);
+      appointmentSource = 'REI date + title time';
+    }
 
     const notes = longTextItems(pairs);
 
@@ -210,13 +230,29 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       leadSource: normalize(leadSource),
       scrapedAt: DateTime.now().setZone(config.calendarTimezone).toISO(),
       sourceUrl: page.url(),
+      appointmentSource,
       warnings: [...(emailFallback.warnings || [])]
     };
 
     if (!result.sellerName) result.warnings.push('Seller name was not found.');
     if (!result.propertyAddress) result.warnings.push('Property address was not found.');
-    if (!result.appointmentStartIso) result.warnings.push('Appointment date/time was not found or could not be parsed.');
+    if (!result.appointmentStartIso) {
+      result.warnings.push(
+        'Appointment date/time not found. Fill "Appointment Date" + "Appointment Time" on the REI ' +
+        'contact, or put the date and time in the task title.'
+      );
+    }
     if (!result.assignedOwner) result.warnings.push('Assigned owner was not found.');
+    // Surface a REI-vs-title disagreement instead of silently preferring one.
+    if (appointmentSource === 'REI appointment fields' && titleDt?.isValid) {
+      const chosen = DateTime.fromISO(result.appointmentStartIso, { zone: config.calendarTimezone });
+      if (chosen.isValid && Math.abs(chosen.diff(titleDt, 'minutes').minutes) > 1) {
+        result.warnings.push(
+          `Appointment differs between REI (${chosen.toFormat('MMM d, yyyy h:mm a')}) and the task ` +
+          `title (${titleDt.toFormat('MMM d, yyyy h:mm a')}). Used the REI page value.`
+        );
+      }
+    }
 
     await captureDebug(page, cancelled ? 'rei-cancelled' : 'rei-success', { extracted: result, pairCount: pairs.length });
     return result;

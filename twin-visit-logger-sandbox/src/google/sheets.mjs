@@ -2,60 +2,55 @@ import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
 
+// Fields the automation may write. Everything else in the tracker stays human-owned.
 export const CANONICAL_HEADERS = [
-  'Gmail Message ID',
-  'REI Record ID',
   'Seller Name',
   'Phone',
   'Email',
   'Property Address',
-  'Visit Start',
   'Visit Date',
   'Visit Time',
   'Visit Status',
   'Current Stage',
   'Assigned Owner',
   'REI BlackBook Link',
-  'Task Title',
-  'Task Status',
-  'Contact Stage',
-  'Property Details',
-  'Visit Notes',
-  'Latest Activity',
-  'Next Action',
   'Lead Source',
+  'Next Action',
+  'Next Action Due Date',
+  'Last Contact Result',
   'Calendar Event ID',
-  'Last Updated',
-  'Automation Status',
-  'Automation Error'
+  'REI Record ID',
+  'Gmail Message ID'
 ];
 
+/**
+ * EXACT column names only — no fuzzy matching.
+ *
+ * Fuzzy aliases were writing scraped text into unrelated columns of the operational tracker
+ * (e.g. task text landing in "Property Condition", a name in "Blocker", a status in
+ * "Final Disposition"). Every canonical field now maps to one exact header; if that header does
+ * not exist in the sheet, the field is simply not written. Human-owned columns (Visit Notes,
+ * Property Condition, Seller Motivation, Blocker, Final Disposition, offer/gift fields) are
+ * deliberately absent so automation can never overwrite them.
+ */
 const HEADER_ALIASES = {
-  'Gmail Message ID': ['Gmail Message ID', 'Email Message ID', 'Message ID'],
-  'REI Record ID': ['REI Record ID', 'REI ID', 'Contact ID'],
-  'Seller Name': ['Seller Name', 'Contact Name', 'Name'],
-  Phone: ['Phone', 'Phone Number', 'Mobile'],
-  Email: ['Email', 'Email Address'],
-  'Property Address': ['Property Address', 'Address'],
-  'Visit Start': ['Visit Start', 'Appointment Start', 'Appointment Date Time'],
-  'Visit Date': ['Visit Date', 'Appointment Date'],
-  'Visit Time': ['Visit Time', 'Appointment Time'],
-  'Visit Status': ['Visit Status', 'Appointment Status'],
-  'Current Stage': ['Current Stage', 'Stage'],
-  'Assigned Owner': ['Assigned Owner', 'Owner', 'Sales Agent', 'Assigned To'],
-  'REI BlackBook Link': ['REI BlackBook Link', 'REI Link', 'Contact Link'],
-  'Task Title': ['Task Title', 'REI Task Title'],
-  'Task Status': ['Task Status', 'REI Task Status'],
-  'Contact Stage': ['Contact Stage', 'Lead Stage'],
-  'Property Details': ['Property Details', 'Property Information'],
-  'Visit Notes': ['Visit Notes', 'Notes', 'Contact Notes'],
-  'Latest Activity': ['Latest Activity', 'Activity', 'Timeline'],
-  'Next Action': ['Next Action', 'Next Step'],
-  'Lead Source': ['Lead Source', 'Source'],
-  'Calendar Event ID': ['Calendar Event ID', 'Google Calendar Event ID', 'Event ID'],
-  'Last Updated': ['Last Updated', 'Updated At'],
-  'Automation Status': ['Automation Status', 'Sync Status'],
-  'Automation Error': ['Automation Error', 'Sync Error', 'Error']
+  'Seller Name': ['Seller Name'],
+  Phone: ['Phone'],
+  Email: ['Email'],
+  'Property Address': ['Property Address'],
+  'Visit Date': ['Visit Date'],
+  'Visit Time': ['Visit Time'],
+  'Visit Status': ['Visit Status'],
+  'Current Stage': ['Current Stage'],
+  'Assigned Owner': ['Assigned Visitor'],
+  'REI BlackBook Link': ['REI BlackBook Link'],
+  'Lead Source': ['Lead Source'],
+  'Next Action': ['Next Action'],
+  'Next Action Due Date': ['Next Action Due Date'],
+  'Last Contact Result': ['Last Contact Result'],
+  'Calendar Event ID': ['Calendar Event ID'],
+  'REI Record ID': ['REI Record ID'],
+  'Gmail Message ID': ['Gmail Message ID']
 };
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -202,7 +197,18 @@ function visitToRecord(visit) {
   const automationError = visit.automationError || '';
   const warnings = Array.isArray(visit.warnings) ? visit.warnings.filter(Boolean) : [];
 
-  const needsReview = Boolean(automationError);
+  // A booked visit with a valid start is always Scheduled/Visit Scheduled so the dashboard shows it
+  // under Upcoming Visits. Only a genuinely unusable record (no valid appointment) is Needs Review.
+  const hasValidStart = Boolean(start?.isValid);
+  const status = cancelled ? 'Cancelled' : hasValidStart ? 'Scheduled' : 'Needs Review';
+  const stage = cancelled ? 'Cancelled' : hasValidStart ? 'Visit Scheduled' : 'Needs Review';
+
+  // One-line provenance note (never the raw scraped page text, which is unreadable in a cell).
+  const noteParts = ['Auto-logged from REI task email'];
+  if (visit.leadSource) noteParts.push(`source: ${visit.leadSource}`);
+  if (visit.contactStage) noteParts.push(`REI stage: ${visit.contactStage}`);
+  if (automationError) noteParts.push(`ERROR: ${automationError}`);
+  else if (warnings.length) noteParts.push(`check: ${warnings.join('; ')}`);
 
   return {
     'Gmail Message ID': visit.gmailMessageId || '',
@@ -211,25 +217,17 @@ function visitToRecord(visit) {
     Phone: visit.phone || '',
     Email: visit.email || '',
     'Property Address': visit.propertyAddress || '',
-    'Visit Start': start?.isValid ? start.toISO() : '',
-    'Visit Date': start?.isValid ? start.toFormat('MM/dd/yyyy') : '',
-    'Visit Time': start?.isValid ? start.toFormat('h:mm a') : '',
-    'Visit Status': cancelled ? 'Cancelled' : needsReview ? 'Needs Review' : 'Scheduled',
-    'Current Stage': cancelled ? 'Cancelled' : needsReview ? 'Needs Review' : 'Visit Scheduled',
+    'Visit Date': hasValidStart ? start.toFormat('MM/dd/yyyy') : '',
+    'Visit Time': hasValidStart ? start.toFormat('h:mm a') : '',
+    'Visit Status': status,
+    'Current Stage': stage,
     'Assigned Owner': visit.assignedOwner || '',
     'REI BlackBook Link': visit.reiLink || '',
-    'Task Title': visit.taskTitle || '',
-    'Task Status': visit.taskStatus || '',
-    'Contact Stage': visit.contactStage || '',
-    'Property Details': clipCell(visit.propertyDetails),
-    'Visit Notes': clipCell(visit.notes),
-    'Latest Activity': clipCell(visit.latestActivity),
-    'Next Action': visit.nextAction || '',
     'Lead Source': visit.leadSource || '',
-    'Calendar Event ID': visit.calendarEventId || '',
-    'Last Updated': visit.scrapedAt || DateTime.now().setZone(config.calendarTimezone).toISO(),
-    'Automation Status': automationError ? 'Error' : warnings.length ? 'Needs Review' : 'Synced',
-    'Automation Error': automationError || warnings.join(' | ')
+    'Next Action': cancelled ? '' : 'Conduct scheduled visit & log outcome',
+    'Next Action Due Date': hasValidStart ? start.toFormat('MM/dd/yyyy') : '',
+    'Last Contact Result': clipCell(noteParts.join(' · '), 500),
+    'Calendar Event ID': visit.calendarEventId || ''
   };
 }
 
