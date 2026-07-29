@@ -123,7 +123,10 @@ export async function processInbox(auth, logger) {
           errors += 1;
           logger.warn('REI record needs review; calendar was not changed.', {
             gmailMessageId: email.id,
-            errors: validationErrors
+            errors: validationErrors,
+            // Include the scraper's detail (which date pieces were found) so the gap is visible.
+            details: partialVisit.warnings || [],
+            appointmentSource: partialVisit.appointmentSource || '(none)'
           });
           continue;
         }
