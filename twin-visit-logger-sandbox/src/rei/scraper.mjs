@@ -177,10 +177,15 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
      *   3. REI date + time from the title (page date, human-supplied time)
      * If none yields a full date AND time, leave it empty so the row is flagged for review.
      */
-    const apptDateOnly =
-      (apptDateRaw.match(/[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4}/) || [])[0] ||
-      (apptDateRaw.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || [])[0] ||
-      '';
+    const DATE_RE = /[A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}/;
+    const apptDateOnly = (apptDateRaw.match(DATE_RE) || [])[0] || '';
+
+    // Many contacts have the Appointment Date/Time fields blank and carry the date only on the task
+    // itself ("Due Date: Jul 29, 2026" in Upcoming Tasks). Use that as a date source of last resort.
+    const dueDateItem = pairs.find((t) => /due date/i.test(t));
+    const dueDateOnly = dueDateItem
+      ? ((dueDateItem.split(/due date:?/i)[1] || '').match(DATE_RE) || [])[0] || ''
+      : '';
     const titleIso = normalize(emailFallback.appointmentStartIso || '');
     const titleDt = titleIso ? DateTime.fromISO(titleIso, { zone: config.calendarTimezone }) : null;
     const titleTime = titleDt?.isValid ? titleDt.toFormat('h:mm a') : '';
@@ -198,6 +203,16 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     if (!appointmentStartIso && apptDateOnly && titleTime) {
       appointmentStartIso = parseDateTimeString(`${apptDateOnly} ${titleTime}`);
       appointmentSource = 'REI date + title time';
+    }
+    // 4. REI "Appointment Time" with the task's Due Date as the date.
+    if (!appointmentStartIso && dueDateOnly && apptTime) {
+      appointmentStartIso = parseDateTimeString(`${dueDateOnly} ${apptTime}`);
+      appointmentSource = 'task due date + REI appointment time';
+    }
+    // 5. Task Due Date with the time from the title.
+    if (!appointmentStartIso && dueDateOnly && titleTime) {
+      appointmentStartIso = parseDateTimeString(`${dueDateOnly} ${titleTime}`);
+      appointmentSource = 'task due date + title time';
     }
 
     const notes = longTextItems(pairs);
@@ -237,9 +252,16 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     if (!result.sellerName) result.warnings.push('Seller name was not found.');
     if (!result.propertyAddress) result.warnings.push('Property address was not found.');
     if (!result.appointmentStartIso) {
+      // Say exactly which pieces were found so the gap is obvious (usually a missing TIME).
+      const seen = [
+        `REI Appointment Date: ${apptDateRaw || '(blank)'}`,
+        `REI Appointment Time: ${apptTime || '(blank)'}`,
+        `task Due Date: ${dueDateOnly || '(blank)'}`,
+        `title date/time: ${titleDt?.isValid ? titleDt.toFormat('MMM d, yyyy h:mm a') : '(none)'}`
+      ].join(' | ');
       result.warnings.push(
-        'Appointment date/time not found. Fill "Appointment Date" + "Appointment Time" on the REI ' +
-        'contact, or put the date and time in the task title.'
+        'No complete appointment date AND time. Fill "Appointment Date" + "Appointment Time" on the ' +
+        `REI contact, or put the date and time in the task title. Found: ${seen}`
       );
     }
     if (!result.assignedOwner) result.warnings.push('Assigned owner was not found.');
