@@ -55,22 +55,37 @@ or sends anything to a seller.
 
 ---
 
-## The one habit required from the team
+## What the team has to do when booking (two things)
 
-Title booked-appointment tasks like this:
+**1. Put the seller's phone number in the task title.** This is how the automation finds the right
+REI contact, and a short title always survives REI's truncation.
 
 ```
-Booked appointment | Jul 30, 2026 2:00 PM | (209) 833-1958
+Booked appointment | (209) 833-1958
 ```
 
-- The **phone number** is how the automation finds the right REI contact.
-- The **date and time** are used when REI's own Appointment fields are blank.
-- Keep it short — REI cuts off long titles, which is what broke the earlier approach.
+**2. Fill these two fields on that contact in REI:**
 
-Everything else (seller, address, owner, source) is pulled from REI automatically.
+- **Appointment Date** — the visit date
+- **Appointment Time** — the visit time
 
-The team still fills in two things by hand on each row, because REI's email cannot carry them
-reliably: **Assigned Owner** and any correction to the **REI BlackBook Link**.
+That is the whole habit. Everything else — seller name, full property address, assigned owner, lead
+source, REI link, and the calendar event — is pulled automatically.
+
+### Why these fields and not the title
+
+We use REI's own appointment fields as the source of truth because they are date/time pickers (no
+typos), they keep REI itself accurate, and a reschedule only requires changing the field — the next
+sync updates both the tracker row and the calendar event. This is already proven: the one test record
+that had these fields filled came through perfectly, and the one that left them blank produced no
+appointment date, because a date with no time cannot become a calendar event.
+
+**Safety net:** if someone forgets, the automation falls back to a date and time in the task title,
+then to the task's due date. Adding `| Jul 30, 2026 2:00 PM` to the title is optional insurance, not
+a requirement.
+
+**Still filled by hand on each row:** the team confirms the **Assigned Owner** and the
+**REI BlackBook Link** where needed.
 
 ---
 
