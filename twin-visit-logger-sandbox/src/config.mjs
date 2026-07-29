@@ -30,7 +30,7 @@ const raw = {
   calendarTimezone: process.env.CALENDAR_TIMEZONE || 'America/Los_Angeles',
   defaultVisitDurationMinutes: int(process.env.DEFAULT_VISIT_DURATION_MINUTES, 60),
   reiUserDataDir: process.env.REI_USER_DATA_DIR || './browser-data/rei-sandbox',
-  reiLoginUrl: process.env.REI_LOGIN_URL || 'https://app.reiblackbook.com/',
+  reiLoginUrl: process.env.REI_LOGIN_URL || 'https://my.reiblackbook.com/',
   reiHeadless: bool(process.env.REI_HEADLESS, false),
   reiPageTimeoutMs: int(process.env.REI_PAGE_TIMEOUT_MS, 45000),
   reiSelectorConfig: process.env.REI_SELECTOR_CONFIG || './config/rei-selectors.json',
