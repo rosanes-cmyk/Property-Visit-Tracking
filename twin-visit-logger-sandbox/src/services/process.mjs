@@ -27,6 +27,18 @@ function extractTaskPhone(email) {
   return any ? any[0].trim() : '';
 }
 
+// The pipe-delimited task title lives in the email BODY (the subject is generic). Find that line
+// so we can read the appointment date/time from it as a fallback when REI's own fields are empty.
+function findTaskTitleLine(email) {
+  const html = String(email.html || '').replace(/<[^>]+>/g, '\n');
+  const text = `${email.text || ''}\n${html}`;
+  const line = text
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .find((l) => /(booked|rescheduled|cancell?ed)\s+appointment/i.test(l));
+  return line || '';
+}
+
 function criticalValidationErrors(visit) {
   const status = String(visit.taskStatus || '').toLowerCase();
   if (status.includes('cancel')) return [];
@@ -60,7 +72,9 @@ export async function processInbox(auth, logger) {
       let partialVisit = null;
       try {
         email = await readMessage(auth, messageRef.id);
-        const titleData = parseAppointmentTitle(email.subject);
+        // Parse the pipe-delimited title from the email BODY (subject is generic), so the date in
+        // the title is available as a fallback when REI's own appointment fields are empty.
+        const titleData = parseAppointmentTitle(findTaskTitleLine(email) || email.subject);
         // REI truncates task titles in emails, so a direct link usually does not survive. Prefer a
         // genuine direct contact link if present; otherwise locate the contact by phone number.
         const reiLink = email.reiLink || titleData.reiLink || '';
