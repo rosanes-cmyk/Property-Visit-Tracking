@@ -205,8 +205,20 @@ function visitToRecord(visit) {
    */
   const hasValidStart = Boolean(start?.isValid);
   const actionable = hasValidStart && Boolean(visit.propertyAddress) && !automationError;
-  const status = cancelled ? 'Cancelled' : actionable ? 'Scheduled' : 'Needs Review';
-  const stage = cancelled ? 'Cancelled' : actionable ? 'Visit Scheduled' : 'Needs Review';
+  /*
+   * Only ever write values the tracker's own dropdowns allow:
+   *   Visit Status  -> Scheduled | Completed | Canceled | Reschedule Needed
+   *   Current Stage -> Visit Scheduled | Visit Completed - Needs Review | Offer Preparation | ...
+   * This previously wrote 'Cancelled' (double L) and 'Needs Review', neither of which is a legal
+   * value, so those rows matched no dashboard section and vanished from the board.
+   *
+   * A record that is not actionable writes NEITHER field. Leaving Current Stage blank lets the
+   * sheet's own Missing Required Fields formula flag it, which routes it to Exceptions Requiring
+   * Review. Blank values are skipped on update, so a stage a human already advanced is never
+   * clobbered by automation.
+   */
+  const status = cancelled ? 'Canceled' : actionable ? 'Scheduled' : '';
+  const stage = cancelled ? '' : actionable ? 'Visit Scheduled' : '';
 
   // One-line provenance note (never the raw scraped page text, which is unreadable in a cell).
   const noteParts = ['Auto-logged from REI task email'];

@@ -303,6 +303,7 @@ var SECTIONS=[
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
   ['Upcoming Visits (Scheduled)',function(r){return r.stage==='Visit Scheduled';}],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
+  ['Offer Preparation',function(r){return r.stage==='Offer Preparation';}],
   ['Offer Sent — Follow-Up Due',function(r){return r.stage==='Offer Sent';}],
   ['Stalled Deals',function(r){return r.stalled;}],
   ['Overdue Tasks',function(r){return r.daysOverdue>0;}],
@@ -311,7 +312,12 @@ var SECTIONS=[
   ['Gift Review',function(r){return r.gift==='Recommended';}],
   ['Long-Term Nurture',function(r){return r.stage==='Long-Term Nurture';}],
   ['Revival Opportunities',function(r){return r.disposition==='Lost'&&r.daysSince!==''&&r.daysSince>=45;}],
-  ['Exceptions Requiring Review',function(r){return r.dq==='Incomplete'||r.dq==='Exception';}]
+  ['Exceptions Requiring Review',function(r){return r.dq==='Incomplete'||r.dq==='Exception';}],
+  ['\u2691 Unrouted \u2014 Needs Attention',function(r){
+    if(r.stage==='Lost / Closed Out')return false;   // archived by design, not lost
+    for(var i=0;i<SECTIONS.length-1;i++){ if(SECTIONS[i][1](r))return false; }
+    return true;   // matched nothing above: surface it rather than drop it
+  }]
 ];
 var VIEW='board',FILTER='all';
 var PSIZE=6,PAGE={};
