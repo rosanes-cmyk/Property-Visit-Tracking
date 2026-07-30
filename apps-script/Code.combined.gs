@@ -1145,6 +1145,45 @@ function apiJson_(obj) {
 
 /* ---------------- server: read ---------------- */
 
+/**
+ * Sheets stores a date/time as a serial number, and getValues() only returns a Date object when the
+ * cell carries a date format. Rows written by the external automation can arrive unformatted, which
+ * is why the detail view showed "46235" and "0.5833333" instead of a date and a time. Convert those
+ * serials by column meaning so the UI always shows something readable.
+ *   date serial 46235 -> 2026-08-01     time fraction 0.58333 -> 2:00 PM
+ */
+function cellDisplay_(header, val) {
+  if (val == null || val === '') return '';
+  var h = String(header);
+  var isTime = /\bTime$/i.test(h);
+  var isDate = /Date/i.test(h);
+
+  if (val instanceof Date) {
+    if (isTime) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'h:mm a');
+    return fmt_(val);
+  }
+  if (typeof val !== 'number' || !isFinite(val)) return val;
+
+  if (isTime && val >= 0 && val < 1) {
+    var mins = Math.round(val * 24 * 60);
+    var hh = Math.floor(mins / 60) % 24, mm = mins % 60;
+    var ap = hh >= 12 ? 'PM' : 'AM';
+    var h12 = hh % 12; if (h12 === 0) h12 = 12;
+    return h12 + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap;
+  }
+  if (isDate && val > 1000) {
+    // Sheets' serial epoch is 1899-12-30. Keep the whole-day part; ignore any time fraction.
+    return fmt_(new Date(Date.UTC(1899, 11, 30) + Math.round(val) * 86400000));
+  }
+  return val;
+}
+
+/** Date-only helper for the flat fields: tolerates Date objects and bare serial numbers alike. */
+function fmtCell_(header, val) {
+  var out = cellDisplay_(header, val);
+  return out === 0 ? '' : out;
+}
+
 function webGetData() {
   const sh = dataSheet_();
   const last = sh.getLastRow();
@@ -1154,7 +1193,7 @@ function webGetData() {
     vals.forEach(function(v, i){
       const rec = {}; HEADERS.forEach(function(h, j){ rec[h] = v[j]; });
       if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return; // live records only
-      const full = {}; HEADERS.forEach(function(h){ var val = rec[h]; full[h] = (val instanceof Date) ? fmt_(val) : (val == null ? '' : val); });
+      const full = {}; HEADERS.forEach(function(h){ full[h] = cellDisplay_(h, rec[h]); });
       rows.push({
         rowNum: CFG.FIRST_DATA_ROW + i,
         id: rec['Property ID'] || '',
@@ -1166,12 +1205,13 @@ function webGetData() {
         stage: rec['Current Stage'] || '',
         owner: rec['Assigned Owner'] || '',
         visitStatus: rec['Visit Status'] || '',
-        visitDate: fmt_(rec['Visit Date']),
+        visitDate: fmtCell_('Visit Date', rec['Visit Date']),
+        visitTime: fmtCell_('Visit Time', rec['Visit Time']),
         visitor: rec['Assigned Visitor'] || '',
         visitNotes: rec['Visit Notes'] || '',
         nextAction: rec['Next Action'] || '',
-        due: fmt_(rec['Next Action Due Date']),
-        lastContact: fmt_(rec['Last Contact Date']),
+        due: fmtCell_('Next Action Due Date', rec['Next Action Due Date']),
+        lastContact: fmtCell_('Last Contact Date', rec['Last Contact Date']),
         daysOverdue: rec['Days Overdue'] === '' ? 0 : Number(rec['Days Overdue']) || 0,
         stalled: rec['Stalled Status'] === 'Yes',
         blocker: rec['Blocker'] || '',
@@ -1186,7 +1226,7 @@ function webGetData() {
         disposition: rec['Final Disposition'] || '',
         handoff: rec['Transaction Handoff Status'] || '',
         gift: rec['Gift Status'] || '',
-        offerPromised: fmt_(rec['Offer Promised Date']),
+        offerPromised: fmtCell_('Offer Promised Date', rec['Offer Promised Date']),
         sellerFloor: rec['Seller Floor'] || '',
         ourMax: rec['Our Max'] || '',
         priceGap: (Number(rec['Seller Floor']) && Number(rec['Our Max']) && Number(rec['Seller Floor']) > Number(rec['Our Max'])) ? (Number(rec['Seller Floor']) - Number(rec['Our Max'])) : 0,
