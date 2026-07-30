@@ -26,9 +26,9 @@ function onOpen() {
     .addItem('💬 Send visit digest to Chat now', 'sendVisitDigestNow')
     .addItem('💬 Check for new bookings now', 'notifyNewBookingsNow')
     .addItem('💬 Send "needs attention" digest now', 'sendAttentionDigestNow')
-    .addItem('💬 Turn ON morning visit digest (7am)', 'installChatDigestTrigger')
+    .addItem('💬 Turn ON morning visit digest (9am)', 'installChatDigestTrigger')
     .addItem('💬 Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
-    .addItem('💬 Turn ON afternoon attention digest (4pm)', 'installChatAttentionTrigger')
+    .addItem('💬 Turn ON afternoon attention digest (3pm)', 'installChatAttentionTrigger')
     .addItem('💬 Turn OFF morning visit digest', 'removeChatDigestTrigger')
     .addItem('💬 Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
     .addItem('💬 Turn OFF attention digest', 'removeChatAttentionTrigger')
@@ -2648,13 +2648,13 @@ function sendVisitDigestNow() {
     'Google Chat', 10);
 }
 
-/** Menu: post the digest every weekday morning. Replaces any existing copy. */
+/** Menu: post the visit digest daily at 9am. Replaces any existing copy. */
 function installChatDigestTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sendVisitDigestToChat') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('sendVisitDigestToChat').timeBased().everyDays(1).atHour(7).create();
-  SpreadsheetApp.getActive().toast('Daily Chat digest ON — posts each morning around 7am.', 'Google Chat', 8);
+  ScriptApp.newTrigger('sendVisitDigestToChat').timeBased().everyDays(1).atHour(9).create();
+  SpreadsheetApp.getActive().toast('Morning visit digest ON — posts daily in the 9am hour.', 'Google Chat', 8);
 }
 
 /** Menu: stop the daily digest. */
@@ -2864,13 +2864,13 @@ function sendAttentionDigestNow() {
     'Google Chat', 10);
 }
 
-/** Menu: post the attention digest every afternoon. */
+/** Menu: post the attention digest daily at 3pm. */
 function installChatAttentionTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(16).create();
-  SpreadsheetApp.getActive().toast('Attention digest ON — posts each afternoon around 4pm.', 'Google Chat', 8);
+  ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(15).create();
+  SpreadsheetApp.getActive().toast('Attention digest ON — posts daily in the 3pm hour.', 'Google Chat', 8);
 }
 
 function removeChatAttentionTrigger() {
