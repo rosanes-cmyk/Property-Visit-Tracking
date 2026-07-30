@@ -40,14 +40,47 @@ function buildDescription(visit) {
   ].join('\n').slice(0, 7800);
 }
 
-async function findEventByPrivateProperty(calendar, visit) {
+/**
+ * Resolve the target calendar.
+ *
+ * CALENDAR_NAME is preferred: it is matched against the summaries in the account's calendar list, so
+ * a calendar shared with this account ("Juan's Official Calendar") is found without anyone pasting a
+ * calendar ID, and it keeps working if that ID ever changes. Falls back to CALENDAR_ID.
+ *
+ * Fails loudly rather than silently writing to the wrong calendar: if the name is configured but not
+ * found (or is not writable), throw, so the run reports it instead of dropping events on `primary`.
+ */
+let cachedCalendarId;
+async function resolveCalendarId(calendar) {
+  if (cachedCalendarId) return cachedCalendarId;
+  const wanted = String(config.calendarName || '').trim();
+  if (!wanted) {
+    cachedCalendarId = config.calendarId;
+    return cachedCalendarId;
+  }
+  const res = await calendar.calendarList.list({ maxResults: 250 });
+  const items = res.data.items || [];
+  const match = items.find((c) => String(c.summary || '').trim().toLowerCase() === wanted.toLowerCase());
+  if (!match) {
+    const names = items.map((c) => c.summary).filter(Boolean).join(', ');
+    throw new Error(`Calendar named "${wanted}" was not found for this account. Visible calendars: ${names}`);
+  }
+  if (match.accessRole !== 'owner' && match.accessRole !== 'writer') {
+    throw new Error(`Calendar "${wanted}" is ${match.accessRole}: events cannot be created. ` +
+      'Ask the owner for "Make changes to events" access.');
+  }
+  cachedCalendarId = match.id;
+  return cachedCalendarId;
+}
+
+async function findEventByPrivateProperty(calendar, visit, calendarId) {
   const properties = [];
   if (visit.reiRecordId) properties.push(`reiRecordId=${visit.reiRecordId}`);
   if (visit.reiLink) properties.push(`reiLinkHash=${linkHash(visit.reiLink)}`);
 
   for (const property of properties) {
     const response = await calendar.events.list({
-      calendarId: config.calendarId,
+      calendarId,
       privateExtendedProperty: [property],
       showDeleted: false,
       maxResults: 10,
@@ -59,10 +92,10 @@ async function findEventByPrivateProperty(calendar, visit) {
   return '';
 }
 
-async function eventExists(calendar, eventId) {
+async function eventExists(calendar, eventId, calendarId) {
   if (!eventId) return false;
   try {
-    await calendar.events.get({ calendarId: config.calendarId, eventId });
+    await calendar.events.get({ calendarId, eventId });
     return true;
   } catch (error) {
     if ([404, 410].includes(error.code) || [404, 410].includes(error.response?.status)) return false;
@@ -72,14 +105,15 @@ async function eventExists(calendar, eventId) {
 
 export async function syncCalendarEvent(auth, visit, existingEventId = '') {
   const calendar = google.calendar({ version: 'v3', auth });
+  const calendarId = await resolveCalendarId(calendar);
   let eventId = existingEventId;
-  if (!(await eventExists(calendar, eventId))) {
-    eventId = await findEventByPrivateProperty(calendar, visit);
+  if (!(await eventExists(calendar, eventId, calendarId))) {
+    eventId = await findEventByPrivateProperty(calendar, visit, calendarId);
   }
 
   if (isCancelled(visit.taskStatus)) {
     if (eventId) {
-      await calendar.events.delete({ calendarId: config.calendarId, eventId });
+      await calendar.events.delete({ calendarId, eventId });
     }
     return '';
   }
@@ -103,7 +137,7 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
 
   if (eventId) {
     const response = await calendar.events.update({
-      calendarId: config.calendarId,
+      calendarId,
       eventId,
       sendUpdates: 'none',
       requestBody: event
@@ -112,7 +146,7 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
   }
 
   const response = await calendar.events.insert({
-    calendarId: config.calendarId,
+    calendarId,
     sendUpdates: 'none',
     requestBody: event
   });

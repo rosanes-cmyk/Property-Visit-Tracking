@@ -27,6 +27,9 @@ const raw = {
   trackerHeaderRow: int(process.env.TRACKER_HEADER_ROW, 1),
   addMissingColumns: bool(process.env.ADD_MISSING_COLUMNS, true),
   calendarId: process.env.CALENDAR_ID || 'primary',
+  // Preferred: match a calendar by NAME from this account's calendar list (works for calendars
+  // shared with you, and survives an ID change). Blank falls back to CALENDAR_ID.
+  calendarName: process.env.CALENDAR_NAME || '',
   calendarTimezone: process.env.CALENDAR_TIMEZONE || 'America/Los_Angeles',
   defaultVisitDurationMinutes: int(process.env.DEFAULT_VISIT_DURATION_MINUTES, 60),
   reiUserDataDir: process.env.REI_USER_DATA_DIR || './browser-data/rei-sandbox',
@@ -54,6 +57,7 @@ const schema = z.object({
   trackerHeaderRow: z.number().int().positive(),
   addMissingColumns: z.boolean(),
   calendarId: z.string().min(1),
+  calendarName: z.string(),
   calendarTimezone: z.string().min(1),
   defaultVisitDurationMinutes: z.number().int().positive().max(1440),
   reiUserDataDir: z.string().min(1),

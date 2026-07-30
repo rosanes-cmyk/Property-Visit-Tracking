@@ -74,6 +74,10 @@ const CFG = {
   API_TOKEN: '',
   SANDBOX: true,
   VISIT_CALENDAR_ID: 'rosanes@twinhomebuyer.com',
+  // Preferred target: resolved by calendar NAME at runtime, so no calendar ID has to be
+  // pasted and it keeps working if the ID changes. Must be a calendar this account can
+  // EDIT (view-only access cannot create events). Falls back to VISIT_CALENDAR_ID when blank.
+  VISIT_CALENDAR_NAME: "Juan's Official Calendar",
   OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',
 };
 
@@ -1528,12 +1532,22 @@ function driveMinutes_(dest) {
   } catch (e) { return 0; }
 }
 function visitCalendar_() {
+  // Prefer the named calendar. getCalendarsByName covers calendars shared WITH this account, so
+  // "Juan's Official Calendar" resolves without anyone copying an ID out of Calendar settings.
+  var name = CFG.VISIT_CALENDAR_NAME;
+  if (name) {
+    var byName = CalendarApp.getCalendarsByName(name) || [];
+    if (byName.length) return byName[0];
+    logAuto_('ERROR', 'calendar', 'No calendar named "' + name + '" is visible to this account. ' +
+      'Confirm it is shared with edit rights, or clear VISIT_CALENDAR_NAME to use VISIT_CALENDAR_ID.');
+    return null;
+  }
   var id = CFG.VISIT_CALENDAR_ID;
   if (!id) return null;
   return (id === 'default' || id === 'me') ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id);
 }
 function maybeCreateVisitEvent_(map, addr) {
-  if (!CFG.VISIT_CALENDAR_ID) return 'skipped (no calendar configured)';
+  if (!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) return 'skipped (no calendar configured)';
   try {
     const cal = visitCalendar_();
     if (!cal) return 'calendar not found / not shared';
@@ -1559,7 +1573,7 @@ function maybeCreateVisitEvent_(map, addr) {
  * timezone offset); falls back to a broad search if no visit date. Only removes exact-title matches.
  */
 function deleteVisitEvents_(addr, visitDate) {
-  if (!CFG.VISIT_CALENDAR_ID || !addr) return 'no calendar / address';
+  if ((!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) || !addr) return 'no calendar / address';
   try {
     var cal = visitCalendar_();
     if (!cal) return 'calendar not found';

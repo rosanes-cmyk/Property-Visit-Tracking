@@ -442,12 +442,22 @@ function driveMinutes_(dest) {
 
 /** Create Juan's calendar event with a drive-time "leave by" reminder. Sandbox-gated. */
 function visitCalendar_() {
+  // Prefer the named calendar. getCalendarsByName covers calendars shared WITH this account, so
+  // "Juan's Official Calendar" resolves without anyone copying an ID out of Calendar settings.
+  var name = CFG.VISIT_CALENDAR_NAME;
+  if (name) {
+    var byName = CalendarApp.getCalendarsByName(name) || [];
+    if (byName.length) return byName[0];
+    logAuto_('ERROR', 'calendar', 'No calendar named "' + name + '" is visible to this account. ' +
+      'Confirm it is shared with edit rights, or clear VISIT_CALENDAR_NAME to use VISIT_CALENDAR_ID.');
+    return null;
+  }
   var id = CFG.VISIT_CALENDAR_ID;
   if (!id) return null;
   return (id === 'default' || id === 'me') ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id);
 }
 function maybeCreateVisitEvent_(map, addr) {
-  if (!CFG.VISIT_CALENDAR_ID) return 'skipped (no calendar configured)';
+  if (!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) return 'skipped (no calendar configured)';
   try {
     const cal = visitCalendar_();
     if (!cal) return 'calendar not found / not shared';
@@ -471,7 +481,7 @@ function maybeCreateVisitEvent_(map, addr) {
  * timezone offset); falls back to a broad search if no visit date. Only removes exact-title matches.
  */
 function deleteVisitEvents_(addr, visitDate) {
-  if (!CFG.VISIT_CALENDAR_ID || !addr) return 'no calendar / address';
+  if ((!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) || !addr) return 'no calendar / address';
   try {
     var cal = visitCalendar_();
     if (!cal) return 'calendar not found';

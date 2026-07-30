@@ -29,6 +29,16 @@ const auth = await authorizeGoogle();
 
 /* ---------- 1. Calendar events ---------- */
 const calendar = google.calendar({ version: 'v3', auth });
+// Clean the SAME calendar the automation writes to (CALENDAR_NAME wins over CALENDAR_ID).
+let targetCalendarId = config.calendarId;
+if (String(config.calendarName || '').trim()) {
+  const list = await calendar.calendarList.list({ maxResults: 250 });
+  const want = config.calendarName.trim().toLowerCase();
+  const hit = (list.data.items || []).find((c) => String(c.summary || '').trim().toLowerCase() === want);
+  if (!hit) throw new Error(`Calendar named "${config.calendarName}" not found for this account.`);
+  targetCalendarId = hit.id;
+  console.log(`[calendar] target: "${config.calendarName}" (${targetCalendarId})`);
+}
 const timeMin = DateTime.now().setZone(config.calendarTimezone).minus({ days: 90 }).toISO();
 const timeMax = DateTime.now().setZone(config.calendarTimezone).plus({ days: 365 }).toISO();
 
@@ -36,7 +46,7 @@ let pageToken;
 let calFound = 0;
 do {
   const res = await calendar.events.list({
-    calendarId: config.calendarId,
+    calendarId: targetCalendarId,
     timeMin,
     timeMax,
     singleEvents: true,
@@ -52,7 +62,7 @@ do {
     console.log(`[calendar] ${tag}: ${when}  ${event.summary || '(no title)'}`);
     if (APPLY) {
       await calendar.events
-        .delete({ calendarId: config.calendarId, eventId: event.id, sendUpdates: 'none' })
+        .delete({ calendarId: targetCalendarId, eventId: event.id, sendUpdates: 'none' })
         .catch((error) => console.error(`  failed to delete ${event.id}: ${error.message}`));
     }
   }

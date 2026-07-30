@@ -29,6 +29,10 @@ const CFG = {
   // ---- Lead intake automation (REI BlackBook webhook → doPost action:'intake') ----
   SANDBOX: true,                 // tags intake rows Source='Intake-Sandbox' (isolates test loads). Calendar is controlled separately below.
   VISIT_CALENDAR_ID: 'rosanes@twinhomebuyer.com',  // calendar that gets the "Property Visit" events. '' = off; 'default' = script owner's primary. (Using your own calendar for now instead of Juan's.)
+  // Preferred target: resolved by calendar NAME at runtime, so no calendar ID has to be
+  // pasted and it keeps working if the ID changes. Must be a calendar this account can
+  // EDIT (view-only access cannot create events). Falls back to VISIT_CALENDAR_ID when blank.
+  VISIT_CALENDAR_NAME: "Juan's Official Calendar",
   OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',   // drive-time origin for the "leave office by" reminder
 };
 
