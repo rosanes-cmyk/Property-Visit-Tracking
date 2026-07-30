@@ -340,6 +340,55 @@ function syncVisitCalendar_(sh, rowNum) {
   }
 }
 
+/**
+ * Realign Current Stage with the row's own evidence.
+ *
+ * Half-applied dashboard actions (and earlier automation) left rows whose Current Stage contradicts
+ * their other fields - e.g. Visit Status=Completed but stage still "Visit Scheduled", so the card sat
+ * in Upcoming Visits with no button able to move it. Derive the stage from the strongest signal
+ * present and rewrite only the rows that disagree. Menu: "Fix mismatched stages".
+ */
+function repairStages() {
+  var sh = dataSheet_();
+  var last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return;
+  var fixed = [];
+  for (var r = CFG.FIRST_DATA_ROW; r <= last; r++) {
+    var R = new RowAccessor_(sh, r);
+    if (!R.get('Property Address')) continue;
+    var stage = String(R.get('Current Stage') || '');
+    // Terminal stages are the operator's decision - never second-guess them.
+    if (stage === 'Lost / Closed Out' || stage === 'Long-Term Nurture' || stage === 'Contract Signed') continue;
+
+    var want = '';
+    if (R.get('Contract Signed Date')) want = 'Contract Signed';
+    else if (R.get('Contract Sent Date')) want = 'Contract Sent';
+    else if (R.get('Counteroffer Amount')) want = 'Active Negotiation';
+    else if (R.get('Offer Sent Date')) want = 'Offer Sent';
+    else if (R.get('Approved Offer Amount')) want = 'Offer Preparation';
+    else if (String(R.get('Visit Status')) === 'Completed') want = 'Visit Completed — Needs Review';
+    else if (String(R.get('Visit Status')) === 'Canceled') want = '';   // leave for a human to close out
+    else if (String(R.get('Visit Status')) === 'Scheduled') want = 'Visit Scheduled';
+
+    if (want && want !== stage) {
+      R.set('Current Stage', want);
+      if (want === 'Visit Completed — Needs Review') {
+        R.setIfBlank('Assigned Owner', 'Jonathan');
+        R.setIfBlank('Next Action', 'Review completed visit: make offer or pass');
+        R.setIfBlank('Next Action Due Date', today_());
+      }
+      R.flush();
+      syncVisitCalendar_(sh, r);
+      fixed.push(R.get('Property ID') + ': "' + stage + '" -> "' + want + '"');
+    }
+  }
+  SpreadsheetApp.flush();
+  logAuto_('REPAIR', '', 'repairStages fixed ' + fixed.length + ' row(s). ' + fixed.join(' | '));
+  SpreadsheetApp.getActive().toast(
+    fixed.length ? ('Fixed ' + fixed.length + ' mismatched stage(s): ' + fixed.join(' · ')) : 'No mismatched stages found.',
+    'repairStages', 15);
+}
+
 function slaFor_(rec) {
   var stage = rec['Current Stage'] || '';
   if (stage === 'Lost / Closed Out' || stage === 'Contract Signed' || stage === 'Long-Term Nurture') return '';

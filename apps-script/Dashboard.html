@@ -309,6 +309,7 @@ var SECTIONS=[
   ['Negotiation Decisions',function(r){return r.stage==='Active Negotiation';}],
   ['Contract Handoffs',function(r){return r.stage==='Contract Signed'&&r.handoff!=='Handoff Confirmed';}],
   ['Gift Review',function(r){return r.gift==='Recommended';}],
+  ['Long-Term Nurture',function(r){return r.stage==='Long-Term Nurture';}],
   ['Revival Opportunities',function(r){return r.disposition==='Lost'&&r.daysSince!==''&&r.daysSince>=45;}],
   ['Exceptions Requiring Review',function(r){return r.dq==='Incomplete'||r.dq==='Exception';}]
 ];
@@ -318,8 +319,9 @@ function keep(r){var own=document.getElementById('owner').value,q=document.getEl
   if(own&&r.owner!==own)return false; if(q&&(r.seller+' '+r.address).toLowerCase().indexOf(q)<0)return false;
   if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; if(FILTER==='gap')return r.gap>0; if(FILTER==='conflict')return r.conflict; return true;}
 function actionsFor(r){var a=[];
-  if(r.visitStatus!=='Completed'&&r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
-  if(r.stage==='Visit Completed — Needs Review'){a.push(['recordOfferSent','Record offer sent',1]);a.push(['nurture','Move to nurture',0]);}
+  if(r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
+  if(r.stage==='Visit Scheduled'||r.stage==='Visit Completed — Needs Review')a.push(['nurture','Move to nurture',0]);
+  if(r.stage==='Visit Completed — Needs Review')a.push(['recordOfferSent','Record offer sent',1]);
   if(r.stage==='Offer Sent'){a.push(['logContact','Log follow-up',1]);a.push(['sellerCounter','Seller countered',0]);a.push(['contractSent','Contract sent',0]);}
   if(r.stage==='Active Negotiation'){a.push(['logContact','Log follow-up',1]);a.push(['contractSent','Contract sent',0]);}
   if(r.stage==='Verbal Agreement'||r.stage==='Contract Sent'){a.push(['contractSigned','Contract signed',1]);a.push(['logContact','Log follow-up',0]);}
