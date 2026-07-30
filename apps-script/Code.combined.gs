@@ -24,8 +24,14 @@ function onOpen() {
     .addSeparator()
     .addItem('💬 Set Google Chat webhook', 'setChatWebhook')
     .addItem('💬 Send visit digest to Chat now', 'sendVisitDigestNow')
-    .addItem('💬 Turn ON daily Chat digest (7am)', 'installChatDigestTrigger')
-    .addItem('💬 Turn OFF daily Chat digest', 'removeChatDigestTrigger')
+    .addItem('💬 Check for new bookings now', 'notifyNewBookingsNow')
+    .addItem('💬 Send "needs attention" digest now', 'sendAttentionDigestNow')
+    .addItem('💬 Turn ON morning visit digest (7am)', 'installChatDigestTrigger')
+    .addItem('💬 Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
+    .addItem('💬 Turn ON afternoon attention digest (4pm)', 'installChatAttentionTrigger')
+    .addItem('💬 Turn OFF morning visit digest', 'removeChatDigestTrigger')
+    .addItem('💬 Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
+    .addItem('💬 Turn OFF attention digest', 'removeChatAttentionTrigger')
     .addSeparator()
     .addItem('📥 Set up Intake Inbox (create tab)', 'setupIntakeInbox')
     .addItem('📥 Check Intake Inbox now', 'checkIntakeInboxNow')
@@ -2658,4 +2664,219 @@ function removeChatDigestTrigger() {
     if (t.getHandlerFunction() === 'sendVisitDigestToChat') { ScriptApp.deleteTrigger(t); n++; }
   });
   SpreadsheetApp.getActive().toast('Daily Chat digest OFF (' + n + ' trigger removed).', 'Google Chat', 6);
+}
+
+/* ============================ instant new-booking alerts ============================ */
+
+var CHAT_SEEN_PROP = 'CHAT_SEEN_IDS';   // Property IDs already announced to the Space
+
+/**
+ * Announce bookings that appeared since the last check — however they arrived.
+ *
+ * The local scraper writes rows straight into the sheet via the Sheets API, so no Apps Script event
+ * ever fires for them. Watching for newly-appeared Property IDs therefore covers every path
+ * (scraper, manual "Add property", webIntake_) from one place.
+ *
+ * The FIRST run seeds the seen-list WITHOUT posting, so switching this on cannot blast the Space
+ * with every row already in the tracker.
+ */
+function notifyNewBookings() {
+  if (!chatWebhookUrl_()) return { posted: 0, seeded: false };
+
+  var props = PropertiesService.getScriptProperties();
+  var stored = props.getProperty(CHAT_SEEN_PROP);
+  var seen = {};
+  (stored || '').split(',').forEach(function (id) { if (id) seen[id] = true; });
+
+  var sh = dataSheet_();
+  var last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return { posted: 0, seeded: false };
+  var vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+
+  var fresh = [], ids = [];
+  vals.forEach(function (v) {
+    var rec = {}; HEADERS.forEach(function (h, i) { rec[h] = v[i]; });
+    var id = String(rec['Property ID'] || '').trim();
+    if (!id || !rec['Property Address']) return;
+    if (String(rec['Source']).trim() === 'TEST') return;
+    ids.push(id);
+    if (seen[id]) return;
+    if (rec['Current Stage'] === 'Lost / Closed Out') return;   // nothing to action
+    fresh.push({
+      id: id,
+      seller: rec['Seller Name'] || '(no name)',
+      address: rec['Property Address'],
+      date: cellDisplay_('Visit Date', rec['Visit Date']) || 'no date',
+      time: cellDisplay_('Visit Time', rec['Visit Time']) || 'time not set',
+      visitor: rec['Assigned Visitor'] || rec['Assigned Owner'] || 'UNASSIGNED',
+      stage: rec['Current Stage'] || '(no stage)',
+      rei: rec['REI BlackBook Link'] || '',
+      missing: rec['Missing Required Fields'] || ''
+    });
+  });
+
+  var isFirstRun = (stored === null);
+  props.setProperty(CHAT_SEEN_PROP, ids.slice(-1500).join(','));
+
+  if (isFirstRun) {
+    logAuto_('CHAT', '', 'New-booking watcher seeded with ' + ids.length + ' existing record(s); nothing posted.');
+    return { posted: 0, seeded: true };
+  }
+  if (!fresh.length) return { posted: 0, seeded: false };
+
+  var err = chatPost_(buildNewBookingCard_(fresh));
+  logAuto_('CHAT', '', err
+    ? ('New-booking alert FAILED (' + fresh.length + '): ' + err)
+    : ('New-booking alert posted · ' + fresh.map(function (f) { return f.id; }).join(', ')));
+  return { posted: err ? 0 : fresh.length, seeded: false, error: err };
+}
+
+function buildNewBookingCard_(items) {
+  var widgets = [];
+  items.forEach(function (v) {
+    var lines = [
+      '<b>' + v.seller + '</b>',
+      v.address,
+      '🗓 ' + v.date + ' · ' + v.time,
+      '👤 ' + v.visitor,
+      '📋 ' + v.stage
+    ];
+    if (v.visitor === 'UNASSIGNED') lines.push('⚠️ <b>Needs a visitor assigned</b>');
+    if (v.missing) lines.push('⚠️ Missing: ' + v.missing);
+    widgets.push({ textParagraph: { text: lines.join('<br>') } });
+    if (v.rei) widgets.push({ buttonList: { buttons: [{ text: 'Open in REI', onClick: { openLink: { url: v.rei } } }] } });
+    widgets.push({ divider: {} });
+  });
+  var url = dashboardUrl_();
+  if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard to update', onClick: { openLink: { url: url } } }] } });
+
+  return { cardsV2: [{ cardId: 'new-booking', card: {
+    header: { title: items.length > 1 ? (items.length + ' new property visits booked') : 'New property visit booked',
+              subtitle: 'Added to the tracker · ' + fmt_(today_()) },
+    sections: [{ widgets: widgets }]
+  } }] };
+}
+
+/** Menu: check for new bookings now. */
+function notifyNewBookingsNow() {
+  if (!chatWebhookUrl_()) { SpreadsheetApp.getUi().alert('Save a Google Chat webhook first.'); return; }
+  var r = notifyNewBookings();
+  SpreadsheetApp.getActive().toast(
+    r.seeded ? 'Watcher seeded with existing records — future bookings will be announced.'
+             : (r.error ? ('Failed: ' + r.error) : (r.posted ? ('Announced ' + r.posted + ' new booking(s).') : 'No new bookings since the last check.')),
+    'Google Chat', 10);
+}
+
+/** Menu: watch for new bookings every 5 minutes. */
+function installChatNewBookingTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'notifyNewBookings') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('notifyNewBookings').timeBased().everyMinutes(5).create();
+  SpreadsheetApp.getActive().toast('New-booking alerts ON — checks every 5 minutes.', 'Google Chat', 8);
+}
+
+function removeChatNewBookingTrigger() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'notifyNewBookings') { ScriptApp.deleteTrigger(t); n++; }
+  });
+  SpreadsheetApp.getActive().toast('New-booking alerts OFF (' + n + ' trigger removed).', 'Google Chat', 6);
+}
+
+/* ==================== forgotten work / follow-ups needing attention ==================== */
+
+/**
+ * Post what is slipping: overdue next actions, stalled deals, visits whose date has passed but were
+ * never completed, and records flagged for review. This is the "nothing gets forgotten" message.
+ * Silent when everything is clean.
+ */
+function sendAttentionDigestToChat() {
+  if (!chatWebhookUrl_()) return { posted: false, count: 0 };
+  var sh = dataSheet_();
+  var last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return { posted: false, count: 0 };
+  var vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+  var today = today_();
+
+  var overdue = [], stalled = [], missedVisit = [], review = [];
+  vals.forEach(function (v) {
+    var rec = {}; HEADERS.forEach(function (h, i) { rec[h] = v[i]; });
+    if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return;
+    if (rec['Current Stage'] === 'Lost / Closed Out') return;
+    var label = (rec['Seller Name'] || '(no name)') + ' — ' + rec['Property Address'];
+    var owner = rec['Assigned Owner'] || rec['Assigned Visitor'] || 'UNASSIGNED';
+
+    var od = Number(rec['Days Overdue']) || 0;
+    if (od > 0) overdue.push(od + 'd · ' + label + ' · 👤 ' + owner + ' · ' + (rec['Next Action'] || 'no next action'));
+    if (rec['Stalled Status'] === 'Yes') stalled.push(label + ' · 👤 ' + owner);
+
+    // A visit whose date has passed while still marked Scheduled was never closed out.
+    if (String(rec['Visit Status']) === 'Scheduled') {
+      var raw = rec['Visit Date'], d = null;
+      if (raw instanceof Date) d = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+      else if (typeof raw === 'number' && raw > 1000) {
+        var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
+        d = new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+      }
+      if (d && d < today) missedVisit.push(fmt_(d) + ' · ' + label + ' · 👤 ' + owner);
+    }
+    if (rec['Data Quality Status'] === 'Exception' || rec['Data Quality Status'] === 'Incomplete') {
+      review.push(label + ' · ' + (rec['Exception Reason'] || rec['Missing Required Fields'] || 'needs review'));
+    }
+  });
+
+  var total = overdue.length + stalled.length + missedVisit.length + review.length;
+  if (!total) {
+    logAuto_('CHAT', '', 'Attention digest skipped — nothing overdue, stalled, missed or flagged.');
+    return { posted: false, count: 0 };
+  }
+
+  var widgets = [];
+  var block = function (icon, title, arr) {
+    if (!arr.length) return;
+    widgets.push({ textParagraph: { text: icon + ' <b>' + title + ' (' + arr.length + ')</b><br>' +
+      arr.slice(0, 8).join('<br>') + (arr.length > 8 ? ('<br>…and ' + (arr.length - 8) + ' more') : '') } });
+    widgets.push({ divider: {} });
+  };
+  block('⏰', 'Overdue next actions', overdue);
+  block('🚩', 'Visit date passed, never completed', missedVisit);
+  block('🐢', 'Stalled (no activity 3+ business days)', stalled);
+  block('⚠️', 'Needs review / missing data', review);
+
+  var url = dashboardUrl_();
+  if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard to update', onClick: { openLink: { url: url } } }] } });
+
+  var err = chatPost_({ cardsV2: [{ cardId: 'attention', card: {
+    header: { title: 'Needs attention — ' + total + ' item(s)', subtitle: fmt_(today_()) },
+    sections: [{ widgets: widgets }]
+  } }] });
+  logAuto_('CHAT', '', err ? ('Attention digest FAILED: ' + err) : ('Attention digest posted · ' + total + ' item(s).'));
+  return { posted: !err, count: total, error: err };
+}
+
+/** Menu: post the attention digest now. */
+function sendAttentionDigestNow() {
+  if (!chatWebhookUrl_()) { SpreadsheetApp.getUi().alert('Save a Google Chat webhook first.'); return; }
+  var r = sendAttentionDigestToChat();
+  SpreadsheetApp.getActive().toast(
+    r.error ? ('Failed: ' + r.error) : (r.count ? ('Posted ' + r.count + ' item(s) needing attention.') : 'Nothing overdue, stalled or flagged — nothing posted.'),
+    'Google Chat', 10);
+}
+
+/** Menu: post the attention digest every afternoon. */
+function installChatAttentionTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(16).create();
+  SpreadsheetApp.getActive().toast('Attention digest ON — posts each afternoon around 4pm.', 'Google Chat', 8);
+}
+
+function removeChatAttentionTrigger() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sendAttentionDigestToChat') { ScriptApp.deleteTrigger(t); n++; }
+  });
+  SpreadsheetApp.getActive().toast('Attention digest OFF (' + n + ' trigger removed).', 'Google Chat', 6);
 }
