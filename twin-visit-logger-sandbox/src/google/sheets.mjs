@@ -248,6 +248,27 @@ function visitToRecord(visit) {
   };
 }
 
+/**
+ * Stages that mean a person has already advanced this record past initial scheduling.
+ *
+ * The scraper re-syncs a booking on every matching email, writing Visit Status='Scheduled' and
+ * Current Stage='Visit Scheduled'. Without a guard, a reschedule or duplicate notification would
+ * silently undo a human's "Mark visit completed" (or an offer/contract stage) and drag the card back
+ * into Upcoming Visits. Automation therefore never overwrites those two fields once the record has
+ * progressed. A CANCELLATION is still allowed through: that is new information the team needs.
+ */
+const HUMAN_ADVANCED_STAGES = new Set([
+  'Visit Completed — Needs Review',
+  'Offer Preparation',
+  'Offer Sent',
+  'Active Negotiation',
+  'Verbal Agreement',
+  'Contract Sent',
+  'Contract Signed',
+  'Long-Term Nurture',
+  'Lost / Closed Out'
+]);
+
 const ALLOW_EMPTY_UPDATE_HEADERS = new Set([
   'Calendar Event ID',
   'Automation Error'
@@ -335,10 +356,29 @@ export async function upsertVisit(auth, visit, existing = null) {
     return { ...match, found: true, rowNumber: newRowNumber, appended: true };
   }
 
+  // Do not walk a human's progress backwards (see HUMAN_ADVANCED_STAGES).
+  const readExisting = (header) => {
+    const i = match.headerMap.get(header);
+    return i === undefined ? '' : String(match.row?.[i] || '').trim();
+  };
+  const existingStage = readExisting('Current Stage');
+  const existingStatus = readExisting('Visit Status');
+  const cancelling = normalize(visit.taskStatus).includes('cancel');
+  const progressed = HUMAN_ADVANCED_STAGES.has(existingStage) || existingStatus === 'Completed';
+  const protectedHeaders = progressed && !cancelling
+    ? new Set(['Visit Status', 'Current Stage'])
+    : new Set();
+  if (protectedHeaders.size) {
+    console.log(JSON.stringify({ level: 'info',
+      message: 'Preserved human-set progress; Visit Status / Current Stage not overwritten.',
+      details: { row: match.rowNumber, existingStage, existingStatus } }));
+  }
+
   const data = [];
   for (const [header, value] of Object.entries(record)) {
     const index = match.headerMap.get(header);
     if (index === undefined) continue;
+    if (protectedHeaders.has(header)) continue;
     if ((value === '' || value === null || value === undefined) && !ALLOW_EMPTY_UPDATE_HEADERS.has(header)) {
       continue;
     }

@@ -16,7 +16,8 @@
     "once": "node src/run-once.mjs",
     "poll": "node src/poll.mjs",
     "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs",
-    "cleanup": "node scripts/cleanup.mjs"
+    "cleanup": "node scripts/cleanup.mjs",
+    "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",
