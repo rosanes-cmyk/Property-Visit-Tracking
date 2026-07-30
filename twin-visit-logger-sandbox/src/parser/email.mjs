@@ -80,9 +80,14 @@ export function parseAppointmentTitle(subject) {
     }
   }
 
+  // A phone number is the contact LOOKUP KEY, not a name/address/owner. Excluding it here stops the
+  // recommended short title ("Booked appointment | (209) 833-1958 | ...") from putting the phone in
+  // the Seller Name column when the REI page lookup returns nothing.
+  const PHONE_ONLY = /^\+?1?[\s.()-]*\d{3}[\s.()-]*\d{3}[\s.()-]*\d{4}$/;
   const nonSpecial = parts.slice(1).filter((part) => {
     if (/^https?:\/\//i.test(part)) return false;
     if (parseDateTime(part)) return false;
+    if (PHONE_ONLY.test(part)) return false;
     return true;
   });
 

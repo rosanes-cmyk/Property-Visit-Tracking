@@ -197,11 +197,16 @@ function visitToRecord(visit) {
   const automationError = visit.automationError || '';
   const warnings = Array.isArray(visit.warnings) ? visit.warnings.filter(Boolean) : [];
 
-  // A booked visit with a valid start is always Scheduled/Visit Scheduled so the dashboard shows it
-  // under Upcoming Visits. Only a genuinely unusable record (no valid appointment) is Needs Review.
+  /*
+   * A record only counts as Scheduled when it is actually actionable: a valid appointment start, a
+   * property address to visit, and no processing error. Marking a row Scheduled on a valid date
+   * alone was wrong — a failed REI lookup produced an address-less "Scheduled" row that the
+   * dashboard could not display, so the failure was invisible.
+   */
   const hasValidStart = Boolean(start?.isValid);
-  const status = cancelled ? 'Cancelled' : hasValidStart ? 'Scheduled' : 'Needs Review';
-  const stage = cancelled ? 'Cancelled' : hasValidStart ? 'Visit Scheduled' : 'Needs Review';
+  const actionable = hasValidStart && Boolean(visit.propertyAddress) && !automationError;
+  const status = cancelled ? 'Cancelled' : actionable ? 'Scheduled' : 'Needs Review';
+  const stage = cancelled ? 'Cancelled' : actionable ? 'Visit Scheduled' : 'Needs Review';
 
   // One-line provenance note (never the raw scraped page text, which is unreadable in a cell).
   const noteParts = ['Auto-logged from REI task email'];
