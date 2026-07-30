@@ -117,12 +117,79 @@ function removeRowsByPrefix_(ss, sheetName, idCol, prefix) {
   return removed;
 }
 
-/** Clears data values from row 2 down (keeps headers + formula columns' formulas). */
+/**
+ * Clear every data row, and remove the calendar events those rows created.
+ *
+ * Clearing rows used to leave their events behind on the calendar: the team then saw visits that no
+ * longer existed anywhere in the tracker. Events are removed BEFORE the addresses are wiped, since
+ * the address is what identifies an event.
+ */
 function clearAllData() {
   const sh = dataSheet_();
   const last = Math.max(sh.getLastRow(), CFG.FIRST_DATA_ROW);
+  var removed = 0;
+  if (last >= CFG.FIRST_DATA_ROW) {
+    const rows = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+    rows.forEach(function (r) {
+      const addr = r[col('Property Address') - 1];
+      if (!addr) return;
+      const res = deleteVisitEvents_(addr, r[col('Visit Date') - 1]);
+      if (String(res).indexOf('removed') === 0) removed++;
+    });
+  }
   const nonFormula = [];
   for (var i = 0; i < HEADERS.length; i++) if (COMPUTED_HEADERS.indexOf(HEADERS[i]) < 0) nonFormula.push(i + 1);
   nonFormula.forEach(function(c){ sh.getRange(CFG.FIRST_DATA_ROW, c, last - 1, 1).clearContent(); });
-  SpreadsheetApp.getActive().toast('Data rows cleared (headers + formulas kept).', 'Twin Visit Logger', 6);
+  logAuto_('CLEANUP', '', 'clearAllData: rows cleared; calendar events removed for ' + removed + ' record(s).');
+  SpreadsheetApp.getActive().toast('Data rows cleared · ' + removed + ' calendar event(s) removed (headers + formulas kept).', 'Twin Visit Logger', 8);
+}
+
+/**
+ * Delete automation-created calendar events that no longer match any live tracker row.
+ *
+ * Needed because a row deleted straight from the sheet (select row -> Delete) runs no Apps Script at
+ * all, so its event survives. Also cleans up after events that were written to a different calendar
+ * before the target was changed. Only touches events whose title begins "Property Visit" — a real
+ * meeting on the same calendar is never at risk.
+ *
+ * Menu: "Remove orphaned calendar events".
+ */
+function purgeOrphanCalendarEvents() {
+  var cal = visitCalendar_();
+  if (!cal) {
+    SpreadsheetApp.getUi().alert('No calendar resolved. Check VISIT_CALENDAR_NAME / VISIT_CALENDAR_ID.');
+    return;
+  }
+  var keyOf = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+
+  // Addresses that still exist in the tracker (any row with an address counts as live).
+  var live = {};
+  var sh = dataSheet_(), last = sh.getLastRow();
+  if (last >= CFG.FIRST_DATA_ROW) {
+    sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), last - CFG.FIRST_DATA_ROW + 1, 1)
+      .getValues().forEach(function (r) { var k = keyOf(r[0]); if (k) live[k] = true; });
+  }
+
+  var now = new Date();
+  var from = new Date(now.getTime() - 120 * 864e5);
+  var to = new Date(now.getTime() + 365 * 864e5);
+  var events = cal.getEvents(from, to);
+  var removed = [], kept = 0;
+
+  events.forEach(function (e) {
+    var title = e.getTitle() || '';
+    if (!/^Property Visit\b/i.test(title)) return;         // not ours — leave alone
+    var tk = keyOf(title);
+    var matches = Object.keys(live).some(function (k) { return k.length > 8 && tk.indexOf(k) >= 0; });
+    if (matches) { kept++; return; }
+    removed.push(Utilities.formatDate(e.getStartTime(), Session.getScriptTimeZone(), 'yyyy-MM-dd') + ' ' + title.slice(0, 60));
+    e.deleteEvent();
+  });
+
+  logAuto_('CLEANUP', '', 'purgeOrphanCalendarEvents on "' + cal.getName() + '": removed ' + removed.length +
+    ', kept ' + kept + '. ' + removed.join(' | '));
+  SpreadsheetApp.getActive().toast(
+    'Calendar "' + cal.getName() + '": removed ' + removed.length + ' orphaned event(s), kept ' + kept +
+    ' matching a live row.' + (removed.length ? ' Removed: ' + removed.slice(0, 4).join(' · ') : ''),
+    'Calendar cleanup', 15);
 }
