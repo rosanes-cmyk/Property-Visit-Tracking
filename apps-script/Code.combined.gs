@@ -1326,7 +1326,7 @@ function webAction(action, id, params) {
     switch (action) {
       case 'visitCompleted':
         R.set('Visit Status', 'Completed'); stamp_(R); R.flush();
-        onVisitStatus_(new RowAccessor_(sh, rowNum)); break;
+        runHandler_(onVisitStatus_, sh, rowNum); break;
       case 'logContact':
         R.set('Last Contact Date', today_());
         if (params.result) R.set('Last Contact Result', params.result);
@@ -1336,22 +1336,22 @@ function webAction(action, id, params) {
       case 'recordOfferSent':
         if (params.amount) R.set('Approved Offer Amount', Number(params.amount));
         R.set('Offer Sent Date', params.date ? new Date(params.date) : today_());
-        stamp_(R); R.flush(); onOfferSent_(new RowAccessor_(sh, rowNum)); break;
+        stamp_(R); R.flush(); runHandler_(onOfferSent_, sh, rowNum); break;
       case 'sellerCounter':
         if (params.amount) R.set('Counteroffer Amount', Number(params.amount));
         if (params.result) R.set('Last Contact Result', params.result);
-        stamp_(R); R.flush(); onSellerCounter_(new RowAccessor_(sh, rowNum)); break;
+        stamp_(R); R.flush(); runHandler_(onSellerCounter_, sh, rowNum); break;
       case 'contractSent':
         R.set('Contract Sent Date', params.date ? new Date(params.date) : today_());
-        stamp_(R); R.flush(); onContractSent_(new RowAccessor_(sh, rowNum)); break;
+        stamp_(R); R.flush(); runHandler_(onContractSent_, sh, rowNum); break;
       case 'contractSigned':
         R.set('Contract Signed Date', params.date ? new Date(params.date) : today_());
-        stamp_(R); R.flush(); onContractSigned_(new RowAccessor_(sh, rowNum)); break;
+        stamp_(R); R.flush(); runHandler_(onContractSigned_, sh, rowNum); break;
       case 'nurture':
         R.set('Current Stage', 'Long-Term Nurture');
         if (params.due) R.set('Next Action Due Date', new Date(params.due));
         if (params.nextAction) R.set('Next Action', params.nextAction);
-        stamp_(R); R.flush(); onStageManual_(new RowAccessor_(sh, rowNum)); break;
+        stamp_(R); R.flush(); runHandler_(onStageManual_, sh, rowNum); break;
       case 'setNextAction':
         if (params.nextAction) R.set('Next Action', params.nextAction);
         if (params.due) R.set('Next Action Due Date', new Date(params.due));
@@ -1366,7 +1366,7 @@ function webAction(action, id, params) {
           else if (h === 'Approved Offer Amount' || h === 'Counteroffer Amount' || h === 'Asking Price' || h === 'Price Expectation') R.set(h, val === '' || val == null ? '' : Number(val));
           else R.set(h, val == null ? '' : val);
         });
-        stamp_(R); R.flush(); break;
+        stamp_(R); R.flush(); syncVisitCalendar_(sh, rowNum); break;
       }
       case 'deleteRecord':
         softDelete_(sh, rowNum); break;
@@ -1377,6 +1377,59 @@ function webAction(action, id, params) {
     return { ok: true, data: webGetData() };
   } catch (e) {
     return { ok: false, error: String(e) };
+  }
+}
+
+/**
+ * Run an automation handler for one row and PERSIST its changes.
+ *
+ * The handlers were written for onEdit, where onEditInstallable flushes at the end. Called directly
+ * from webAction they were never flushed, so a quick-action saved its own field but silently lost the
+ * cascade — "Mark visit completed" set Visit Status but not Current Stage, leaving the card stuck in
+ * Upcoming Visits. Always flush here, then keep the calendar in step with the new state.
+ */
+function runHandler_(handler, sh, rowNum) {
+  var R = new RowAccessor_(sh, rowNum);
+  handler(R);
+  R.flush();
+  syncVisitCalendar_(sh, rowNum);
+  return R;
+}
+
+/**
+ * Make the calendar match the row's current state.
+ *   Canceled / closed / no visit date -> remove the event
+ *   Scheduled with a visit date       -> ensure the event exists on that date
+ * Called after every dashboard write so rescheduling or cancelling in the dashboard is reflected on
+ * the calendar without anyone editing it by hand.
+ */
+function syncVisitCalendar_(sh, rowNum) {
+  try {
+    var R = new RowAccessor_(sh, rowNum);
+    var addr = R.get('Property Address');
+    if (!addr) return '';
+    var status = String(R.get('Visit Status') || '');
+    var stage = String(R.get('Current Stage') || '');
+    var visitDate = R.get('Visit Date');
+    var cancelled = status === 'Canceled' || status === 'Reschedule Needed' || stage === 'Lost / Closed Out';
+
+    if (cancelled || !visitDate) {
+      var removed = deleteVisitEvents_(addr, visitDate);
+      logAuto_('CALENDAR', R.get('Property ID'), 'Visit event removed (' + (cancelled ? status || stage : 'no visit date') + ') · ' + removed);
+      return removed;
+    }
+    // Re-point the event at the current date: drop any stale copy, then create it fresh.
+    deleteVisitEvents_(addr, null);
+    var res = maybeCreateVisitEvent_({
+      'Property Address': addr, 'Seller Name': R.get('Seller Name'), 'Phone': R.get('Phone'),
+      'REI BlackBook Link': R.get('REI BlackBook Link'), 'Lead Source': R.get('Lead Source'),
+      'Visit Date': visitDate
+    }, addr);
+    logAuto_('CALENDAR', R.get('Property ID'), 'Visit event synced to ' + fmt_(new Date(visitDate)) + ' · ' + res);
+    return res;
+  } catch (e) {
+    logAuto_('ERROR', 'syncVisitCalendar', String(e));
+    return 'error: ' + e;
   }
 }
 
@@ -1466,7 +1519,18 @@ function deleteVisitEvents_(addr, visitDate) {
     else { var n = new Date(); from = new Date(n.getTime() - 120*864e5); to = new Date(n.getTime() + 365*864e5); }
     var evs = cal.getEvents(from, to, { search: addr });
     var removed = 0;
-    evs.forEach(function(e){ if (e.getTitle() === title) { e.deleteEvent(); removed++; } });
+    // Match BOTH producers: this script writes "Property Visit - <addr>", while the local scraper
+    // writes "Property Visit | <seller> | <addr>". Anything starting "Property Visit" that carries
+    // this address is ours, so a cancel/reschedule cleans up either one.
+    // NB: use a FULL-length key here, not intakeNorm_ (which truncates to 24 chars and would drop
+    // the address out of a "Property Visit | Seller | Address" title).
+    var keyOf = function(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+    var addrKey = keyOf(addr);
+    evs.forEach(function(e){
+      var t = e.getTitle() || '';
+      var mine = (t === title) || (/^Property Visit\b/i.test(t) && addrKey && keyOf(t).indexOf(addrKey) >= 0);
+      if (mine) { e.deleteEvent(); removed++; }
+    });
     return removed ? ('removed ' + removed + ' event(s)') : 'no matching event';
   } catch (e) { return 'error: ' + e; }
 }
