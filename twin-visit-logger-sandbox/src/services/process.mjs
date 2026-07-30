@@ -44,11 +44,14 @@ function criticalValidationErrors(visit) {
   const status = String(visit.taskStatus || '').toLowerCase();
   if (status.includes('cancel')) return [];
 
+  // Only data the automation genuinely cannot work without. Assigned Owner is deliberately NOT here:
+  // REI often has no owner on the contact and the team assigns it by hand, so requiring it blocked
+  // real bookings from being scheduled and suppressed their calendar events. A missing owner is
+  // surfaced as a warning and the dashboard flags the row instead.
   const errors = [];
   if (!visit.sellerName) errors.push('Seller name is missing.');
   if (!visit.propertyAddress) errors.push('Property address is missing.');
   if (!visit.appointmentStartIso) errors.push('Appointment date/time is missing or invalid.');
-  if (!visit.assignedOwner) errors.push('Assigned owner is missing.');
   return errors;
 }
 

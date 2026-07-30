@@ -241,6 +241,63 @@ const ALLOW_EMPTY_UPDATE_HEADERS = new Set([
   'Automation Error'
 ]);
 
+let cachedSheetId;
+
+async function getSheetId(sheets) {
+  if (cachedSheetId !== undefined) return cachedSheetId;
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: config.spreadsheetId,
+    fields: 'sheets(properties(sheetId,title))'
+  });
+  const found = (meta.data.sheets || []).find((s) => s.properties?.title === config.trackerSheet);
+  cachedSheetId = found?.properties?.sheetId ?? null;
+  return cachedSheetId;
+}
+
+/**
+ * Give the date and time cells a real date/time number format.
+ *
+ * USER_ENTERED writes turn "08/01/2026" and "2:00 PM" into proper date/time VALUES, but a cell with
+ * no date format renders that value as its underlying serial number - which is why the tracker showed
+ * "46235" and "0.5833333" instead of the date and time. Applying the format makes the stored value
+ * display correctly without changing it.
+ */
+async function applyDateTimeFormats(sheets, rowNumber, headerMap) {
+  if (!rowNumber) return;
+  const sheetId = await getSheetId(sheets);
+  if (sheetId === null) return;
+
+  const targets = [
+    { header: 'Visit Date', pattern: 'mm/dd/yyyy' },
+    { header: 'Next Action Due Date', pattern: 'mm/dd/yyyy' },
+    { header: 'Visit Time', pattern: 'h:mm am/pm' }
+  ];
+
+  const requests = [];
+  for (const { header, pattern } of targets) {
+    const index = headerMap.get(header);
+    if (index === undefined) continue;
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: rowNumber - 1,
+          endRowIndex: rowNumber,
+          startColumnIndex: index,
+          endColumnIndex: index + 1
+        },
+        cell: { userEnteredFormat: { numberFormat: { type: pattern.includes('h:mm') ? 'TIME' : 'DATE', pattern } } },
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+  if (!requests.length) return;
+
+  await sheets.spreadsheets
+    .batchUpdate({ spreadsheetId: config.spreadsheetId, requestBody: { requests } })
+    .catch(() => {});   // Formatting is cosmetic: never fail a sync over it.
+}
+
 export async function upsertVisit(auth, visit, existing = null) {
   const sheets = google.sheets({ version: 'v4', auth });
   const match = existing || (await findExistingVisit(auth, visit));
@@ -261,7 +318,9 @@ export async function upsertVisit(auth, visit, existing = null) {
     });
     const updatedRange = response.data.updates?.updatedRange || '';
     const rowMatch = updatedRange.match(/!(?:[A-Z]+)(\d+):/);
-    return { ...match, found: true, rowNumber: rowMatch ? Number(rowMatch[1]) : null, appended: true };
+    const newRowNumber = rowMatch ? Number(rowMatch[1]) : null;
+    await applyDateTimeFormats(sheets, newRowNumber, match.headerMap);
+    return { ...match, found: true, rowNumber: newRowNumber, appended: true };
   }
 
   const data = [];
@@ -287,5 +346,6 @@ export async function upsertVisit(auth, visit, existing = null) {
     });
   }
 
+  await applyDateTimeFormats(sheets, match.rowNumber, match.headerMap);
   return { ...match, appended: false };
 }
