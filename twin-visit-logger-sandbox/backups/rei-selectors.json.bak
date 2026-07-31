@@ -3,36 +3,6 @@
     "urlFragments": ["login", "signin", "auth"],
     "passwordSelectors": ["input[type='password']"]
   },
-  "chat": {
-    "_comment": "ProfitDial outbound 'from number' widget. UNCONFIRMED CANDIDATES — every selector below is a guess. Do not trust them until 'npm run inspect:profitdial' prints a CONFIRMED line for each one; that script reports which candidate actually resolved on the live page, so replace these arrays with what it found. Read/verify only: nothing in this project may click a send, call, or text control.",
-    "expectedFromNumber": "(510) 916-3995",
-    "profitDialSelect": [
-      "[data-testid='profitdial-from-number']",
-      "[data-testid='from-number-select']",
-      "[data-test='from-number-select']",
-      "[aria-label*='from number' i]",
-      "[aria-label*='from' i][role='combobox']",
-      "[role='combobox']",
-      "select[name*='from' i]",
-      "[class*='fromNumber']",
-      "[class*='from-number']"
-    ],
-    "profitDialOptions": [
-      "[data-testid='profitdial-from-number-option']",
-      "[role='listbox'] [role='option']",
-      "[role='option']",
-      "[role='menu'] [role='menuitem']",
-      "[class*='menu'] [class*='option']",
-      "select[name*='from' i] option"
-    ],
-    "profitDialSelectedValue": [
-      "[data-testid='profitdial-from-number'] [class*='singleValue']",
-      "[data-testid='profitdial-from-number-value']",
-      "[role='combobox'] [class*='singleValue']",
-      "[class*='fromNumber'] [class*='value']",
-      "[role='combobox']"
-    ]
-  },
   "listItemLabels": {
     "_comment": "Primary strategy. REI renders each field as a leaf [data-testid='list-item'] whose text is Label+Value glued together; the scraper matches these label prefixes and returns the remainder. Verified against a real REI contact page.",
     "sellerName": ["Name"],
