@@ -17,31 +17,7 @@ cd "$HOME\Downloads\twin-visit-logger-sandbox\twin-visit-logger-sandbox"
 | Delete automation events + email labels | `node scripts\cleanup.mjs --yes` |
 | Preview what cleanup would delete | `node scripts\cleanup.mjs` |
 | Test scraping one contact | `node scripts\test-scrape.mjs "https://my.reiblackbook.com/contacts/20528181"` |
-| Find the ProfitDial from-number picker | `node scripts\inspect-profitdial.mjs "https://my.reiblackbook.com/contacts/20528181"` |
 | Edit settings | `notepad .env` |
-
-## Checking the ProfitDial "from number"
-
-The outbound caller-ID picker is a custom widget, so its selectors had to be guessed. Instead of
-recording them with `playwright codegen`, run the inspector — it opens the page in your logged-in
-sandbox browser, finds the widget itself, and prints paste-ready selectors:
-
-```powershell
-node scripts\inspect-profitdial.mjs "https://my.reiblackbook.com/contacts/20528181"
-```
-
-In the browser window that opens, click the contact's **Chat/Text** panel so the picker is on screen,
-then let the script finish. It prints `CONFIRMED` next to every selector that resolved, the number
-currently selected, and every number offered. Copy anything it found into the `chat` block of
-`config/rei-selectors.json`, replacing the guesses.
-
-This is read-only: it opens the dropdown to read it and closes it again. It never clicks Call, Text,
-or Send. To actually change the selected number, add `--set` — that is the only mode that changes
-anything, it is never used by the polling automation, and it still refuses to click any control whose
-text is not purely a phone number.
-
-The target number lives in `config/rei-selectors.json` as `chat.expectedFromNumber`
-(currently `(510) 916-3995`), or pass `--number "(510) 916-3995"`.
 
 ## The task title template
 

@@ -12,13 +12,12 @@
     "auth:google": "node scripts/google-auth.mjs",
     "login:rei": "node scripts/rei-login.mjs",
     "inspect:rei": "node scripts/inspect-rei.mjs",
-    "inspect:profitdial": "node scripts/inspect-profitdial.mjs",
     "setup:sheet": "node scripts/setup-sheet.mjs",
     "once": "node src/run-once.mjs",
     "poll": "node src/poll.mjs",
-    "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs && node --check src/rei/profitdial.mjs && node --check scripts/inspect-profitdial.mjs",
+    "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs",
     "cleanup": "node scripts/cleanup.mjs",
-    "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs && node ../tests/profitdial-number.test.mjs"
+    "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",
