@@ -1,3 +1,4 @@
 # Generated migration output. Contains real seller names, phones, and addresses — keep it local.
 build/legacy-import.csv
 build/__pycache__/
+build/legacy-source-rows.json
