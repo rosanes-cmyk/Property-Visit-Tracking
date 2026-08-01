@@ -125,6 +125,9 @@ function applyDropdowns_(sh) {
     'Current Stage':'Current Stage','Final Disposition':'Final Disposition',
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
+    // Legacy-migration columns.
+    'Deal Stage':'Deal Stage','Deal Status':'Deal Status','Contract Status':'Contract Status',
+    'Closer':'Closer','Golden Needle':'Golden Needle',
   };
   // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
   // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the

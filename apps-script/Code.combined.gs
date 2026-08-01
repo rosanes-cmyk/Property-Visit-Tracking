@@ -166,7 +166,7 @@ const DROPDOWNS = {
   ],
   'Contract Status': ['Under Contract','Cancelled Contract','Acquired'],
   'Closer': ['Juan Diaz','Jose Herrera','Cherry','Jonathan','Kyle'],
-  'Golden Needle': ['Yes',''],
+  'Golden Needle': ['Yes'],
 };
 
 /** column index (1-based) for a header name */
@@ -315,6 +315,9 @@ function applyDropdowns_(sh) {
     'Current Stage':'Current Stage','Final Disposition':'Final Disposition',
     'Transaction Handoff Status':'Transaction Handoff Status','Updated By':'Updated By',
     'Source':'Source','REI Update Required':'REI Update Required','REI Update Completed':'REI Update Completed',
+    // Legacy-migration columns.
+    'Deal Stage':'Deal Stage','Deal Status':'Deal Status','Contract Status':'Contract Status',
+    'Closer':'Closer','Golden Needle':'Golden Needle',
   };
   // 'Updated By' is an identity field (editor names / email prefixes vary), so it is a
   // SOFT dropdown (suggests values but accepts any) — otherwise automation stamping the
@@ -3332,6 +3335,38 @@ function mapLegacyRow_(row, propertyId) {
   };
 }
 
+/**
+ * Columns whose dropdown REJECTS anything not on the list. 'Updated By' and 'Gift Approved By' are
+ * deliberately excluded — Setup.gs builds those as soft rules that accept any value.
+ */
+var IMPORT_HARD_DROPDOWNS = ['Lead Source', 'Visit Status', 'Assigned Visitor', 'Assigned Owner',
+  'Current Stage', 'Final Disposition', 'Source', 'Deal Stage', 'Deal Status', 'Contract Status',
+  'Closer', 'Golden Needle'];
+
+/** Returns [{ header, value, count }] for every value a dropdown would reject. */
+function legacyIllegalValues_(records) {
+  var out = [];
+  IMPORT_HARD_DROPDOWNS.forEach(function (header) {
+    var allowed = DROPDOWNS[header];
+    if (!allowed) return;
+    var legal = {};
+    allowed.forEach(function (v) { legal[String(v)] = true; });
+
+    var counts = {};                       // offending value -> how many records carry it
+    records.forEach(function (rec) {
+      var value = rec[header];
+      if (value === '' || value === undefined || value === null) return;   // blank is always allowed
+      value = String(value);
+      if (legal[value]) return;
+      counts[value] = (counts[value] || 0) + 1;
+    });
+    Object.keys(counts).forEach(function (value) {
+      out.push({ header: header, value: value, count: counts[value] });
+    });
+  });
+  return out;
+}
+
 /** Accepts a full Drive URL or a bare file ID. */
 function legacyFileId_(input) {
   var text = String(input || '').trim();
@@ -3437,8 +3472,13 @@ function importFromOldWorkbook_(previewOnly) {
     records.push(mapped);
   }
 
-  var unstaged = records.filter(function (rec) { return !rec['Current Stage']; }).length;
+  // ---- would any value be rejected by a dropdown? ---------------------------------------
+  // Data validation is enforced on write: one bad value throws and takes the whole import with it
+  // ("cell L43 violates the data validation rules"). Catch it here, name it, and say what to do —
+  // rather than letting a raw exception surface after the user has already committed.
+  var illegal = legacyIllegalValues_(records);
   var needRows = firstEmpty + records.length - 1;
+  var unstaged = records.filter(function (rec) { return !rec['Current Stage']; }).length;
   var summary =
     'Source: "' + source.getName() + '" → tab "' + OLD_WORKBOOK_TAB + '" (' + (values.length - 1) + ' rows)\n\n' +
     '  ' + records.length + ' new record(s) will be added, starting at row ' + firstEmpty + '\n' +
@@ -3449,6 +3489,15 @@ function importFromOldWorkbook_(previewOnly) {
     (needRows > CFG.MAX_ROWS
       ? '\n  STOP: this needs row ' + needRows + ' but formulas only reach row ' + CFG.MAX_ROWS +
         '.\n  Run "Repair sheet" first, then import again.\n'
+      : '') +
+    (illegal.length
+      ? '\n  These values are not on their dropdown list. The import refreshes the lists before\n' +
+        '  writing, so this normally fixes itself — if it persists, the value needs adding to\n' +
+        '  DROPDOWNS in the script:\n' +
+        illegal.slice(0, 10).map(function (bad) {
+          return '    ' + bad.header + ': "' + bad.value + '" (' + bad.count + ' record(s))';
+        }).join('\n') +
+        (illegal.length > 10 ? '\n    ...and ' + (illegal.length - 10) + ' more' : '') + '\n'
       : '');
 
   if (previewOnly) { ui.alert('Preview only — nothing was changed.\n\n' + summary); return; }
@@ -3458,6 +3507,12 @@ function importFromOldWorkbook_(previewOnly) {
 
   // ---- write ------------------------------------------------------------------------------
   ensureRows_(sh, needRows);
+
+  // Refresh the dropdown rules from DROPDOWNS before writing. Data validation is enforced on write:
+  // if the sheet still carries an older list, a legitimate value like "Juan Diaz" throws and takes
+  // the entire import down. Doing it here means the import cannot fail for that reason, whether or
+  // not "Repair sheet" was run first.
+  applyDropdowns_(sh);
 
   var skip = {};
   IMPORT_SKIP_COLUMNS.forEach(function (h) { skip[h] = true; });
@@ -3470,7 +3525,25 @@ function importFromOldWorkbook_(previewOnly) {
     });
   });
 
-  sh.getRange(firstEmpty, 1, grid.length, HEADERS.length).setValues(grid);
+  try {
+    sh.getRange(firstEmpty, 1, grid.length, HEADERS.length).setValues(grid);
+  } catch (err) {
+    // Almost always a data-validation rejection naming one cell. Translate the cell reference into
+    // the column and value that caused it, so the fix is obvious.
+    var cell = String(err.message || '').match(/cell ([A-Z]+)(\d+)/);
+    var detail = '';
+    if (cell) {
+      var index = 0;
+      for (var c = 0; c < cell[1].length; c++) index = index * 26 + (cell[1].charCodeAt(c) - 64);
+      var offender = grid[Number(cell[2]) - firstEmpty];
+      detail = '\n\nColumn: "' + (HEADERS[index - 1] || cell[1]) + '"' +
+               (offender ? '\nValue: "' + offender[index - 1] + '"' : '');
+    }
+    ui.alert('The import was rejected and NOTHING was written.\n\n' + err.message + detail +
+             '\n\nAdd that value to its dropdown list in the script (DROPDOWNS), then try again.');
+    logAuto_('ERROR', 'import', 'Legacy import rejected: ' + err.message);
+    return;
+  }
   for (var w = 0; w < grid.length; w++) restoreFormulasRow_(sh, firstEmpty + w);
   SpreadsheetApp.flush();
 

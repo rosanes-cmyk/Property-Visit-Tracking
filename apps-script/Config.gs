@@ -105,7 +105,7 @@ const DROPDOWNS = {
   ],
   'Contract Status': ['Under Contract','Cancelled Contract','Acquired'],
   'Closer': ['Juan Diaz','Jose Herrera','Cherry','Jonathan','Kyle'],
-  'Golden Needle': ['Yes',''],
+  'Golden Needle': ['Yes'],
 };
 
 /** column index (1-based) for a header name */
