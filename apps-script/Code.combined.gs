@@ -1662,6 +1662,14 @@ function maybeCreateVisitEvent_(map, addr) {
     if (!cal) return 'calendar not found / not shared';
     if (!map['Visit Date']) return 'no visit date — event skipped';
     const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);
+
+    // History never reaches the calendar. The 379 imported legacy records carry visit dates going
+    // back to 2023; putting those on Juan's calendar would bury the visits that have not happened
+    // yet. This is the single choke point every caller goes through, so the rule holds for the
+    // import, the dashboard actions, "Fix mismatched stages", and the REI intake alike.
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    if (start < midnight) return 'visit date is in the past — event skipped (history stays off the calendar)';
+
     const end = new Date(start.getTime() + 60 * 60000);
     const title = 'Property Visit - ' + addr;
     if (cal.getEventsForDay(start).some(function(e){ return e.getTitle() === title; })) return 'event already on calendar (no duplicate)';

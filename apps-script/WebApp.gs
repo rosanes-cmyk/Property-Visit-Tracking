@@ -463,6 +463,14 @@ function maybeCreateVisitEvent_(map, addr) {
     if (!cal) return 'calendar not found / not shared';
     if (!map['Visit Date']) return 'no visit date — event skipped';
     const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);   // default 9:00 window if no time given
+
+    // History never reaches the calendar. The 379 imported legacy records carry visit dates going
+    // back to 2023; putting those on Juan's calendar would bury the visits that have not happened
+    // yet. This is the single choke point every caller goes through, so the rule holds for the
+    // import, the dashboard actions, "Fix mismatched stages", and the REI intake alike.
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    if (start < midnight) return 'visit date is in the past — event skipped (history stays off the calendar)';
+
     const end = new Date(start.getTime() + 60 * 60000);
     const desc = 'Seller: ' + (map['Seller Name'] || '') + '\nPhone: ' + (map['Phone'] || '') +
                  '\nREI: ' + (map['REI BlackBook Link'] || '') + '\nLead source: ' + (map['Lead Source'] || '');
