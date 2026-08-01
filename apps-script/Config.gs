@@ -13,7 +13,7 @@ const CFG = {
   LEGACY_ARCHIVE: 'Legacy Pipeline (archive)',
   HEADER_ROW: 1,
   FIRST_DATA_ROW: 2,
-  MAX_ROWS: 500,           // formulas maintained down to this row
+  MAX_ROWS: 1200,          // formulas maintained down to this row (raised from 500 for the 379-row legacy import)
   REPORT_TITLE: 'Twin Visit Logger Daily Opportunity Report',
   // Set to Cherry's address for the daily report; left blank = report is written to a sheet only.
   REPORT_TO: '',           // e.g. 'rosanes@twinhomebuyer.com'
@@ -64,13 +64,18 @@ const HEADERS = [
   'Gift Approved By','Gift Approval Date',
   'Offer Promised Date',
   'Seller Floor','Our Max',
+  // Fields the live "Property Visit Tracking" workbook tracked that had no home here. Appended so
+  // every existing column keeps its position on the live sheet.
+  'City','Deal Stage','Deal Status','Contract Status','Closer','Golden Needle','Market Status Update',
 ];
 
 const DROPDOWNS = {
-  'Visit Status': ['Scheduled','Completed','Canceled','Reschedule Needed'],
+  'Visit Status': ['Scheduled','Completed','Canceled','Reschedule Needed','Skipped — Offer Made'],
   'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
-  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan'],
-  'Assigned Visitor': ['Juan','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
+  // Both lists carry every real name found in the live workbook, so an import does not fail
+  // validation. 'Juan Diaz' and 'Juan' are both present because the old sheet used both.
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','Arly','Matt','Darius','Danica','Team','Matt/Arly','Matt/Juan','Cherry/Matt'],
+  'Assigned Visitor': ['Juan','Juan Diaz','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
   'Gift Approved By': ['Cherry','Juan'],
   'Updated By': ['Jonathan','Kyle','Cherry','Juan','Apps Script','Import'],
@@ -87,6 +92,20 @@ const DROPDOWNS = {
   'REI Update Required': ['Yes','No'],
   'REI Update Completed': ['Yes','No'],
   'Source': ['Manual','Apps Script','Import','Intake','Intake-Sandbox','TEST'],
+  // The company's own taxonomy, copied verbatim from the live workbook's
+  // "Ref (Deals) - Tags definition" tab. Deal Stage is the four-way bucket; Deal Status is the
+  // detail. These are what the team already uses in REI BlackBook — do not re-word them.
+  'Deal Stage': ['Active','On Hold','Won','Lost'],
+  'Deal Status': [
+    'Lead Received','Appointment Scheduled','Pending Reschedule','Under Review','Offer Made','Under Contract',
+    'On Hold - Follow Up Scheduled','On Hold - Nurture','On Hold - Awaiting Seller','On Hold - Probate/Legal','On Hold - Seller Timeline',
+    'Acquired','Acquired - In Rehab','Acquired - Listed','Acquired - Sold','Wholesale - Buyer Assigned','Wholesale - Deal Closed',
+    'Not Qualified',"We're Passing",'Contract Cancelled','Seller Rejected Offer','Did Not Proceed','Sold to Competitor',
+    'Sold with Realtor','Referred to Realtor','Already listed','Sold (unknown buyer)'
+  ],
+  'Contract Status': ['Under Contract','Cancelled Contract','Acquired'],
+  'Closer': ['Juan Diaz','Jose Herrera','Cherry','Jonathan','Kyle'],
+  'Golden Needle': ['Yes',''],
 };
 
 /** column index (1-based) for a header name */
