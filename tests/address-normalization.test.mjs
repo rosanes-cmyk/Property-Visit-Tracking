@@ -43,14 +43,32 @@ const end = GS.indexOf('\n}', start) + 2;
 if (start < 0) throw new Error('importNormAddr_ not found');
 const importNormAddr_ = new Function(`${GS.slice(start, end)}\nreturn importNormAddr_;`)();
 
-/** A JS stand-in for the sheet formula, built by reading the formula's SUBSTITUTE chain. */
+/**
+ * Build the actual formula string by running the real formulaFor_ with a stub column resolver, so
+ * the assertions below are about the formula Sheets will receive, not about the source text.
+ */
 const SETUP = read('apps-script/Setup.gs');
-const formula = SETUP.slice(SETUP.indexOf("case 'Normalized Address':"), SETUP.indexOf("case 'Days Since Last Activity':"));
+const fnFrom = SETUP.indexOf('function formulaFor_(header, r) {');
+const fnTo = SETUP.indexOf('\nconst COMPUTED_HEADERS');
+const formulaFor_ = new Function('colL', 'CFG',
+  `${SETUP.slice(fnFrom, fnTo)}\nreturn formulaFor_;`
+)(() => 'B', { STALLED_BUSINESS_DAYS: 3 });
+const formula = formulaFor_('Normalized Address', 2);
 
 console.log('=== The sheet formula strips the country suffix ===');
 check('formula lowercases before matching the country', /LOWER\(/.test(formula), true);
 check('formula removes ", united states"', formula.includes('", united states",""'), true);
 check('formula removes ", usa"', formula.includes('", usa",""'), true);
+  check('formula folds unit/ste/suite the way it already folds apt',
+    [' apt ', ' unit ', ' ste ', ' suite '].every((w) => formula.includes(`"${w}"," "`)), true);
+  check('the formula has balanced parentheses',
+    [...formula].reduce((depth, c) => depth + (c === '(') - (c === ')'), 0), 0);
+  check('never goes negative (a stray close paren would still sum to zero)',
+    [...formula].reduce((s2, c) => {
+      s2.depth += (c === '(') - (c === ')');
+      s2.ok = s2.ok && s2.depth >= 0;
+      return s2;
+    }, { depth: 0, ok: true }).ok, true);
 check('country is stripped BEFORE commas are removed (otherwise it can never match)',
   formula.indexOf('", united states"') < formula.indexOf('",",""'), true);
 
@@ -64,6 +82,12 @@ const CASES = [
   ['2607 Gimelli Pl, Apt 115, San Jose, CA', '2607 gimelli pl 115 san jose ca'],
   ['1160 Drury Rd., Berkeley, CA 94705', '1160 drury rd berkeley ca 94705'],
   ['#12 Main St, Oakland, CA', '12 main st oakland ca'],
+  // The real pair the duplicate finder caught: the same Fremont condo written two ways.
+  ['38623 Cherry Ln #206, Fremont, CA 94536', '38623 cherry ln 206 fremont ca 94536'],
+  ['38623 Cherry Ln Unit 206, Fremont, CA 94536', '38623 cherry ln 206 fremont ca 94536'],
+  ['38623 Cherry Ln Apt 206, Fremont, CA 94536', '38623 cherry ln 206 fremont ca 94536'],
+  ['100 Market St Ste 4, SF, CA', '100 market st 4 sf ca'],
+  ['100 Market St Suite 4, SF, CA', '100 market st 4 sf ca'],
   ['', ''],
 ];
 
@@ -88,6 +112,8 @@ check('different house number', normalizeAddress('2145 Capitol Ave, EPA') === no
 check('different street', normalizeAddress('100 Main St, Oakland') === normalizeAddress('100 Oak St, Oakland'), false);
 check('different city', normalizeAddress('100 Main St, Oakland, CA') === normalizeAddress('100 Main St, Fremont, CA'), false);
 check('different unit', normalizeAddress('1 A St, Apt 2, SF') === normalizeAddress('1 A St, Apt 3, SF'), false);
+check('different unit written differently is still different',
+  normalizeAddress('1 A St Unit 2, SF') === normalizeAddress('1 A St #3, SF'), false);
 check('"US" inside a street name is not treated as a country',
   normalizeAddress('12 US Highway 1, Vallejo, CA'), '12 us highway 1 vallejo ca');
 

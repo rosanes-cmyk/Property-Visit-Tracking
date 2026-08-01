@@ -340,8 +340,8 @@ function formulaFor_(header, r) {
       // The country suffix is stripped FIRST, while the commas are still there to anchor it. REI
       // writes ", UNITED STATES" on every address and the old workbook never did, so without this
       // the same property reads as two different ones and duplicates silently.
-      return '=IF(' + A('Property Address') + '="","",TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(' +
-        'LOWER(' + A('Property Address') + '),", united states",""),", usa",""),",",""),".",""),"#","")," apt "," "),"  "," "))';
+      return '=IF(' + A('Property Address') + '="","",TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(' +
+        'LOWER(' + A('Property Address') + '),", united states",""),", usa",""),",",""),".",""),"#","")," apt "," ")," unit "," ")," ste "," ")," suite "," "),"  "," ")))';
     case 'Days Since Last Activity':
       return '=IF(' + A('Property Address') + '="","",IF(MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')=0,"",TODAY()-MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')))';
     case 'Days Overdue':
@@ -3031,7 +3031,8 @@ function importNormAddr_(value) {
     .replace(/,/g, '')
     .replace(/\./g, '')
     .replace(/#/g, '')
-    .replace(/ apt /g, ' ')
+    // "Apt 115" / "#206" / "Unit 206" / "Ste 4" are the same place written four ways.
+    .replace(/ (apt|apartment|unit|ste|suite) /g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

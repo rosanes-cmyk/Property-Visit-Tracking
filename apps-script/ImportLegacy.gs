@@ -41,7 +41,8 @@ function importNormAddr_(value) {
     .replace(/,/g, '')
     .replace(/\./g, '')
     .replace(/#/g, '')
-    .replace(/ apt /g, ' ')
+    // "Apt 115" / "#206" / "Unit 206" / "Ste 4" are the same place written four ways.
+    .replace(/ (apt|apartment|unit|ste|suite) /g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
