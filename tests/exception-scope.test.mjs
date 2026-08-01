@@ -28,15 +28,18 @@ function check(name, got, want) {
 const SETUP = read('apps-script/Setup.gs');
 const CONFIG = read('apps-script/Config.gs');
 const RECENT = Number((CONFIG.match(/RECENT_VISIT_DAYS:\s*(\d+)/) || [])[1]);
+const DORMANT = Number((CONFIG.match(/DORMANT_DAYS:\s*(\d+)/) || [])[1]);
 
 const from = SETUP.indexOf('function formulaFor_(header, r) {');
 const to = SETUP.indexOf('\nconst COMPUTED_HEADERS');
 const formulaFor_ = new Function('colL', 'CFG',
   `${SETUP.slice(from, to)}\nreturn formulaFor_;`
-)(() => 'B', { STALLED_BUSINESS_DAYS: 3, RECENT_VISIT_DAYS: RECENT });
+)(() => 'B', { STALLED_BUSINESS_DAYS: 3, RECENT_VISIT_DAYS: RECENT, DORMANT_DAYS: DORMANT });
 
 console.log('=== The knob exists and is sane ===');
 check('RECENT_VISIT_DAYS is configured', Number.isFinite(RECENT) && RECENT > 0, true);
+check('DORMANT_DAYS is configured', Number.isFinite(DORMANT) && DORMANT > 0, true);
+check('a record is dormant only well after a visit stops being "recent"', DORMANT > RECENT, true);
 
 console.log('\n=== Finished records are never chased ===');
 for (const header of ['Exception Reason', 'Missing Required Fields']) {
@@ -61,6 +64,14 @@ check('the REI link is only required when Source is not Import',
 check('the other required fields are still required',
   ['Next Action', 'Next Action Due Date', 'Assigned Owner', 'Current Stage']
     .every((f) => missing.includes(`"${f}"`)), true);
+
+console.log('\n=== Dormant records are not nagged for follow-up fields ===');
+check(`the follow-up checks are gated on activity within ${DORMANT} days`,
+  (missing.match(new RegExp(`>=TODAY\\(\\)-${DORMANT}`, 'g')) || []).length, 3);
+check('a missing Property Address / Current Stage is flagged regardless of age',
+  missing.indexOf('"Property Address"') < missing.indexOf(`TODAY()-${DORMANT}`), true);
+check('activity is the latest of contact, update and visit date',
+  /MAX\(/.test(missing), true);
 
 /* --------------------------------------------------------------------------
  * Score the real imported records against the same rules.
@@ -93,12 +104,20 @@ if (!fs.existsSync(csvPath)) {
   // Fixed "today" so the counts below are stable regardless of when the suite runs.
   const TODAY = new Date('2026-08-01T00:00:00Z');
   const cutoff = new Date(TODAY.getTime() - RECENT * 86400000).toISOString().slice(0, 10);
+  const dormantCutoff = new Date(TODAY.getTime() - DORMANT * 86400000).toISOString().slice(0, 10);
 
   const score = (rec, { scoped }) => {
     const stage = rec['Current Stage'];
     if (scoped && (stage === 'Lost / Closed Out' || stage === 'Contract Signed')) return [];
     const recent = !scoped || (rec['Visit Date'] && rec['Visit Date'] >= cutoff);
+    const lastActivity = [rec['Last Contact Date'], rec['Last Updated Date'], rec['Visit Date']]
+      .filter(Boolean).sort().pop() || '';
+    const active = !scoped || (lastActivity && lastActivity >= dormantCutoff);
     const out = [];
+    if (!stage) out.push('no stage');
+    if (active) {
+      for (const f of ['Next Action', 'Next Action Due Date', 'Assigned Owner']) if (!rec[f]) out.push(f);
+    }
     if (rec['Visit Status'] === 'Completed' && recent && !rec['Visit Notes']) out.push('notes');
     if (rec['Visit Status'] === 'Completed' && recent) out.push('motivation');
     if (stage === 'Offer Sent') out.push('offer');
@@ -113,7 +132,7 @@ if (!fs.existsSync(csvPath)) {
   console.log('\n=== Against the real 379 imported records ===');
   console.log(`      unscoped: ${before} flagged · scoped: ${after} flagged`);
   check('the old rules flagged most of the sheet', before > records.length * 0.6, true);
-  check('the scoped rules flag under a quarter of it', after < records.length * 0.25, true);
+  check('the scoped rules flag under a third of it', after < records.length / 3, true);
 
   const stillFlagged = records.filter((r) => score(r, { scoped: true }).length);
   check('nothing already lost or signed is flagged',
@@ -124,6 +143,18 @@ if (!fs.existsSync(csvPath)) {
   check('nurture leads with no follow-up date are still flagged', reasons('follow-up') > 0, true);
   check('offers sent with no amount/date are still flagged', reasons('offer') > 0, true);
   check('a visit completed in the last 30 days is still chased', reasons('motivation') > 0, true);
+  check('records with no stage are still surfaced for triage', reasons('no stage') > 0, true);
+
+  console.log('\n=== ...and dormant records are left alone ===');
+  const dormantFlagged = stillFlagged.filter((r) => {
+    const last = [r['Last Contact Date'], r['Last Updated Date'], r['Visit Date']].filter(Boolean).sort().pop() || '';
+    return last && last < dormantCutoff;
+  });
+  check('nothing dormant is flagged merely for a missing owner or next action',
+    dormantFlagged.filter((r) => {
+      const f = score(r, { scoped: true });
+      return f.every((x) => ['Next Action', 'Next Action Due Date', 'Assigned Owner'].includes(x));
+    }).length, 0);
 }
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);

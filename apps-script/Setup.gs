@@ -161,13 +161,16 @@ function formulaFor_(header, r) {
       // Finished records are exempt, same as Exception Reason. The REI link is only required of
       // records the automation created: the imported history has no REI contact and never will, so
       // demanding one would flag 379 rows permanently with nothing anyone can do about it.
+      // Only a record with recent activity is asked for the follow-up fields; see CFG.DORMANT_DAYS.
+      var LASTACT = 'MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')';
+      var ACTIVE = 'AND(' + LASTACT + '<>0,' + LASTACT + '>=TODAY()-' + CFG.DORMANT_DAYS + ')';
       return '=IF(OR(' + A('Property Address') + '="",' + A('Current Stage') + '="Lost / Closed Out",' +
         A('Current Stage') + '="Contract Signed"),"",TEXTJOIN(", ",TRUE,' +
         'IF(' + A('Property Address') + '="","Property Address",""),' +
         'IF(' + A('Current Stage') + '="","Current Stage",""),' +
-        'IF(' + A('Next Action') + '="","Next Action",""),' +
-        'IF(' + A('Next Action Due Date') + '="","Next Action Due Date",""),' +
-        'IF(' + A('Assigned Owner') + '="","Assigned Owner",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Next Action') + '=""),"Next Action",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Next Action Due Date') + '=""),"Next Action Due Date",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Assigned Owner') + '=""),"Assigned Owner",""),' +
         'IF(AND(' + A('Source') + '<>"Import",' + A('REI BlackBook Link') + '=""),"REI BlackBook Link","")))';
     case 'Duplicate Address Flag':
       return '=IF(' + A('Normalized Address') + '="","",IF(COUNTIFS(' + R('Normalized Address') + ',' + A('Normalized Address') + ',' + R('Current Stage') + ',"<>Lost / Closed Out")>1,"Duplicate",""))';

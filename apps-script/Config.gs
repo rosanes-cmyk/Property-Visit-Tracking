@@ -22,6 +22,11 @@ const CFG = {
   // Older visits are history: the imported records go back to 2023 and nobody is going to fill
   // those in, so flagging them only hides the visits that genuinely need writing up.
   RECENT_VISIT_DAYS: 30,
+  // A record with no activity for this long is dormant, not incomplete. The imported history has no
+  // Next Action / Due Date / Owner because the old workbook never had those fields; demanding them
+  // from a lead that went quiet 18 months ago flags it forever with nothing anyone will do about it.
+  // Forgotten-but-live deals are caught separately by Stalled Status, which uses business days.
+  DORMANT_DAYS: 90,
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board

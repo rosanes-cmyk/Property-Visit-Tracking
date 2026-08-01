@@ -85,6 +85,11 @@ const CFG = {
   // Older visits are history: the imported records go back to 2023 and nobody is going to fill
   // those in, so flagging them only hides the visits that genuinely need writing up.
   RECENT_VISIT_DAYS: 30,
+  // A record with no activity for this long is dormant, not incomplete. The imported history has no
+  // Next Action / Due Date / Owner because the old workbook never had those fields; demanding them
+  // from a lead that went quiet 18 months ago flags it forever with nothing anyone will do about it.
+  // Forgotten-but-live deals are caught separately by Stalled Status, which uses business days.
+  DORMANT_DAYS: 90,
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
@@ -356,13 +361,16 @@ function formulaFor_(header, r) {
       // Finished records are exempt, same as Exception Reason. The REI link is only required of
       // records the automation created: the imported history has no REI contact and never will, so
       // demanding one would flag 379 rows permanently with nothing anyone can do about it.
+      // Only a record with recent activity is asked for the follow-up fields; see CFG.DORMANT_DAYS.
+      var LASTACT = 'MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')';
+      var ACTIVE = 'AND(' + LASTACT + '<>0,' + LASTACT + '>=TODAY()-' + CFG.DORMANT_DAYS + ')';
       return '=IF(OR(' + A('Property Address') + '="",' + A('Current Stage') + '="Lost / Closed Out",' +
         A('Current Stage') + '="Contract Signed"),"",TEXTJOIN(", ",TRUE,' +
         'IF(' + A('Property Address') + '="","Property Address",""),' +
         'IF(' + A('Current Stage') + '="","Current Stage",""),' +
-        'IF(' + A('Next Action') + '="","Next Action",""),' +
-        'IF(' + A('Next Action Due Date') + '="","Next Action Due Date",""),' +
-        'IF(' + A('Assigned Owner') + '="","Assigned Owner",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Next Action') + '=""),"Next Action",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Next Action Due Date') + '=""),"Next Action Due Date",""),' +
+        'IF(AND(' + ACTIVE + ',' + A('Assigned Owner') + '=""),"Assigned Owner",""),' +
         'IF(AND(' + A('Source') + '<>"Import",' + A('REI BlackBook Link') + '=""),"REI BlackBook Link","")))';
     case 'Duplicate Address Flag':
       return '=IF(' + A('Normalized Address') + '="","",IF(COUNTIFS(' + R('Normalized Address') + ',' + A('Normalized Address') + ',' + R('Current Stage') + ',"<>Lost / Closed Out")>1,"Duplicate",""))';
