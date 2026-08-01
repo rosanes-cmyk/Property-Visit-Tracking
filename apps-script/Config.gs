@@ -18,6 +18,10 @@ const CFG = {
   // Set to Cherry's address for the daily report; left blank = report is written to a sheet only.
   REPORT_TO: '',           // e.g. 'rosanes@twinhomebuyer.com'
   STALLED_BUSINESS_DAYS: 3,
+  // A "completed visit" is only nagged for missing Visit Notes / Seller Motivation this recently.
+  // Older visits are history: the imported records go back to 2023 and nobody is going to fill
+  // those in, so flagging them only hides the visits that genuinely need writing up.
+  RECENT_VISIT_DAYS: 30,
   NO_DECISION_BUSINESS_DAYS: 1,
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board

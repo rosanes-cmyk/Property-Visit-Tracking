@@ -158,13 +158,17 @@ function formulaFor_(header, r) {
     case 'Stalled Status':
       return '=IF(' + A('Property Address') + '="","",IF(OR(' + A('Current Stage') + '="Lost / Closed Out",' + A('Current Stage') + '="Long-Term Nurture",' + A('Current Stage') + '="Contract Signed"),"No",IF(MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')=0,"No",IF(NETWORKDAYS(MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + '),TODAY())-1>=' + CFG.STALLED_BUSINESS_DAYS + ',"Yes","No"))))';
     case 'Missing Required Fields':
-      return '=IF(OR(' + A('Property Address') + '="",' + A('Current Stage') + '="Lost / Closed Out"),"",TEXTJOIN(", ",TRUE,' +
+      // Finished records are exempt, same as Exception Reason. The REI link is only required of
+      // records the automation created: the imported history has no REI contact and never will, so
+      // demanding one would flag 379 rows permanently with nothing anyone can do about it.
+      return '=IF(OR(' + A('Property Address') + '="",' + A('Current Stage') + '="Lost / Closed Out",' +
+        A('Current Stage') + '="Contract Signed"),"",TEXTJOIN(", ",TRUE,' +
         'IF(' + A('Property Address') + '="","Property Address",""),' +
         'IF(' + A('Current Stage') + '="","Current Stage",""),' +
         'IF(' + A('Next Action') + '="","Next Action",""),' +
         'IF(' + A('Next Action Due Date') + '="","Next Action Due Date",""),' +
         'IF(' + A('Assigned Owner') + '="","Assigned Owner",""),' +
-        'IF(' + A('REI BlackBook Link') + '="","REI BlackBook Link","")))';
+        'IF(AND(' + A('Source') + '<>"Import",' + A('REI BlackBook Link') + '=""),"REI BlackBook Link","")))';
     case 'Duplicate Address Flag':
       return '=IF(' + A('Normalized Address') + '="","",IF(COUNTIFS(' + R('Normalized Address') + ',' + A('Normalized Address') + ',' + R('Current Stage') + ',"<>Lost / Closed Out")>1,"Duplicate",""))';
     case 'Opportunity Priority':
@@ -182,9 +186,14 @@ function formulaFor_(header, r) {
     case 'Data Quality Status':
       return '=IF(' + A('Property Address') + '="","",IF(' + A('Exception Reason') + '<>"","Exception",IF(' + A('Missing Required Fields') + '<>"","Incomplete","OK")))';
     case 'Exception Reason':
-      return '=IF(' + A('Property Address') + '="","",TEXTJOIN(" | ",TRUE,' +
-        'IF(AND(' + A('Visit Status') + '="Completed",' + A('Visit Notes') + '=""),"Completed visit missing Visit Notes",""),' +
-        'IF(AND(' + A('Visit Status') + '="Completed",' + A('Seller Motivation') + '=""),"Completed visit missing Seller Motivation (or add Exception note)",""),' +
+      // Finished records are never chased. A deal that is lost or signed has nothing left to fix,
+      // and nagging three years of closed history buries the handful of records that DO need work.
+      // The two "completed visit" data-capture nags are also scoped to the last 30 days: they exist
+      // to catch a visit Juan did last week, not one from 2023 nobody will revisit.
+      return '=IF(OR(' + A('Property Address') + '="",' + A('Current Stage') + '="Lost / Closed Out",' +
+        A('Current Stage') + '="Contract Signed"),"",TEXTJOIN(" | ",TRUE,' +
+        'IF(AND(' + A('Visit Status') + '="Completed",' + A('Visit Date') + '>=TODAY()-' + CFG.RECENT_VISIT_DAYS + ',' + A('Visit Notes') + '=""),"Completed visit missing Visit Notes",""),' +
+        'IF(AND(' + A('Visit Status') + '="Completed",' + A('Visit Date') + '>=TODAY()-' + CFG.RECENT_VISIT_DAYS + ',' + A('Seller Motivation') + '=""),"Completed visit missing Seller Motivation (or add Exception note)",""),' +
         'IF(AND(' + A('Current Stage') + '="Offer Sent",OR(' + A('Approved Offer Amount') + '="",' + A('Offer Sent Date') + '="")),"Offer Sent needs Approved Offer Amount + Offer Sent Date",""),' +
         'IF(AND(' + A('Current Stage') + '="Active Negotiation",OR(' + A('Last Contact Result') + '="",' + A('Next Action') + '="",' + A('Assigned Owner') + '="",' + A('Next Action Due Date') + '="")),"Active Negotiation needs Last Contact Result + Next Action + Owner + Due Date",""),' +
         'IF(AND(' + A('Current Stage') + '="Contract Sent",' + A('Contract Sent Date') + '="",' + A('File Link') + '=""),"Contract Sent needs Contract Sent Date or File Link",""),' +

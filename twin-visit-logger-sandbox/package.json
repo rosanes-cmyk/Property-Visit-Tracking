@@ -17,7 +17,7 @@
     "poll": "node src/poll.mjs",
     "check": "node --check src/run-once.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs",
     "cleanup": "node scripts/cleanup.mjs",
-    "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs && node ../tests/legacy-import.test.mjs && node ../tests/import-from-drive.test.mjs && node ../tests/address-normalization.test.mjs && node ../tests/calendar-past-guard.test.mjs"
+    "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs && node ../tests/legacy-import.test.mjs && node ../tests/import-from-drive.test.mjs && node ../tests/address-normalization.test.mjs && node ../tests/calendar-past-guard.test.mjs && node ../tests/exception-scope.test.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",
