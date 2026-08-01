@@ -5,9 +5,13 @@ the **database / source of truth**; the dashboard reads it live and its quick-ac
 through the **same automation + validation** as a manual edit. It never contacts sellers and never
 shows Source = TEST records.
 
-## Live deployment (2026-07-23)
-- **Web app URL (/exec):**
-  `https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbx13gEK5suKTAnQztKFAJWViZSrL40edm3CpC25RnQC_rHoUl37VQRbIBB5QLtU0aBXjg/exec`
+## Live deployment (URL confirmed 2026-08-01)
+- **Web app URL (/exec) — CURRENT:**
+  `https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbxp7ACEnlumHkspmbOOuY7PO4InKOUeMEmAuejfft-GTfNJI23Hr5izbt2Cxgelo3nLOg/exec`
+- **Superseded — do not use:** the `AKfycbx13gEK…QLtU0aBXjg` deployment recorded on 2026-07-23.
+  It is a *different* deployment of the same script, so pushing a New version to the current one
+  does nothing to it: anyone still on that link sees a frozen older build. Delete it in
+  Deploy → Manage deployments once nobody is using it.
 - **Deployment:** Version 1 · **Execute as:** rosanes@twinhomebuyer.com · **Access:** Anyone within
   **equitytrack.org** (the Workspace org; twinhomebuyer.com is an alias on it — org-internal, not
   "anyone with the link").

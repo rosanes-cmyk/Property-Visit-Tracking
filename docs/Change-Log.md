@@ -7,7 +7,18 @@
 > stale snapshot live (e.g. the first web-app deploy shipped the pre-WebApp build and lacked the
 > JSON API until it was re-synced). The `/exec` URL stays the same across new versions.
 
-## v3.1 — 2026-07-23 (Web dashboard DEPLOYED)
+## 2026-08-01 — dashboard URL corrected
+
+The live dashboard is the deployment already recorded in `Cowork-Zapier-Setup-Task.md`:
+
+`https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbxp7ACEnlumHkspmbOOuY7PO4InKOUeMEmAuejfft-GTfNJI23Hr5izbt2Cxgelo3nLOg/exec`
+
+The `AKfycbx13gEK…` URL below is a **second, older deployment of the same script**. Two deployments
+means two frozen snapshots: "Deploy → New version" updates only the one you pick, so the other keeps
+serving old code indefinitely. That is the trap that made earlier fixes look like they had not
+worked. Keep one deployment; delete the other.
+
+## v3.1 — 2026-07-23 (Web dashboard DEPLOYED — URL later superseded, see above)
 
 The Apps Script Web App dashboard was deployed on the DEV COPY and verified live.
 - URL: `https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbx13gEK5suKTAnQztKFAJWViZSrL40edm3CpC25RnQC_rHoUl37VQRbIBB5QLtU0aBXjg/exec`
