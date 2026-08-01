@@ -222,6 +222,80 @@ function legacyIllegalValues_(records) {
   return out;
 }
 
+/**
+ * Report records that look like the same property twice — by address, or by phone number.
+ *
+ * Read-only. It deletes nothing and merges nothing: which of a pair to keep is a judgement call
+ * (the REI-created row usually has the current appointment; the imported row usually has the
+ * richer history), so it lists them and lets a human decide.
+ */
+function findDuplicateRecords() {
+  var ui = SpreadsheetApp.getUi();
+  var sh = dataSheet_();
+  if (!sh) { ui.alert('Run "Build structure (setup)" first.'); return; }
+
+  var lastRow = sh.getLastRow();
+  if (lastRow < CFG.FIRST_DATA_ROW) { ui.alert('No data rows.'); return; }
+
+  var block = sh.getRange(CFG.FIRST_DATA_ROW, 1, lastRow - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+  var at = function (header) { return col(header) - 1; };
+
+  var byAddress = {}, byPhone = {};
+  var pairs = [];
+
+  for (var i = 0; i < block.length; i++) {
+    var row = block[i];
+    var rowNum = CFG.FIRST_DATA_ROW + i;
+    var address = String(row[at('Property Address')] || '');
+    if (!address) continue;
+
+    var label = 'row ' + rowNum + '  ' + (row[at('Property ID')] || '?') + '  ' +
+                (row[at('Seller Name')] || '(no name)') + '  ' + address;
+
+    var addrKey = importNormAddr_(address);
+    if (addrKey) {
+      if (byAddress[addrKey]) pairs.push(['same address', byAddress[addrKey], label]);
+      else byAddress[addrKey] = label;
+    }
+
+    // Last 10 digits, so +1 / formatting differences do not hide a match.
+    var digits = String(row[at('Phone')] || '').replace(/\D/g, '');
+    if (digits.length >= 10) {
+      var phoneKey = digits.slice(-10);
+      if (byPhone[phoneKey] && byPhone[phoneKey] !== label) {
+        pairs.push(['same phone', byPhone[phoneKey], label]);
+      } else if (!byPhone[phoneKey]) {
+        byPhone[phoneKey] = label;
+      }
+    }
+  }
+
+  // A pair caught by both rules is one problem, not two.
+  var seen = {}, unique = [];
+  pairs.forEach(function (p) {
+    var key = p[1] + '||' + p[2];
+    if (seen[key]) return;
+    seen[key] = true;
+    unique.push(p);
+  });
+
+  if (!unique.length) {
+    ui.alert('No duplicates found across ' + block.length + ' row(s).\n\n' +
+             'Checked: normalised address (country suffix ignored) and phone number.');
+    return;
+  }
+
+  var report = unique.slice(0, 25).map(function (p) {
+    return '[' + p[0] + ']\n   ' + p[1] + '\n   ' + p[2];
+  }).join('\n\n');
+
+  ui.alert('Found ' + unique.length + ' possible duplicate pair(s):\n\n' + report +
+    (unique.length > 25 ? '\n\n...and ' + (unique.length - 25) + ' more' : '') +
+    '\n\nNothing was changed. Decide which row to keep — usually the one carrying the current ' +
+    'appointment and REI link — then delete the other row from the sheet.');
+  logAuto_('INFO', 'duplicates', 'Found ' + unique.length + ' possible duplicate pair(s).');
+}
+
 /** Accepts a full Drive URL or a bare file ID. */
 function legacyFileId_(input) {
   var text = String(input || '').trim();

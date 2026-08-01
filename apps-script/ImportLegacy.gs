@@ -28,10 +28,16 @@ var IMPORT_SKIP_COLUMNS = [
   'Data Quality Status', 'Exception Reason'
 ];
 
-/** Mirrors the sheet's Normalized Address formula, so dedupe compares like with like. */
+/**
+ * Mirrors the sheet's Normalized Address formula, so dedupe compares like with like.
+ * The country suffix goes first, while the comma is still there to anchor it: REI writes
+ * ", UNITED STATES" on every address and the old workbook never did, so without this the same
+ * property reads as two different ones.
+ */
 function importNormAddr_(value) {
   return String(value == null ? '' : value)
     .toLowerCase()
+    .replace(/,\s*(united states|usa|us)\s*$/i, '')
     .replace(/,/g, '')
     .replace(/\./g, '')
     .replace(/#/g, '')

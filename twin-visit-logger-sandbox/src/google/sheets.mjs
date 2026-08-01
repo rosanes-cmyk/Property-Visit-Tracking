@@ -55,6 +55,24 @@ const HEADER_ALIASES = {
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+/**
+ * Address comparison key. Must stay identical to importNormAddr_ in the Apps Script and to the
+ * sheet's Normalized Address formula — tests/address-normalization.test.mjs pins all three.
+ *
+ * The country suffix is stripped first, while the comma is still there to anchor it. REI writes
+ * ", UNITED STATES" on every address and the legacy workbook never did, so without this the same
+ * property reads as two different ones and the upsert appends a duplicate row instead of updating.
+ */
+export const normalizeAddress = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/,\s*(united states|usa|us)\s*$/i, '')
+  .replace(/,/g, '')
+  .replace(/\./g, '')
+  .replace(/#/g, '')
+  .replace(/ apt /g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 
 function clipCell(value, maxLength = 45000) {
   const text = String(value || '');
@@ -154,7 +172,7 @@ export async function findExistingVisit(auth, visit) {
   const targetMessageId = normalize(visit.gmailMessageId);
   const targetId = normalize(visit.reiRecordId);
   const targetLink = normalize(visit.reiLink);
-  const targetAddress = normalize(visit.propertyAddress);
+  const targetAddress = normalizeAddress(visit.propertyAddress);
   const targetPhone = normalize(visit.phone).replace(/\D/g, '');
 
   for (let index = 0; index < rows.length; index += 1) {
@@ -162,7 +180,7 @@ export async function findExistingVisit(auth, visit) {
     const sameMessage = targetMessageId && normalize(get(row, 'Gmail Message ID')) === targetMessageId;
     const sameId = targetId && normalize(get(row, 'REI Record ID')) === targetId;
     const sameLink = targetLink && normalize(get(row, 'REI BlackBook Link')) === targetLink;
-    const sameAddress = targetAddress && normalize(get(row, 'Property Address')) === targetAddress;
+    const sameAddress = targetAddress && normalizeAddress(get(row, 'Property Address')) === targetAddress;
     const rowPhone = get(row, 'Phone').replace(/\D/g, '');
     const samePhone = targetPhone && rowPhone && rowPhone === targetPhone;
 
