@@ -82,3 +82,36 @@ To read both at once: **Google Calendar → Settings → Time zone → Display s
 3. Did you run `node src\run-once.mjs` after creating the task?
 4. Read the log — it names exactly which piece was missing.
 5. If REI asks for a login, run `node scripts\rei-login.mjs` and try again.
+
+## WhatsApp group per visit
+
+When a property visit lands on Juan's calendar, this creates the WhatsApp group for it.
+
+| What you want | Command |
+|---|---|
+| Log WhatsApp in (once) | `node scripts\whatsapp-login.mjs` |
+| Check the selectors work on your build | `node scripts\whatsapp-doctor.mjs` |
+| See what groups it WOULD create | `node src\whatsapp\watch.mjs` |
+| Actually create them | `node src\whatsapp\watch.mjs --yes` |
+
+Set these in `.env` first:
+
+```
+WHATSAPP_TEAM_NUMBERS=+14155550100,+14155550101
+WHATSAPP_OWN_NUMBER=+14155550100
+WHATSAPP_INCLUDE_SELLER=true
+```
+
+Read this before running it with `--yes`:
+
+- **`WHATSAPP_INCLUDE_SELLER=true` puts the seller in the group.** Anything the team posts there —
+  offer numbers, "seller seems motivated", condition notes — is visible to them. Set it to `false`
+  if the group is meant to be a team/photo space.
+- **It never sends a message.** It creates the group and stops. There is no send function in the
+  code, and a selector that could match a send/delete/leave control is refused at runtime.
+- **Without `--yes` nothing is created.** The dry run walks the flow, reports which numbers WhatsApp
+  can actually find, and backs out.
+- **Automating WhatsApp Web is against WhatsApp's terms** and accounts do get banned for it. Log in
+  with a number the business can afford to lose, not Juan's main line.
+- Past visits are ignored, cancelled events are ignored, and a group that already exists is recorded
+  rather than created twice — so re-running is safe.
