@@ -1,0 +1,187 @@
+/**
+ * Deciding WHAT group to create, for WHICH visit, with WHO in it.
+ *
+ * Everything here is pure: calendar events in, a plan out. No browser, no network, no side effects,
+ * and deliberately no dependencies — this layer decides who gets added to a group chat that a
+ * seller can read, so it has to be testable in a bare checkout, not only after npm install.
+ *
+ * Covered by tests/whatsapp-plan.test.mjs.
+ */
+
+const OUR_EVENT = /^Property Visit\b/i;
+
+/** Digits only, then to E.164. A US number without a country code gets +1. */
+export function toE164(value, defaultCountry = '1') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const explicit = raw.startsWith('+');
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  if (explicit) return digits.length >= 8 ? `+${digits}` : '';
+  if (digits.length === 10) return `+${defaultCountry}${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  // Anything else is ambiguous — an extension, a partial, a typo. Refuse rather than guess, because
+  // a wrong number here means adding a stranger to a chat about someone's house.
+  return '';
+}
+
+/** Read "Label: value" out of the event description the calendar module writes. */
+export function fieldFromDescription(description, label) {
+  const prefix = `${label}:`.toLowerCase();
+  for (const line of String(description ?? '').split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.toLowerCase().startsWith(prefix)) {
+      const value = trimmed.slice(prefix.length).trim();
+      return value === 'Not found' ? '' : value;
+    }
+  }
+  return '';
+}
+
+/** "2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES" -> "2145 Capitol Ave" */
+export function shortAddress(address) {
+  return String(address ?? '').split(',')[0].replace(/\s+/g, ' ').trim();
+}
+
+/** The calendar day an instant falls on, in the target timezone, as YYYY-MM-DD. */
+export function localDay(date, timezone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const at = (type) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${at('year')}-${at('month')}-${at('day')}`;
+}
+
+function formatIn(date, timezone, options) {
+  return new Intl.DateTimeFormat('en-US', { timeZone: timezone, ...options }).format(date);
+}
+
+/**
+ * WhatsApp's group subject limit was 25 characters for years and is 100 today. It is a parameter
+ * rather than a constant so a shorter cap can be set without a code change if that ever bites.
+ */
+export const GROUP_NAME_MAX = 100;
+
+/**
+ * Build the group subject. If it has to be shortened, the ADDRESS gives way and the date survives:
+ * a group named for the wrong day is worse than one with a clipped street.
+ */
+export function groupName(address, start, timezone, template = 'Visit {address} {date}', max = GROUP_NAME_MAX) {
+  const date = start ? formatIn(start, timezone, { month: 'short', day: 'numeric' }) : '';
+  const build = (street) => template
+    .replace('{address}', street)
+    .replace('{date}', date)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const street = shortAddress(address);
+  const built = build(street);
+  if (built.length <= max) return built;
+  return build(street.slice(0, Math.max(0, street.length - (built.length - max))).trim()).slice(0, max);
+}
+
+/**
+ * Who goes in. Team numbers always; the seller only when includeSeller is on AND their number
+ * parses cleanly. Duplicates and the account's own number are removed — WhatsApp rejects a group
+ * that tries to add its own owner as a participant.
+ */
+export function participants({ teamNumbers = [], sellerPhone = '', includeSeller = false, ownNumber = '' }) {
+  const own = toE164(ownNumber);
+  const seen = new Set();
+  const out = [];
+
+  const add = (value, role) => {
+    const e164 = toE164(value);
+    if (!e164 || (own && e164 === own) || seen.has(e164)) return;
+    seen.add(e164);
+    out.push({ number: e164, role });
+  };
+
+  for (const number of teamNumbers) add(number, 'team');
+  if (includeSeller) add(sellerPhone, 'seller');
+  return out;
+}
+
+/**
+ * Turn one calendar event into a plan, or explain why it is being skipped.
+ * `now` is injected so the decision is testable and stable.
+ */
+export function planForEvent(event, options) {
+  const {
+    timezone = 'America/Los_Angeles',
+    teamNumbers = [],
+    includeSeller = false,
+    ownNumber = '',
+    template = 'Visit {address} {date}',
+    now = new Date(),
+    alreadyDone = new Set()
+  } = options || {};
+
+  const title = String(event?.summary ?? '');
+  const skip = (reason) => ({ create: false, reason, event });
+
+  if (!OUR_EVENT.test(title)) return skip('not a Property Visit event');
+  if (event.status === 'cancelled') return skip('event is cancelled');
+
+  const startIso = event?.start?.dateTime || event?.start?.date || '';
+  if (!startIso) return skip('event has no start time');
+
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) return skip('event start could not be parsed');
+  // Compare calendar days in the target timezone, so a 5pm visit today is never "in the past"
+  // just because the run happens at 6pm, and no UTC-offset arithmetic can drift it a day.
+  if (localDay(start, timezone) < localDay(now, timezone)) return skip('visit is in the past');
+
+  // Location is authoritative; the description is the fallback, and the title the last resort.
+  const address = event.location
+    || fieldFromDescription(event.description, 'Property')
+    || title.replace(/^Property Visit\s*[-|·—]?\s*/i, '').trim();
+  if (!address) return skip('no property address on the event');
+
+  const name = groupName(address, start, timezone, template);
+  if (alreadyDone.has(event.id)) return skip(`group already created (${name})`);
+
+  const people = participants({
+    teamNumbers,
+    sellerPhone: fieldFromDescription(event.description, 'Phone'),
+    includeSeller,
+    ownNumber
+  });
+  if (!people.length) return skip('no valid participant numbers — nobody to add');
+
+  return {
+    create: true,
+    eventId: event.id,
+    name,
+    address,
+    startIso,
+    startLocal: formatIn(start, timezone, {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+      hour: 'numeric', minute: '2-digit'
+    }),
+    participants: people,
+    sellerIncluded: people.some((p) => p.role === 'seller')
+  };
+}
+
+/** Plan a whole calendar page. Returns { create: [...], skipped: [...] }. */
+export function planForEvents(events, options) {
+  const create = [];
+  const skipped = [];
+  for (const event of events || []) {
+    const plan = planForEvent(event, options);
+    (plan.create ? create : skipped).push(plan);
+  }
+  // Two events for the same property on the same day only need one group.
+  const seen = new Set();
+  const deduped = [];
+  for (const plan of create) {
+    if (seen.has(plan.name)) {
+      skipped.push({ create: false, reason: `duplicate of "${plan.name}"`, event: plan.event });
+      continue;
+    }
+    seen.add(plan.name);
+    deduped.push(plan);
+  }
+  return { create: deduped, skipped };
+}

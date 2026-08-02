@@ -41,7 +41,20 @@ const raw = {
   strictValidation: bool(process.env.STRICT_VALIDATION, true),
   dryRun: bool(process.env.DRY_RUN, false),
   debugCapture: bool(process.env.DEBUG_CAPTURE, true),
-  logLevel: process.env.LOG_LEVEL || 'info'
+  logLevel: process.env.LOG_LEVEL || 'info',
+  // ---- WhatsApp group automation (src/whatsapp) ----
+  // Separate browser profile from REI: different site, different login, and a WhatsApp ban must
+  // never take the REI session with it.
+  whatsappUserDataDir: process.env.WHATSAPP_USER_DATA_DIR || './browser-data/whatsapp',
+  whatsappSelectorConfig: process.env.WHATSAPP_SELECTOR_CONFIG || './config/whatsapp-selectors.json',
+  whatsappTeamNumbers: String(process.env.WHATSAPP_TEAM_NUMBERS || '')
+    .split(',').map((n) => n.trim()).filter(Boolean),
+  // The number this browser profile is logged in as. WhatsApp rejects a group that tries to add its
+  // own owner, so it is excluded from every participant list.
+  whatsappOwnNumber: process.env.WHATSAPP_OWN_NUMBER || '',
+  whatsappIncludeSeller: bool(process.env.WHATSAPP_INCLUDE_SELLER, false),
+  whatsappGroupTemplate: process.env.WHATSAPP_GROUP_TEMPLATE || 'Visit {address} {date}',
+  whatsappLookaheadDays: int(process.env.WHATSAPP_LOOKAHEAD_DAYS, 30)
 };
 
 const schema = z.object({
@@ -69,7 +82,14 @@ const schema = z.object({
   strictValidation: z.boolean(),
   dryRun: z.boolean(),
   debugCapture: z.boolean(),
-  logLevel: z.string().min(1)
+  logLevel: z.string().min(1),
+  whatsappUserDataDir: z.string().min(1),
+  whatsappSelectorConfig: z.string().min(1),
+  whatsappTeamNumbers: z.array(z.string()),
+  whatsappOwnNumber: z.string(),
+  whatsappIncludeSeller: z.boolean(),
+  whatsappGroupTemplate: z.string().min(1),
+  whatsappLookaheadDays: z.number().int().positive().max(365)
 });
 
 export const config = schema.parse({
@@ -77,5 +97,7 @@ export const config = schema.parse({
   googleCredentialsPath: path.resolve(raw.googleCredentialsPath),
   googleTokenPath: path.resolve(raw.googleTokenPath),
   reiUserDataDir: path.resolve(raw.reiUserDataDir),
-  reiSelectorConfig: path.resolve(raw.reiSelectorConfig)
+  reiSelectorConfig: path.resolve(raw.reiSelectorConfig),
+  whatsappUserDataDir: path.resolve(raw.whatsappUserDataDir),
+  whatsappSelectorConfig: path.resolve(raw.whatsappSelectorConfig)
 });
