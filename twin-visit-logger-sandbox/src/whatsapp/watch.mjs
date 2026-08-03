@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, localDay } from './plan.mjs
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-13';
+const BUILD = '2026-08-03-note-14';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -55,6 +55,16 @@ const FORCE = process.argv.includes('--force');
  * only needed if a chat has been deleted and the picker can no longer find someone.
  */
 const REWARM = process.argv.includes('--rewarm');
+
+/*
+ * --repost-note forgets that a note was already sent for the selected visits, so one gets posted again.
+ * For when a note went out wrong and was deleted by hand.
+ *
+ * This is NOT a licence to spam: postGroupNote still reads the open conversation and refuses if the
+ * note is already there. The state flags are the belt; that check is the braces. So this reposts only
+ * when the note is genuinely gone.
+ */
+const REPOST_NOTE = process.argv.includes('--repost-note');
 
 /*
  * --only "text"  restricts the run to groups whose name contains that text, case-insensitively.
@@ -172,12 +182,26 @@ async function main() {
      * recorded group as finished regardless is what left the first real group sitting in WhatsApp
      * with no note and no way back to it: the next run skipped the event before ever looking.
      */
-    alreadyDone: FORCE
+    alreadyDone: (FORCE || REPOST_NOTE)
       ? new Set()
       : eventsFinished(state.groups, { requireNote: config.whatsappPostNote })
   });
 
   const create = ONLY ? planned.filter((p) => p.name.toLowerCase().includes(ONLY)) : planned;
+
+  // Clear the note flags only for the visits this run is actually touching, so --repost-note --only
+  // cannot quietly re-open every other group's note as well.
+  if (REPOST_NOTE) {
+    for (const plan of create) {
+      const entry = state.groups[plan.eventId];
+      if (!entry) continue;
+      delete entry.notePosted;
+      delete entry.noteAttemptedAt;
+    }
+    await writeState(state);
+    console.log(`--repost-note → the note will be sent again for ${create.length} visit(s), ` +
+      'unless it is still in the group.\n');
+  }
   if (ONLY) {
     console.log(`--only "${ONLY}" → ${create.length} of ${planned.length} kept; ` +
       `${planned.length - create.length} left alone this run\n`);
@@ -452,7 +476,22 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
     console.log('\nREI task completion is off (set REI_COMPLETE_TASKS=true in .env to enable).');
     return;
   }
-  const done = plans.filter((p) => state.groups[p.eventId]);
+  /*
+   * The task is only closed once the briefing is actually IN the group.
+   *
+   * A group with no note is not a handover — whoever opens it learns nothing about the property. And
+   * because an unconfirmed note is never retried, leaving the task open is the only thing left that
+   * makes that visible to a person. So the interlock is: calendar event + group + note.
+   */
+  const done = plans.filter((p) => {
+    const entry = state.groups[p.eventId];
+    if (!entry) return false;
+    if (config.whatsappPostNote && !entry.notePosted) {
+      console.log(`\n--- ${p.name}\n    NOT closing the REI task: the note is not confirmed in the group.`);
+      return false;
+    }
+    return true;
+  });
   if (!done.length) return;
 
   console.log(`\n=== Clearing ${done.length} REI task(s) ===`);
