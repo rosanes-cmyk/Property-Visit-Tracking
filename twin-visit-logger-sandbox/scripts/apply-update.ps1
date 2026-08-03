@@ -2,6 +2,13 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\apply-update.ps1 -Zip "$HOME\Downloads\tvlnote4.zip"
 #
+# NOTE: this script ships INSIDE the update zips, so it cannot install the zip that first delivers it.
+# The first time, do it by hand — three lines, no wrapper folder, Expand-Archive does not nest:
+#   Expand-Archive "$HOME\Downloads\<zip>" "$env:TEMP\tvl" -Force
+#   Copy-Item "$env:TEMP\tvl\*" . -Recurse -Force
+#   Select-String src\whatsapp\watch.mjs -Pattern "^const BUILD"
+# After that this script is present and handles every later update.
+#
 # Why this exists: four wrong diagnoses in this project traced back to a zip extracted somewhere other
 # than the folder Node loads from — Windows nests it in a subfolder named after the zip, or the files
 # go to Downloads and the old code keeps running while the new behaviour is looked for. This puts the
