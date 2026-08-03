@@ -211,12 +211,51 @@ export function extractCallSummary(notesText) {
  */
 export function extractLogistics(notesText) {
   const t = String(notesText || '');
+  const rawDrive = labelledValue(t, 'Drive Time') || labelledValue(t, 'Travel Time')
+    || labelledValue(t, 'ETA');
+
+  /*
+   * The VA writes their own Maps link inside the Drive Time line — "~56 mins
+   * (https://maps.app.goo.gl/tfL4u5Uam65aB28j9)". That link beats one generated from the address: it is
+   * the route they actually checked, which is where the "~56 mins" came from.
+   *
+   * It is lifted OUT of the drive-time text so the URL is not printed twice, once inline and again on the
+   * directions line.
+   */
+  const link = (rawDrive.match(/https?:\/\/[^\s)>\]]+/) || [''])[0];
+  const driveTime = link
+    ? rawDrive.replace(link, '').replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').trim()
+    : rawDrive;
+
   return {
     leaveOffice: labelledValue(t, 'Leave Office') || labelledValue(t, 'Leave by')
       || labelledValue(t, 'Depart'),
-    driveTime: labelledValue(t, 'Drive Time') || labelledValue(t, 'Travel Time')
-      || labelledValue(t, 'ETA')
+    driveTime,
+    mapsLink: link
   };
+}
+
+/**
+ * How many minutes before the appointment the visitor must leave — the number Google Calendar needs.
+ *
+ * Calendar reminders are expressed as "minutes before the event starts", so "Leave Office: 10:00 AM" for an
+ * 11:00 AM visit becomes 60. Returns 0 when it cannot be worked out, and a caller treats 0 as "no reminder"
+ * rather than "remind at the start", because a leave-now alert that fires as the visit begins is worse than
+ * none.
+ *
+ * `parseTimeOnDate` is injected so this stays pure and testable without a timezone library.
+ */
+export function minutesBeforeStart(leaveOfficeText, startMillis, parseTimeOnDate) {
+  const text = String(leaveOfficeText || '').trim();
+  if (!text || !startMillis || typeof parseTimeOnDate !== 'function') return 0;
+
+  const leaveMillis = parseTimeOnDate(text);
+  if (!leaveMillis) return 0;
+
+  const minutes = Math.round((startMillis - leaveMillis) / 60000);
+  // Must be before the visit, and within a day of it. A negative or absurd value means the time was
+  // misread, and guessing at it would put someone on the road at the wrong hour.
+  return minutes > 0 && minutes <= 1440 ? minutes : 0;
 }
 
 /**

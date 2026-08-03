@@ -12,7 +12,7 @@
  */
 import {
   extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes, labelledValue, extractCallSummary,
-  extractLogistics, mapsLink
+  extractLogistics, mapsLink, minutesBeforeStart
 } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
 
 let pass = 0, fail = 0;
@@ -189,6 +189,37 @@ check('commas and spaces are encoded', mapsLink('1 A St, B, CA').includes('%2C')
 check('no address means no link', mapsLink(''), '');
 check('whitespace only means no link', mapsLink('   '), '');
 check('undefined does not throw', mapsLink(undefined), '');
+
+console.log('\n=== The VA writes their own Maps link inside the drive time ===');
+/*
+ * "Drive Time: ~56 mins (https://maps.app.goo.gl/tfL4u5Uam65aB28j9)". That link beats one generated from
+ * the address: it is the route they actually checked, which is where "~56 mins" came from.
+ */
+const REAL_TRIP = 'Leave Office: 10:00 AM\nDrive Time: ~56 mins (https://maps.app.goo.gl/tfL4u5Uam65aB28j9)';
+const rt = extractLogistics(REAL_TRIP);
+check('their link is picked up', rt.mapsLink, 'https://maps.app.goo.gl/tfL4u5Uam65aB28j9');
+// Printed twice — once inline, once on the directions line — it is just noise.
+check('and lifted out of the drive-time text', rt.driveTime, '~56 mins');
+check('leave time still read', rt.leaveOffice, '10:00 AM');
+check('no link means no link, and the text is untouched',
+  extractLogistics('Drive Time: ~1 hr 45 mins (via US-101 N)').driveTime, '~1 hr 45 mins (via US-101 N)');
+
+console.log('\n=== minutesBeforeStart: what Calendar needs for a leave-now alert ===');
+// A default alert ten minutes before an appointment ninety minutes away is useless.
+const at11 = Date.UTC(2026, 7, 4, 18, 0);                       // 11:00 PDT
+const on = (h, m) => Date.UTC(2026, 7, 4, h + 7, m);            // that day, PDT -> UTC
+check('10:00 AM for an 11:00 visit is 60 minutes',
+  minutesBeforeStart('10:00 AM', at11, () => on(10, 0)), 60);
+check('9:15 AM is 105 minutes', minutesBeforeStart('9:15 AM', at11, () => on(9, 15)), 105);
+check('a leave time AFTER the visit is refused',
+  minutesBeforeStart('11:30 AM', at11, () => on(11, 30)), 0);
+check('the same minute is refused', minutesBeforeStart('11:00 AM', at11, () => on(11, 0)), 0);
+// A leave-now alert that fires as the visit begins is worse than no alert.
+check('more than a day ahead is refused', minutesBeforeStart('10:00 AM', at11, () => at11 - 2 * 86400000), 0);
+check('an unparseable time is refused', minutesBeforeStart('morning', at11, () => 0), 0);
+check('no leave time means no reminder', minutesBeforeStart('', at11, () => on(10, 0)), 0);
+check('no start time means no reminder', minutesBeforeStart('10:00 AM', 0, () => on(10, 0)), 0);
+check('a missing parser does not throw', minutesBeforeStart('10:00 AM', at11, null), 0);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

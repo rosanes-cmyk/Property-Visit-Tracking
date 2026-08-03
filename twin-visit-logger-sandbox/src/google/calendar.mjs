@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
 import {
-  extractPropertyRadar, extractCallSummary, extractLogistics, mapsLink
+  extractPropertyRadar, extractCallSummary, extractLogistics, mapsLink, minutesBeforeStart
 } from '../whatsapp/propertyradar.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -47,7 +47,8 @@ function buildDescription(visit) {
     `Property: ${visit.propertyAddress || 'Not found'}`,
     // High, and never last: other steps read this back, and it must survive any truncation.
     `REI BlackBook: ${visit.reiLink || 'Not found'}`,
-    some('Maps', mapsLink(visit.propertyAddress)),
+    // The VA's own link when they wrote one — it is the route their drive-time estimate came from.
+    some('Maps', extractLogistics(visit.notes || '').mapsLink || mapsLink(visit.propertyAddress)),
     `Assigned Owner: ${visit.assignedOwner || 'Not found'}`,
     `Current Stage: ${isCancelled(visit.taskStatus) ? 'Cancelled' : 'Visit Scheduled'}`,
     `Task Status: ${visit.taskStatus || 'Not found'}`,
@@ -169,6 +170,25 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
   if (visit.reiRecordId) privateProperties.reiRecordId = String(visit.reiRecordId);
   if (visit.gmailMessageId) privateProperties.gmailMessageId = String(visit.gmailMessageId);
 
+  /*
+   * A reminder at the time the visitor must LEAVE, not just before the visit.
+   *
+   * A default alert ten minutes before an appointment ninety minutes' drive away is useless. The notes
+   * carry "Leave Office: 10:00 AM"; Calendar wants minutes-before-start, so that becomes 60 for an 11:00
+   * visit and fires exactly when it is time to go.
+   *
+   * The time is resolved on the APPOINTMENT'S OWN DATE in the event's timezone — reading "10:00 AM" against
+   * today would give a nonsense offset for a visit next week.
+   */
+  const trip = extractLogistics(visit.notes || '');
+  const leaveMinutes = minutesBeforeStart(trip.leaveOffice, start.toMillis(), (text) => {
+    const parsed = DateTime.fromFormat(String(text).trim().toUpperCase().replace(/\s+/g, ' '), 'h:mm a', {
+      zone: config.calendarTimezone
+    });
+    if (!parsed.isValid) return 0;
+    return start.set({ hour: parsed.hour, minute: parsed.minute, second: 0, millisecond: 0 }).toMillis();
+  });
+
   const event = {
     summary: clip(`Property Visit | ${visit.sellerName || 'Seller'} | ${visit.propertyAddress || 'Address pending'}`, 500),
     location: visit.propertyAddress || '',
@@ -177,6 +197,17 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
     end: { dateTime: end.toISO(), timeZone: config.calendarTimezone },
     extendedProperties: { private: privateProperties }
   };
+
+  if (leaveMinutes) {
+    // Two alerts: one when it is time to leave, and one fifteen minutes before that to get ready.
+    event.reminders = {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: leaveMinutes },
+        ...(leaveMinutes + 15 <= 1440 ? [{ method: 'popup', minutes: leaveMinutes + 15 }] : [])
+      ]
+    };
+  }
 
   if (eventId) {
     const response = await calendar.events.update({
