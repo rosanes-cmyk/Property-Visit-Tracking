@@ -1,10 +1,11 @@
 /**
  * WhatsApp Web driver.
  *
- * READ THIS BEFORE TRUSTING IT: every selector here is a CANDIDATE. WhatsApp Web ships obfuscated,
- * frequently-changing markup and this file was written without a live session to check against.
- * Run `npm run whatsapp:doctor` first — it reports which selectors actually resolve on your build
- * and writes the working ones out for config/whatsapp-selectors.json.
+ * Selector status: chatList, searchBox, newChatButton, newGroupButton, participantSearch and
+ * participantResults were CONFIRMED against a live session (2026-08-03). nextButton,
+ * groupSubjectInput and createGroupButton are still candidates — WhatsApp only renders them once a
+ * participant has been picked, which cannot be checked without touching a real contact. Re-run
+ * `npm run whatsapp:doctor` after any WhatsApp update; its markup changes often.
  *
  * Hard rules, enforced in code below:
  *   - This module NEVER sends a message. There is no send function, and the composer is never typed
@@ -84,8 +85,16 @@ export async function groupExists(page, selectors, name) {
   const results = page.locator((selectors.searchResultTitles || []).join(', ') || "[role='listitem'] span[title]");
   const count = await results.count().catch(() => 0);
   for (let i = 0; i < count; i += 1) {
-    const title = (await results.nth(i).getAttribute('title').catch(() => '')) || '';
-    if (title.trim() === name) { await clearSearch(page, search.locator); return true; }
+    // The title attribute is not always present — on this build the row title sits in
+    // [data-testid='cell-frame-title'] and the attribute may be on a span inside it. Reading the
+    // attribute alone silently found nothing, which would have meant creating a duplicate group.
+    const row = results.nth(i);
+    const attr = (await row.getAttribute('title').catch(() => '')) || '';
+    const text = (await row.innerText().catch(() => '')) || '';
+    if (attr.trim() === name || text.replace(/\s+/g, ' ').trim() === name) {
+      await clearSearch(page, search.locator);
+      return true;
+    }
   }
   await clearSearch(page, search.locator);
   return false;

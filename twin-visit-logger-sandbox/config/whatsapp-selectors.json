@@ -1,72 +1,60 @@
 {
-  "_comment": "UNCONFIRMED CANDIDATES. WhatsApp Web's markup is obfuscated and changes often, and these were written without a live session to check against. Run `npm run whatsapp:doctor` — it reports which of these actually resolve on your build and prints paste-ready replacements. Nothing here may match a send/delete/leave control; src/whatsapp/client.mjs refuses such a selector at runtime.",
-
+  "_comment": "CONFIRMED against a live WhatsApp Web session on 2026-08-03 via `node scripts/whatsapp-doctor.mjs`. chatList, newChatButton, newGroupButton, searchBox, participantSearch and participantResults were verified on screen. nextButton and createGroupButton could NOT be verified because they only exist after a participant is selected, so those two remain candidates. Nothing here may match a send/delete/leave control; src/whatsapp/client.mjs refuses such a selector at runtime.",
   "chatList": [
     "[data-testid='chat-list']",
-    "#pane-side",
     "[aria-label='Chat list']",
-    "div[role='grid']"
+    "#pane-side"
   ],
-
   "searchBox": [
-    "[data-testid='chat-list-search']",
-    "div[contenteditable='true'][data-tab='3']",
-    "[aria-label='Search input textbox']",
-    "[title='Search input textbox']"
+    "[aria-label='Search or start a new chat']",
+    "[data-testid='chat-list-search-container'] div[contenteditable='true']",
+    "[data-testid='chat-list-search'] div[contenteditable='true']",
+    "div[contenteditable='true'][data-tab='3']"
   ],
-
   "searchResultTitles": [
     "[data-testid='cell-frame-title'] span[title]",
-    "#pane-side span[title]",
-    "[role='listitem'] span[title]"
+    "[data-testid='cell-frame-title']",
+    "[data-testid='cell-frame-container'] span[title]"
   ],
-
   "newChatButton": [
-    "[data-testid='chat']",
     "[aria-label='New chat']",
     "[title='New chat']",
-    "span[data-icon='new-chat-outline']",
-    "span[data-icon='chat']"
+    "[data-testid='new-chat-outline']"
   ],
-
   "newGroupButton": [
-    "[data-testid='new-group']",
     "[aria-label='New group']",
-    "li:has-text('New group')",
-    "div[role='button']:has-text('New group')"
+    "[data-testid='new-group']",
+    "li:has-text('New group')"
   ],
-
   "participantSearch": [
-    "[data-testid='contacts-search']",
-    "div[contenteditable='true'][data-tab='4']",
-    "[aria-label='Search name or number']",
-    "[title='Search name or number']"
+    "[data-testid='new-group-drawer-participants'] [data-testid='inputarea'] div[contenteditable='true']",
+    "[data-testid='new-group-drawer-participants'] div[contenteditable='true']",
+    "[data-testid='inputarea'] div[contenteditable='true']",
+    "[data-testid='inputarea'] input",
+    "[aria-label='Search name or number']"
   ],
-
   "participantResults": [
+    "[data-testid='new-group-drawer-participants'] [data-testid='cell-frame-container']",
     "[data-testid='cell-frame-container']",
-    "div[role='listitem']",
-    "[data-testid='contact-list'] li"
+    "[data-testid^='list-item-']"
   ],
-
   "nextButton": [
-    "[data-testid='arrow-forward']",
+    "[data-testid='drawer-left'] [aria-label='Next']",
     "[aria-label='Next']",
+    "[data-testid='arrow-forward']",
     "span[data-icon='arrow-forward']",
-    "div[role='button'][aria-label='Next']"
+    "[data-testid='drawer-left'] [role='button'][aria-label='Next']"
   ],
-
   "groupSubjectInput": [
     "[data-testid='group-subject-input']",
+    "[data-testid='drawer-left'] [data-testid='inputarea'] div[contenteditable='true']",
     "div[contenteditable='true'][data-tab='1']",
-    "[aria-label='Group subject (optional)']",
-    "[title='Group subject (optional)']"
+    "[aria-label='Group subject (optional)']"
   ],
-
   "createGroupButton": [
-    "[data-testid='checkmark-medium']",
     "[aria-label='Create group']",
+    "[data-testid='checkmark-medium']",
     "span[data-icon='checkmark-medium']",
-    "div[role='button'][aria-label='Create group']"
+    "[data-testid='drawer-left'] [role='button'][aria-label='Create group']"
   ]
 }

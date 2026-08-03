@@ -62,6 +62,13 @@ console.log(`Page starts with: "${state.firstText}"\n`);
 const ONSCREEN = ['chatList', 'searchBox', 'newChatButton'];
 // These only exist once the New group flow is open.
 const IN_FLOW = ['newGroupButton', 'participantSearch', 'nextButton'];
+/*
+ * Two controls cannot be checked here and their absence is NOT a fault: WhatsApp only renders the
+ * Next arrow and the create/confirm button once a participant has been selected, and selecting one
+ * would mean touching a real contact. Reporting them as MISSING sent the last run chasing a
+ * non-problem, so they are labelled instead.
+ */
+const ONLY_AFTER_SELECTING = new Set(['nextButton', 'createGroupButton']);
 
 const results = {};
 for (const key of ONSCREEN) {
@@ -76,7 +83,10 @@ if (results.newChatButton) {
   for (const key of IN_FLOW) {
     const hit = await firstVisible(page, selectors[key] || []);
     results[key] = hit.selector;
-    console.log(`${hit.selector ? 'OK      ' : 'MISSING '} ${key}${hit.selector ? `  ->  ${hit.selector}` : ''}`);
+    const label = hit.selector ? 'OK      ' : (ONLY_AFTER_SELECTING.has(key) ? 'n/a here' : 'MISSING ');
+    console.log(`${label} ${key}${hit.selector ? `  ->  ${hit.selector}` : ''}` +
+      (!hit.selector && ONLY_AFTER_SELECTING.has(key)
+        ? '   (only appears after a participant is picked — not a fault)' : ''));
     if (key === 'newGroupButton' && hit.selector) {
       await hit.locator.click().catch(() => {});
       await page.waitForTimeout(1000);
@@ -85,7 +95,7 @@ if (results.newChatButton) {
 }
 
 // For anything still missing, list what IS on screen so a working selector can be picked by hand.
-const missing = Object.keys(results).filter((k) => !results[k]);
+const missing = Object.keys(results).filter((k) => !results[k] && !ONLY_AFTER_SELECTING.has(k));
 if (missing.length) {
   console.log(`\n${missing.length} selector(s) not found: ${missing.join(', ')}`);
   console.log('Everything identifiable that IS on screen right now — paste this back and the');
@@ -111,6 +121,10 @@ if (missing.length) {
 await page.keyboard.press('Escape').catch(() => {});
 await page.keyboard.press('Escape').catch(() => {});
 
-console.log('\nPaste any corrected selectors into config/whatsapp-selectors.json and re-run.');
-console.log('Nothing was created or sent.');
+if (!missing.length) {
+  console.log('\nEvery selector that can be checked at this stage resolved.');
+  console.log('The Next arrow and the create button are only reachable mid-flow, so they are');
+  console.log('exercised for real on the first run with --yes.');
+}
+console.log('\nNothing was created or sent.');
 await context.close();
