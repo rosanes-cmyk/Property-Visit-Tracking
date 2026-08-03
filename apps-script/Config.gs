@@ -43,6 +43,10 @@ const CFG = {
   // EDIT (view-only access cannot create events). Falls back to VISIT_CALENDAR_ID when blank.
   VISIT_CALENDAR_NAME: "Juan's Official Calendar",
   OFFICE_ORIGIN: '170 Glenn Way, San Carlos, CA 94070',   // drive-time origin for the "leave office by" reminder
+  // The deployed /exec dashboard link used on Google Chat cards. MUST be /exec, never /dev: a /dev
+  // link only opens for people who can edit this script, so everyone else taps the card and gets a
+  // Google error page. Override without editing code via the menu "Set dashboard link".
+  DASHBOARD_URL: 'https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbxp7ACEnlumHkspmbOOuY7PO4InKOUeMEmAuejfft-GTfNJI23Hr5izbt2Cxgelo3nLOg/exec',
 };
 
 // Internal task recipients. Blank = deliver via the visible Task Queue sheet only (pilot default).

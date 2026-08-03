@@ -62,9 +62,57 @@ function chatPost_(payload) {
   }
 }
 
-/** The deployed dashboard URL, so the team can act on the digest in one tap. */
+var DASHBOARD_URL_PROP = 'DASHBOARD_URL';
+
+/**
+ * The dashboard link put on every Chat card.
+ *
+ * NOT ScriptApp.getService().getUrl(): that hands back the /dev URL, which only opens for people
+ * who can edit the script. Everyone else on the team clicks the card and gets a Google error page —
+ * which is exactly what happened. The deployed /exec URL is used instead.
+ *
+ * Order: the DASHBOARD_URL script property (set once via the menu, survives redeploys), then the
+ * value in CFG, then getUrl() as a last resort so a fresh install still links somewhere.
+ */
 function dashboardUrl_() {
+  var stored = '';
+  try { stored = PropertiesService.getScriptProperties().getProperty(DASHBOARD_URL_PROP) || ''; } catch (e) {}
+  if (stored) return stored;
+  if (CFG.DASHBOARD_URL) return CFG.DASHBOARD_URL;
   try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; }
+}
+
+/** Menu: paste the /exec link once. Refuses a /dev link, which is the whole bug this fixes. */
+function setDashboardUrl() {
+  var ui = SpreadsheetApp.getUi();
+  var answer = ui.prompt(
+    'Dashboard link for Chat cards',
+    'Paste the deployed web-app link, ending in /exec.\n\n' +
+    'Find it: Extensions -> Apps Script -> Deploy -> Manage deployments -> copy the Web app URL.\n\n' +
+    'A /dev link will be rejected: it only opens for people who can edit the script, so everyone\n' +
+    'else on the team gets an error page when they tap the card.\n\n' +
+    'Leave blank to clear it and fall back to the built-in value.',
+    ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+
+  var url = String(answer.getResponseText() || '').trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!url) {
+    props.deleteProperty(DASHBOARD_URL_PROP);
+    ui.alert('Cleared. Chat cards will use the link built into the script.');
+    return;
+  }
+  if (!/^https:\/\/script\.google\.com\//.test(url)) {
+    ui.alert('That is not an Apps Script web-app link. It should start with https://script.google.com/');
+    return;
+  }
+  if (/\/dev(\?|$)/.test(url)) {
+    ui.alert('That is the /dev link. It only opens for editors of this script — the team would get\n' +
+             'an error page. Use the /exec link from Manage deployments instead.');
+    return;
+  }
+  props.setProperty(DASHBOARD_URL_PROP, url);
+  ui.alert('Saved. Chat cards will link here:\n\n' + url);
 }
 
 /**
