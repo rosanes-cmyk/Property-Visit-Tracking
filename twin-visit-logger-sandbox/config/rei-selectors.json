@@ -10,7 +10,7 @@
     ]
   },
   "listItemLabels": {
-    "_comment": "Primary strategy. REI renders each field as a leaf [data-testid='list-item'] whose text is Label+Value glued together; the scraper matches these label prefixes and returns the remainder. Verified against a real REI contact page.",
+    "_comment": "Label prefixes on a real REI contact page, CONFIRMED 2026-08-03 from contact 20473369 via `npm run rei:fields`. REI renders each field as a leaf [data-testid='list-item'] whose text is the LABEL glued straight onto the VALUE with no separator, so these are matched as prefixes and the remainder is the value. Order matters: longer, more specific labels first.",
     "sellerName": [
       "Name"
     ],
@@ -50,6 +50,22 @@
     ],
     "amountOffer": [
       "Amount Offer"
+    ],
+    "mailingAddress": [
+      "Mailing Address"
+    ],
+    "campaign": [
+      "Campaign"
+    ],
+    "appointmentType": [
+      "Appointment Type"
+    ],
+    "notes": [
+      "Notes"
+    ],
+    "latestActivity": [
+      "Latest Engagement Insights",
+      "Latest"
     ]
   },
   "fields": {
@@ -221,5 +237,24 @@
       "button:has-text('Complete')",
       "button:has-text('Done')"
     ]
+  },
+  "propertyFacts": {
+    "_comment": "Beds / baths / square footage appear as their own text chips - '4 Beds', '2.0 Baths', '2,448 SqFt' - not as label/value pairs, so they are matched by pattern rather than by label.",
+    "patterns": {
+      "beds": "(\\d+(?:\\.\\d+)?)\\s*Beds?\\b",
+      "baths": "(\\d+(?:\\.\\d+)?)\\s*Baths?\\b",
+      "sqft": "([\\d,]+)\\s*SqFt\\b"
+    }
+  },
+  "_notAvailableInRei": {
+    "_comment": "CHECKED AND ABSENT from the REI contact page on 2026-08-03. The PROPERTY INSPECTION note the team writes contains these, but REI does not hold them, so the scraper cannot fill them and nobody should keep looking for a selector.",
+    "fields": [
+      "Estimated Value",
+      "Assessed Value",
+      "Estimated Open Loans Balance",
+      "Estimated Equity",
+      "Purchase Date and purchase price"
+    ],
+    "whereTheyActuallyComeFrom": "PropertyRadar, which the team already cross-checks by hand (their own note says 'PropertyRadar lists Single Family 6/3 3,200sf while seller describes a triplex'). The closest thing REI holds is an 'Equity Percentage' figure written into the free-text Notes field."
   }
 }

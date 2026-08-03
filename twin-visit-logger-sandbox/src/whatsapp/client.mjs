@@ -221,15 +221,21 @@ export async function createGroup(page, selectors, { name, participants, apply =
   if (!picker.locator) throw new Error('Could not find the participant search box. Run: npm run whatsapp:doctor');
 
   for (const person of participants) {
-    // Typed through the KEYBOARD, not into a located element. The editable field inside
-    // [data-testid='inputarea'] carries no testid, aria-label or title, so no selector finds it
-    // reliably — but clicking the container focuses it, and keyboard input then lands correctly.
-    // This also survives WhatsApp swapping the inner element, which it does often.
+    /*
+     * NEVER Ctrl+A + Backspace here. In WhatsApp's picker the already-selected participants sit in
+     * the same input as chips, so select-all-then-delete removes the person added on the previous
+     * pass. That is why a run reporting "resolved 4/4" produced a group with one member: each number
+     * deleted the one before it and only the last survived.
+     *
+     * fill('') clears the input's VALUE only and leaves the chips alone — safe now that the field is
+     * confirmed to be a real <input type="text"> rather than a contenteditable.
+     */
     await picker.locator.click().catch(() => {});
-    await page.keyboard.press('Control+A').catch(() => {});
-    await page.keyboard.press('Backspace').catch(() => {});
-    await page.keyboard.type(person.number, { delay: 40 });
-    await page.waitForTimeout(1400);
+    await picker.locator.fill('').catch(() => {});
+    await picker.locator.type(person.number, { delay: 40 }).catch(async () => {
+      await page.keyboard.type(person.number, { delay: 40 });
+    });
+    await page.waitForTimeout(1600);
 
     const rows = page.locator((selectors.participantResults || []).join(', ') || "[role='listitem']");
     const rowCount = await rows.count().catch(() => 0);
@@ -246,9 +252,30 @@ export async function createGroup(page, selectors, { name, participants, apply =
       break;
     }
     if (!matched) report.notFound.push(person.number);
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(600);
   }
   step(`resolved ${report.added.length}/${participants.length} participant(s)`);
+
+  // Read back how many the UI actually shows as selected. "resolved 4/4" described clicks, not
+  // members — and a group of one was reported as a complete success because of it.
+  if (apply) {
+    const selected = await page.evaluate(() => {
+      const drawer = document.querySelector("[data-testid='new-group-drawer-participants']")
+        || document.querySelector("[data-testid='drawer-left']");
+      if (!drawer) return null;
+      // Chips carry a remove control; count those rather than guess at a class name.
+      const chips = drawer.querySelectorAll("[data-testid*='chip' i], [aria-label*='Remove' i], button[aria-label*='remove' i]");
+      return chips.length || null;
+    }).catch(() => null);
+
+    report.selectedInUi = selected;
+    if (selected !== null && selected < report.added.length) {
+      step(`WARNING: WhatsApp shows only ${selected} selected, not ${report.added.length} — ` +
+           'check the group afterwards');
+    } else if (selected !== null) {
+      step(`WhatsApp shows ${selected} selected`);
+    }
+  }
 
   if (!apply) {
     await page.keyboard.press('Escape').catch(() => {});

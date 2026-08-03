@@ -35,15 +35,26 @@ Motivation lines before posting.
 
 ## Where each line comes from
 
+Checked against a real REI contact (20473369, Jon Box) on 2026-08-03 with `npm run rei:fields`.
+
 | Line | Source |
 |---|---|
-| Property, Seller, Phone, REI Link, Appointment, Lead Source | **Automatic** — already scraped from REI into the tracker |
-| Estimated / Assessed Value, Loan Balance, Equity, Purchase Date | REI's property data — *not captured yet*, see below |
-| Motivation, Reason for Selling, Occupancy, Condition, Known Issues | REI custom fields or notes — *not captured yet* |
+| Property, Seller, Phone, Email, REI Link, Appointment, Lead Source | **Automatic** — scraped from REI |
+| Beds / Baths / SqFt | **Automatic** — REI shows these as chips (`4 Beds`, `2.0 Baths`, `2,448 SqFt`) |
+| Lead Stage, Category, Call Disposition, Next Step, Sales Agent, Campaign | **Automatic** — all present on the contact |
+| Motivation, Reason for Selling, Occupancy, Condition, Known Issues | **Typed by hand.** REI has no fields for these; the team writes them into free-text notes |
+| Estimated Value, Assessed Value, Loan Balance, Equity, Purchase Date | **Typed by hand — REI does not hold them at all.** See below |
 
-The bottom two groups are being mapped now. Once `scripts/rei-fields.mjs` has reported the real REI
-label names, they land in the tracker automatically and this note can be assembled from the sheet
-instead of typed.
+### The financial summary is not in REI
+
+Those five figures were looked for and are genuinely absent from the REI contact page. REI holds only
+an `Equity Percentage` figure written into the free-text Notes field (22% on the Jon Box record).
+
+They come from **PropertyRadar**, which the team already cross-checks by hand — their own note says
+*"PropertyRadar lists Single Family 6/3 3,200sf while seller describes a triplex"*. So no amount of
+scraper work will fill them in; they need either a PropertyRadar integration or continued manual
+entry. Recorded in `config/rei-selectors.json` under `_notAvailableInRei` so nobody spends another
+afternoon hunting for a selector that does not exist.
 
 ---
 
