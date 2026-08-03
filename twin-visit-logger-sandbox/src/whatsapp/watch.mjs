@@ -193,20 +193,63 @@ async function main() {
     await assertLoggedIn(page, selectors);
 
     /*
+     * PASS 1 — ask WHATSAPP what already exists, before doing anything else.
+     *
+     * WhatsApp is the authority on which groups exist, never the state file. The state file said both
+     * groups existed at a moment when they had just been deleted by hand; a run that trusted it would
+     * have skipped the warm-up, walked into the picker with unresolvable numbers, and produced two
+     * groups of nobody. So existence is established here, live, and the rest of the run follows from
+     * that answer.
+     *
+     * A group that exists but never got its note is given it here — that is what brings a group
+     * created before note-posting worked back into line, without anyone deleting and rebuilding it.
+     */
+    const needCreating = [];
+    for (const plan of create) {
+      console.log(`\n--- ${plan.name}`);
+      if (!(await groupExists(page, selectors, plan.name))) {
+        console.log('    not on WhatsApp yet');
+        needCreating.push(plan);
+        continue;
+      }
+
+      console.log('    already exists on WhatsApp — recording it, not creating another');
+      state.groups[plan.eventId] = {
+        ...(state.groups[plan.eventId] || {}),
+        name: plan.name,
+        foundExisting: true,
+        at: new Date().toISOString()
+      };
+      await writeState(state);
+
+      if (config.whatsappPostNote) {
+        const opened = await openGroupByName(page, selectors, plan.name);
+        if (!opened.opened) {
+          console.log(`    could not open it to post the note: ${opened.reason}`);
+        } else if (await maybePostNote(page, selectors, plan)) {
+          state.groups[plan.eventId].notePosted = true;
+          await writeState(state);
+        }
+      }
+    }
+
+    if (!needCreating.length) {
+      console.log('\nEvery group already existed — no group was created this run.');
+    }
+
+    /*
+     * PASS 2 — make the numbers findable, but only if a group is actually being built.
+     *
      * WhatsApp's group picker only searches saved contacts and numbers you already have a chat with.
      * A perfectly valid team number that is neither returns no results, and the group silently comes
      * out short. Resolving each number first through wa.me puts a chat in the list so the picker can
      * find it — and tells us definitively which numbers have no WhatsApp account at all.
+     *
+     * A note-only run has no picker to fill, so it skips this: opening four chats is visible in four
+     * other people's WhatsApp, and doing it for nothing is not free.
      */
-    const everyNumber = [...new Set(create.flatMap((p) => p.participants.map((x) => x.number)))];
-
-    // A run where every group already exists is only here to post a missing note — no picker is
-    // involved, so there is nothing to warm up. Skipping it also avoids opening four chats for no
-    // reason, which is a visible act in someone else's WhatsApp.
-    const needsPicker = create.some((p) => !state.groups[p.eventId]?.name);
-    if (!needsPicker) {
-      console.log('\nEvery group already exists — skipping the number warm-up; this run only posts notes.');
-    } else {
+    const everyNumber = [...new Set(needCreating.flatMap((p) => p.participants.map((x) => x.number)))];
+    if (everyNumber.length) {
       console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
       const reach = await warmUpNumbers(page, everyNumber, selectors);
       if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
@@ -217,33 +260,9 @@ async function main() {
       }
     }
 
-    for (const plan of create) {
+    // PASS 3 — create what is missing, and post its note.
+    for (const plan of needCreating) {
       console.log(`\n--- ${plan.name}`);
-
-      // Self-healing: if the group is already on WhatsApp, record it and move on. This is what
-      // makes a lost state file harmless instead of a source of duplicate groups.
-      if (await groupExists(page, selectors, plan.name)) {
-        console.log('    already exists on WhatsApp — recording it, not creating another');
-        state.groups[plan.eventId] = {
-          ...(state.groups[plan.eventId] || {}),
-          name: plan.name,
-          foundExisting: true,
-          at: new Date().toISOString()
-        };
-        await writeState(state);
-
-        // ...and it may still be missing its note — that is precisely why it came round again.
-        if (config.whatsappPostNote) {
-          const opened = await openGroupByName(page, selectors, plan.name);
-          if (!opened.opened) {
-            console.log(`    could not open it to post the note: ${opened.reason}`);
-          } else if (await maybePostNote(page, selectors, plan)) {
-            state.groups[plan.eventId].notePosted = true;
-            await writeState(state);
-          }
-        }
-        continue;
-      }
 
       const report = await createGroup(page, selectors, {
         name: plan.name,
