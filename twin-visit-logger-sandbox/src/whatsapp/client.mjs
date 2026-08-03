@@ -390,11 +390,21 @@ export async function openGroupByName(page, selectors, name) {
   return { opened: false, reason: 'no chat with that exact name in the search results' };
 }
 
-/** Everything visible in the open conversation. Used to spot a note this run already posted. */
+/**
+ * Everything visible in the open conversation. Used to spot a note already posted.
+ *
+ * innerText ALONE is not enough: WhatsApp renders every emoji as an <img>, and innerText skips an
+ * image's alt text. A note beginning "🏠 PROPERTY INSPECTION" therefore reads as " PROPERTY
+ * INSPECTION" on screen, so a marker containing the emoji could never match — which is how the same
+ * note got posted three times, two minutes apart. The alt text is folded in as well so this stays
+ * correct even if a marker gains an emoji again later.
+ */
 async function conversationText(page) {
   return await page.evaluate(() => {
     const main = document.querySelector('#main');
-    return main ? (main.innerText || '') : '';
+    if (!main) return '';
+    const alts = [...main.querySelectorAll('img[alt]')].map((img) => img.getAttribute('alt') || '');
+    return `${main.innerText || ''}\n${alts.join(' ')}`;
   }).catch(() => '');
 }
 
@@ -449,13 +459,21 @@ export async function postGroupNote(page, selectors, { groupName, text, apply = 
 
   // --- 4. Type and send, once ---
   await composer.locator.click();
-  // Shift+Enter for the line breaks, so a multi-line note does not send itself line by line.
+  /*
+   * insertText puts a whole line in with ONE event. keyboard.type sends a key event per character, and
+   * WhatsApp does work between them — it fetched a link preview for the REI URL mid-note and the
+   * remaining keystrokes landed in the wrong order, producing "Rei Blackbook Liintment:" and
+   * "11:00 AMnk:" in a message that went to a real group. A single insert cannot interleave.
+   *
+   * Shift+Enter for the line breaks, so a multi-line note does not send itself line by line.
+   */
   const lines = String(text).split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     if (i > 0) await page.keyboard.press('Shift+Enter');
-    if (lines[i]) await page.keyboard.type(lines[i], { delay: 4 });
+    if (lines[i]) await page.keyboard.insertText(lines[i]);
   }
-  await page.waitForTimeout(500);
+  // A moment for the link preview to settle before Enter, so it cannot swallow the send.
+  await page.waitForTimeout(1500);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(2500);
 

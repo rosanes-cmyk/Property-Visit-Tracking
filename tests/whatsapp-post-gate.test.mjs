@@ -79,7 +79,13 @@ check('recognises it inside a whole conversation transcript',
 check('an empty conversation has no note', noteAlreadyPresent(''), false);
 check('ordinary chatter is not a note',
   noteAlreadyPresent('Matt: parked outside\nJuan: coming down'), false);
-check('the marker is the note heading', note.startsWith(NOTE_MARKER), true);
+// The marker must be EMOJI-FREE. WhatsApp renders emoji as <img> and innerText drops the alt text, so
+// a marker containing "🏠" can never match the rendered conversation — which is exactly how the same
+// note reached the group three times, two minutes apart.
+check('the marker carries no emoji', /^[\x20-\x7E]+$/.test(NOTE_MARKER), true);
+check('the note contains the marker', note.includes(NOTE_MARKER), true);
+check('a note rendered WITHOUT its emoji is still recognised',
+  noteAlreadyPresent(note.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')), true);
 
 console.log('\n=== eventsFinished: which events need nothing further ===');
 const groups = {
@@ -90,6 +96,13 @@ const groups = {
 };
 check('with note posting ON, only the noted group is finished',
   [...eventsFinished(groups, { requireNote: true })], ['hasNote']);
+/*
+ * An ATTEMPT counts as finished even when delivery could not be confirmed. This posts into a group of
+ * real colleagues: three copies of the same briefing two minutes apart is a worse failure than one
+ * note a human has to check. So it is at-most-once, and the run says so loudly.
+ */
+check('an unverifiable attempt is never retried',
+  eventsFinished({ tried: { name: 'A', noteAttemptedAt: '2026-08-03T21:00:00Z' } }).has('tried'), true);
 // This is the bug that stranded the first real group: recorded, noteless, and skipped forever after.
 check('a noteless group is NOT finished, so it comes round again',
   eventsFinished(groups, { requireNote: true }).has('noNote'), false);

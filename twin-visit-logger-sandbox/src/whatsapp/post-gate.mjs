@@ -82,7 +82,15 @@ export function eventsFinished(groups = {}, { requireNote = true } = {}) {
   const done = new Set();
   for (const [eventId, entry] of Object.entries(groups || {})) {
     if (!entry) continue;
-    if (requireNote && !entry.notePosted) continue;
+    /*
+     * noteAttemptedAt counts as done, not just notePosted.
+     *
+     * It is written BEFORE the message is typed, so a note whose delivery cannot be confirmed is never
+     * tried again. That asymmetry is deliberate: this posts into a group of real colleagues, and three
+     * copies of the same briefing two minutes apart is a worse failure than one note that needs a human
+     * to check it. When an attempt cannot be verified the run says so loudly instead of retrying.
+     */
+    if (requireNote && !entry.notePosted && !entry.noteAttemptedAt) continue;
     done.add(eventId);
   }
   return done;

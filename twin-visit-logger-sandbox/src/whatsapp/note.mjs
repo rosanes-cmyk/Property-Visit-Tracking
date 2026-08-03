@@ -17,11 +17,20 @@
 export const TO_FILL_IN = '_______';
 
 /**
- * The heading every note starts with — and therefore how a note is recognised again later, which is
- * what stops a second run posting a duplicate into the same group. Defined here, next to the text it
- * heads, so the two cannot drift apart.
+ * How a note is recognised again later — which is what stops a second run posting a duplicate.
+ *
+ * PLAIN TEXT, no emoji, and that is the whole point. WhatsApp Web replaces every emoji in a message
+ * with an <img> element, and innerText does not include an image's alt text. So a marker of
+ * "🏠 PROPERTY INSPECTION" could never match what is on screen: the rendered text reads
+ * " PROPERTY INSPECTION". The check failed every time, the note was posted again every two minutes,
+ * and the group got three copies of it.
+ *
+ * The heading still shows the emoji to a human. Only the part used for MATCHING is emoji-free.
  */
-export const NOTE_MARKER = '🏠 PROPERTY INSPECTION';
+export const NOTE_MARKER = 'PROPERTY INSPECTION';
+
+/** The heading as it appears in the message. */
+export const NOTE_HEADING = `🏠 ${NOTE_MARKER}`;
 
 function line(icon, label, value) {
   return `${icon} ${label}: ${value || TO_FILL_IN}`;
@@ -38,7 +47,7 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   };
 
   const facts = [
-    NOTE_MARKER,
+    NOTE_HEADING,
     line('📍', 'Property', v('propertyAddress')),
     line('🧑', 'Seller', v('sellerName')),
     line('📞', 'Phone', v('phone')),

@@ -39,7 +39,7 @@ import { fieldFromDescription, localDay } from './plan.mjs';
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-11';
+const BUILD = '2026-08-03-note-12';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -270,8 +270,11 @@ async function main() {
         const opened = await openGroupByName(page, selectors, plan.name);
         if (!opened.opened) {
           console.log(`    could not open it to post the note: ${opened.reason}`);
-        } else if (await maybePostNote(page, selectors, plan)) {
-          state.groups[plan.eventId].notePosted = true;
+        } else {
+          // Recorded BEFORE typing: an unverifiable attempt must not become a repeat.
+          state.groups[plan.eventId].noteAttemptedAt = new Date().toISOString();
+          await writeState(state);
+          state.groups[plan.eventId].notePosted = await maybePostNote(page, selectors, plan);
           await writeState(state);
         }
       }
@@ -354,10 +357,14 @@ async function main() {
         };
         await writeState(state);
         console.log('    recorded');
+        state.groups[plan.eventId].noteAttemptedAt = new Date().toISOString();
+        await writeState(state);
         const noteWent = await maybePostNote(page, selectors, plan);
-        if (noteWent) {
-          state.groups[plan.eventId].notePosted = true;
-          await writeState(state);
+        state.groups[plan.eventId].notePosted = noteWent;
+        await writeState(state);
+        if (!noteWent) {
+          console.log('    the note is NOT confirmed in the group. It will NOT be retried —');
+          console.log('    check the group and post it by hand if it is missing.');
         }
         await notifyChat(
           `WhatsApp group created — ${plan.name}` +
