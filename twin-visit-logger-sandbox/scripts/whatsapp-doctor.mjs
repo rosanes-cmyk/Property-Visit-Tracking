@@ -11,7 +11,7 @@
  * Read-only. It opens menus and closes them with Escape. It creates nothing and sends nothing.
  */
 import fs from 'node:fs/promises';
-import { launchWhatsApp, assertLoggedIn, firstVisible, WHATSAPP_URL } from '../src/whatsapp/client.mjs';
+import { launchWhatsApp, firstVisible, WHATSAPP_URL } from '../src/whatsapp/client.mjs';
 import { config } from '../src/config.mjs';
 
 const selectors = JSON.parse(await fs.readFile(config.whatsappSelectorConfig, 'utf8'));
@@ -22,14 +22,41 @@ const context = await launchWhatsApp({
 });
 const page = context.pages()[0] || (await context.newPage());
 
-try {
-  await assertLoggedIn(page, selectors);
-  console.log('Logged in.\n');
-} catch (error) {
-  console.error(error.message);
-  await context.close();
-  process.exit(1);
+/*
+ * Deliberately does NOT abort on a failed login check. Telling the user "the chat list was not
+ * found" and quitting is useless: that message cannot distinguish "you are not logged in" from
+ * "the shipped selectors are wrong", and distinguishing those two is the entire job of this script.
+ * So it reports the page state either way and keeps going.
+ */
+await page.goto(WHATSAPP_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
+await page.waitForTimeout(4000);   // WhatsApp Web paints its shell before the chat list arrives
+
+const state = await page.evaluate(() => {
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const qr = [...document.querySelectorAll('canvas')].filter(visible).length > 0;
+  const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+  return {
+    url: location.href,
+    title: document.title,
+    qrCanvas: qr,
+    mentionsLinkDevice: /link(ing)? (a )?device|scan the QR|Steps to log in/i.test(text),
+    firstText: text.slice(0, 220)
+  };
+});
+
+console.log(`URL:   ${state.url}`);
+console.log(`Title: ${state.title}\n`);
+
+if (state.qrCanvas || state.mentionsLinkDevice) {
+  console.log('NOT LOGGED IN — WhatsApp Web is still showing the QR / link-device screen.');
+  console.log('  Run:  node scripts\\whatsapp-login.mjs');
+  console.log('  Scan the code, WAIT until your real chats appear in the window, and only then');
+  console.log('  press Enter. Pressing Enter before the chats load saves an empty session.\n');
+} else {
+  console.log('Looks logged in (no QR on screen). Checking selectors...\n');
 }
+console.log(`Page starts with: "${state.firstText}"\n`);
 
 // Groups reachable from the main screen without opening anything.
 const ONSCREEN = ['chatList', 'searchBox', 'newChatButton'];
@@ -61,7 +88,8 @@ if (results.newChatButton) {
 const missing = Object.keys(results).filter((k) => !results[k]);
 if (missing.length) {
   console.log(`\n${missing.length} selector(s) not found: ${missing.join(', ')}`);
-  console.log('Candidates visible on screen right now:\n');
+  console.log('Everything identifiable that IS on screen right now — paste this back and the');
+  console.log('selectors can be corrected from it:\n');
   const found = await page.evaluate(() => {
     const out = [];
     for (const el of document.querySelectorAll('[data-testid],[aria-label],[data-icon],[title]')) {
