@@ -15,7 +15,7 @@
     "setup:sheet": "node scripts/setup-sheet.mjs",
     "once": "node src/run-once.mjs",
     "poll": "node src/poll.mjs",
-    "check": "node --check src/run-once.mjs && node --check src/services/process.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs && node --check src/whatsapp/plan.mjs && node --check src/whatsapp/client.mjs && node --check src/whatsapp/watch.mjs && node --check src/rei/tasks.mjs && node --check src/rei/task-gate.mjs && node --check src/whatsapp/note.mjs && node --check src/whatsapp/post-gate.mjs",
+    "check": "node --check src/run-once.mjs && node --check src/services/process.mjs && node --check src/poll.mjs && node --check src/rei/scraper.mjs && node --check src/whatsapp/plan.mjs && node --check src/whatsapp/client.mjs && node --check src/whatsapp/watch.mjs && node --check src/rei/tasks.mjs && node --check src/rei/task-gate.mjs && node --check src/whatsapp/note.mjs && node --check src/whatsapp/post-gate.mjs && node --check scripts/add-visit-from-rei.mjs",
     "cleanup": "node scripts/cleanup.mjs",
     "test": "node ../tests/routing.test.mjs && node ../tests/progress-guard.test.mjs && node ../tests/legacy-import.test.mjs && node ../tests/import-from-drive.test.mjs && node ../tests/address-normalization.test.mjs && node ../tests/calendar-past-guard.test.mjs && node ../tests/exception-scope.test.mjs && node ../tests/whatsapp-plan.test.mjs && node ../tests/rei-task-gate.test.mjs && node ../tests/chat-dashboard-link.test.mjs && node ../tests/attention-digest.test.mjs && node ../tests/whatsapp-note.test.mjs && node ../tests/whatsapp-post-gate.test.mjs",
     "whatsapp:login": "node scripts/whatsapp-login.mjs",
@@ -23,7 +23,8 @@
     "whatsapp:watch": "node src/whatsapp/watch.mjs",
     "rei:task-doctor": "node scripts/rei-task-doctor.mjs",
     "where": "node scripts/where-am-i-writing.mjs",
-    "rei:fields": "node scripts/rei-fields.mjs"
+    "rei:fields": "node scripts/rei-fields.mjs",
+    "add:visit": "node scripts/add-visit-from-rei.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",

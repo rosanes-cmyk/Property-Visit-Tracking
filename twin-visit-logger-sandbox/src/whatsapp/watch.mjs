@@ -38,7 +38,7 @@ import { fieldFromDescription, localDay } from './plan.mjs';
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-6';
+const BUILD = '2026-08-03-note-7';
 
 const APPLY = process.argv.includes('--yes');
 
