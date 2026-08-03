@@ -2328,7 +2328,28 @@ function processIntakeInbox_() {
     if (String(row[idx['Status']]).trim()) continue;
     var addr = String(inboxGet_(row, idx, 'Property Address')).trim();
     var body = String(inboxGet_(row, idx, 'Task Body')).trim();
-    if (!addr && !body) continue;
+    /*
+     * A row with no address AND no body used to be skipped in silence, on the assumption that it was
+     * an empty row. It is not always: three real appointments sat here for days carrying a seller
+     * name, a phone and a visit date but NO Property Address, because whatever writes into this tab
+     * never filled that column. Silence made them invisible — Status stayed blank, so the tab looked
+     * like nothing had arrived, while the dashboard showed nothing because no Data row was ever made.
+     *
+     * A genuinely empty row is still skipped quietly. A row with real content but no address is now
+     * MARKED, because an address is the one thing that cannot be worked around: no address means no
+     * tracker row and no calendar event, and nobody can be sent to a house that was never named.
+     */
+    if (!addr && !body) {
+      var hasSomething = ['Seller Name', 'Phone', 'Email', 'Visit Date', 'Visit Time']
+        .some(function (f) { return String(inboxGet_(row, idx, f)).trim(); });
+      if (hasSomething) {
+        sh.getRange(rowNum, idx['Status'] + 1)
+          .setValue('NOT LOGGED: no Property Address — fill it in on this row, then re-run');
+        if (idx['Processed At'] != null) sh.getRange(rowNum, idx['Processed At'] + 1).setValue(new Date());
+        processed++; errors++;
+      }
+      continue;
+    }
     var tags = String(inboxGet_(row, idx, 'Tags')).toLowerCase();
     var blocked = INTAKE_SKIP_TAGS.filter(function (t) { return tags.indexOf(t) >= 0; });
     if (blocked.length) {
