@@ -35,27 +35,52 @@ export async function launchWhatsApp({ userDataDir, headless = false, timezone =
   return context;
 }
 
-/** Throws unless a logged-in session is present. A QR code means the session expired. */
+/**
+ * Throws unless a logged-in session is present. A QR code means the session expired.
+ *
+ * WhatsApp Web paints its shell well before the chat list arrives, so this WAITS for the list rather
+ * than checking once and judging. Checking immediately is what made a run fail with "chat list was
+ * not found" minutes after the doctor had found it without trouble — the doctor happened to sit for
+ * four seconds first, and the real path did not.
+ */
 export async function assertLoggedIn(page, selectors) {
   await page.goto(WHATSAPP_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
 
-  const qr = page.locator("canvas[aria-label*='scan' i], [data-testid='qrcode']").first();
-  if (await qr.isVisible().catch(() => false)) {
-    throw new Error('WhatsApp Web is showing a QR code — the session is not logged in. Run: npm run whatsapp:login');
+  const chatListSelector = (selectors.chatList || []).map(assertSafe).join(', ');
+  const qrSelector = "canvas[aria-label*='scan' i], [data-testid='qrcode']";
+
+  // Whichever appears first settles it: the chat list means logged in, a QR means it is not.
+  if (chatListSelector) {
+    await page.waitForSelector(`${chatListSelector}, ${qrSelector}`, { timeout: 60000 }).catch(() => {});
   }
-  const chatList = await firstVisible(page, selectors.chatList || []);
+
+  const qr = page.locator(qrSelector).first();
+  if (await qr.isVisible().catch(() => false)) {
+    throw new Error('WhatsApp Web is showing a QR code — the session is not logged in. Run: node scripts/whatsapp-login.mjs');
+  }
+
+  const chatList = await firstVisible(page, selectors.chatList || [], { perCandidateMs: 8000 });
   if (!chatList.locator) {
-    throw new Error('WhatsApp Web loaded but the chat list was not found. Run: npm run whatsapp:doctor');
+    throw new Error(
+      'WhatsApp Web loaded, no QR is showing, but the chat list never appeared within 60s.\n' +
+      'Run: node scripts/whatsapp-doctor.mjs   — it will report the page state and which selectors resolve.'
+    );
   }
 }
 
-/** First candidate selector that resolves to something visible, plus which one it was. */
-export async function firstVisible(page, candidates, { withinMs = 4000 } = {}) {
+/**
+ * First candidate selector that resolves to something visible, plus which one it was.
+ *
+ * Each candidate gets its own timeout rather than a share of one budget. Dividing a fixed budget
+ * meant that ADDING a fallback selector shortened the wait for the correct one — five candidates got
+ * 800ms each, which is not long enough for WhatsApp to paint.
+ */
+export async function firstVisible(page, candidates, { perCandidateMs = 1500 } = {}) {
   for (const selector of candidates) {
     assertSafe(selector);
     const locator = page.locator(selector).first();
-    const visible = await locator.isVisible({ timeout: withinMs / candidates.length }).catch(() => false);
+    const visible = await locator.isVisible({ timeout: perCandidateMs }).catch(() => false);
     if (visible) return { selector, locator };
   }
   return { selector: '', locator: null };
