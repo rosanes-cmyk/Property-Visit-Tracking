@@ -13,6 +13,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { google } from 'googleapis';
 import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
@@ -29,7 +30,24 @@ import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { acquireLock } from '../utils/lock.mjs';
 import { fieldFromDescription, localDay } from './plan.mjs';
 
+/*
+ * Bump this on every change shipped as a zip.
+ *
+ * Four separate diagnoses in this project have been wrong because a zip was extracted somewhere other
+ * than the folder Node loads from, and the old code kept running while the new behaviour was being
+ * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
+ * "did my update land?" is answered before anything else happens.
+ */
+const BUILD = '2026-08-03-note-4';
+
 const APPLY = process.argv.includes('--yes');
+
+/*
+ * --force ignores data/whatsapp-groups.json entirely and re-checks every visit against WhatsApp.
+ * For when the record and reality have parted company — groups deleted by hand, a state file copied
+ * between machines. Nothing is duplicated by it: WhatsApp is still asked what exists first.
+ */
+const FORCE = process.argv.includes('--force');
 
 /*
  * --only "text"  restricts the run to groups whose name contains that text, case-insensitively.
@@ -89,6 +107,13 @@ async function resolveCalendarId(calendar) {
 }
 
 async function main() {
+  // Printed first, before any work: which build this is, which file is really executing, and whether
+  // the note will be posted. Three facts that have each cost a wrong diagnosis when left unstated.
+  console.log(`Twin Visit Logger · WhatsApp watch · build ${BUILD}`);
+  console.log(`Running: ${fileURLToPath(import.meta.url)}`);
+  console.log(`Note posting: ${config.whatsappPostNote ? 'ON' : 'OFF (WHATSAPP_POST_NOTE=false)'}` +
+    `${FORCE ? ' · --force: ignoring the state file' : ''}\n`);
+
   if (!config.whatsappTeamNumbers.length && !config.whatsappIncludeSeller) {
     throw new Error('Nobody to add. Set WHATSAPP_TEAM_NUMBERS in .env (comma-separated).');
   }
@@ -140,7 +165,9 @@ async function main() {
      * recorded group as finished regardless is what left the first real group sitting in WhatsApp
      * with no note and no way back to it: the next run skipped the event before ever looking.
      */
-    alreadyDone: eventsFinished(state.groups, { requireNote: config.whatsappPostNote })
+    alreadyDone: FORCE
+      ? new Set()
+      : eventsFinished(state.groups, { requireNote: config.whatsappPostNote })
   });
 
   const create = ONLY ? planned.filter((p) => p.name.toLowerCase().includes(ONLY)) : planned;
@@ -166,6 +193,16 @@ async function main() {
 
   if (!create.length) {
     console.log('\nNothing to do.');
+    // "group already created" is a claim about the state FILE, and the file can be wrong — a group
+    // deleted by hand is still recorded in it. Say so, rather than leaving a dead end.
+    // The reason carries the group name — "group already created (1390 Estudillo Ave, …)" — so this
+    // matches on the prefix. An exact key lookup silently never fires, which is worse than no hint.
+    if (Object.keys(byReason).some((r) => r.startsWith('group already created'))) {
+      console.log('\nThose are recorded in data\\whatsapp-groups.json as already done. If a group was');
+      console.log('deleted by hand, or you want every visit re-checked against WhatsApp itself:');
+      console.log('  node src\\whatsapp\\watch.mjs --yes --force');
+      console.log('Nothing gets duplicated — WhatsApp is asked what exists before anything is created.');
+    }
     if (byReason['not a Property Visit event']?.length === events.length && events.length) {
       console.log('\nNONE of the events on this calendar are property visits. Either this is the');
       console.log('wrong calendar, or no visit has been booked yet. A visit event is titled');
