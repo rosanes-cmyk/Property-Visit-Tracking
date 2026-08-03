@@ -10,7 +10,7 @@
  *
  * The note below is copied verbatim from the live contact for 1390 Estudillo Ave.
  */
-import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
+import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes, labelledValue, extractCallSummary } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -111,6 +111,40 @@ const PLAIN = 'Spoke to the tenant. Gate code is 4471. Dog in the yard — call 
 check('ordinary prose is untouched', tidyReiNotes(PLAIN), PLAIN);
 check('empty stays empty', tidyReiNotes(''), '');
 check('undefined does not throw', tidyReiNotes(undefined), '');
+
+console.log('\n=== extractCallSummary: the judgement lines the VA already wrote ===');
+/*
+ * Motivation Level, Reason for Selling, Property Condition and Known Issues printed as blanks while the
+ * answers sat a few lines down the same notes, as labelled facts in the VA's call summary.
+ */
+const SUMMARY = 'CALL SUMMARY – August 3, 2026++ Contact Result: Answered++ ' +
+  'Seller Motivation: Not urgent, exploring options due to repair needs++ ' +
+  'Timeline: No pressure; visit tomorrow++ Price Expectation: Not specified.++ ' +
+  'Property Details: 4bd/4ba, needs repairs++ ' +
+  'Objections/Concerns: Cautious — wants Juan to visit first++ ' +
+  'Lead Temperature: WARM — engaged seller, cautious but moving forward';
+const cs = extractCallSummary(SUMMARY);
+
+// Grade then reason. Joining both sentences in full gave four clauses and three dashes for one idea.
+check('motivation is the grade then the reason',
+  cs.motivationLevel, 'Warm — Not urgent, exploring options due to repair needs');
+check('known issues come from Objections/Concerns',
+  cs.knownIssues, 'Cautious — wants Juan to visit first');
+check('property condition falls back to Property Details', cs.propertyCondition, '4bd/4ba, needs repairs');
+check('timeline', cs.timeline, 'No pressure; visit tomorrow');
+// "Not specified" is the VA saying there is no answer. A blank says that without dressing it up.
+check('"Not specified" reads as blank', cs.priceExpectation, '');
+check('no Reason for Selling label means blank', cs.reasonForSelling, '');
+
+console.log('\n--- labelledValue stops at the next field ---');
+check('stops at "++"', labelledValue('Timeline: tomorrow++ Price: 400k', 'Timeline'), 'tomorrow');
+check('stops at a newline', labelledValue('Timeline: tomorrow\nPrice: 400k', 'Timeline'), 'tomorrow');
+check('stops at a bullet', labelledValue('Timeline: tomorrow• Price: 400k', 'Timeline'), 'tomorrow');
+check('a missing label is blank', labelledValue('Nothing here', 'Timeline'), '');
+check('an empty value is blank', labelledValue('Timeline:', 'Timeline'), '');
+check('"N/A" is blank', labelledValue('Timeline: N/A', 'Timeline'), '');
+check('nothing at all', extractCallSummary('').motivationLevel, '');
+check('undefined does not throw', extractCallSummary(undefined).knownIssues, '');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

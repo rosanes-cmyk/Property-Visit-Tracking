@@ -50,69 +50,40 @@ for (const [what, value] of [
   ['assigned', 'Juan, Thea']
 ]) check(`${what} is present`, note.includes(value), true);
 check('beds/baths/sqft are combined on one line', note.includes('4 bd · 2.0 ba · 2,448 sqft'), true);
-check("REI's own notes are carried across", note.includes('Equity Percentage: 22%'), true);
+check("the REI link is present so the full notes are one tap away",
+  note.includes('reiblackbook.com/contacts/20473369'), true);
 
-console.log('\n=== The full REI notes and activity, not a one-line stand-in ===');
+console.log('\n=== The judgement lines are read from the call summary ===');
 /*
- * The team asked for "all of the REI notes" and were getting one line. REI's Notes and Activity are
- * multi-line blocks; both belong in the briefing, with their line breaks, because the appointment
- * history in there is a list and flattening it makes it unreadable.
+ * These printed as blanks while the answers sat a few lines further down the same notes. And the raw
+ * notes are no longer pasted in at all: dumping them produced a message thousands of characters long, and
+ * the client's answer on seeing it was "this was only needed in there... no other long notes".
  */
-const FULL = buildInspectionNote({
+const CALL = buildInspectionNote({
   propertyAddress: '1390 Estudillo Ave, San Leandro, CA 94577',
-  notes: 'Equity Percentage: 22%\nOwner wants to close before September.\nPrice: 450k discussed.',
-  latestActivity: 'Aug 1 - call, 4 min\nJul 28 - postcard responded',
-  nextAction: 'Juan to visit on August 4, 2026, at 11:00 AM'
+  notes: 'Estimated Value: $1,491,101\nOccupancy: Owner Occupied\n' +
+    'CALL SUMMARY++ Seller Motivation: Not urgent, exploring options++ Timeline: No pressure' +
+    '++ Property Details: 1390 Estudillo Ave, San Leandro, CA — 4bd/4ba, needs repairs' +
+    '++ Objections/Concerns: Cautious — wants Juan to visit first++ Lead Temperature: WARM — engaged'
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
 
-check('the notes heading is there', FULL.includes('📝 REI Notes:'), true);
-check('every notes line survives',
-  ['Equity Percentage: 22%', 'Owner wants to close before September.', 'Price: 450k discussed.']
-    .every((l) => FULL.includes(l)), true);
-check('the activity heading is there', FULL.includes('🕑 REI Activity:'), true);
-check('every activity line survives',
-  ['Aug 1 - call, 4 min', 'Jul 28 - postcard responded'].every((l) => FULL.includes(l)), true);
-check('next action is its own line',
-  FULL.includes('➡️ Next Action: Juan to visit on August 4, 2026, at 11:00 AM'), true);
-check('line breaks are preserved, not flattened', FULL.includes('22%\nOwner wants'), true);
+check('motivation is the grade then the reason',
+  CALL.includes('🌡️ Motivation Level: Warm — Not urgent, exploring options'), true);
+check('known issues come from Objections/Concerns',
+  CALL.includes('⚠️ Known Issues: Cautious — wants Juan to visit first'), true);
+check('occupancy comes from PropertyRadar', CALL.includes('👥 Occupancy: Owner Occupied'), true);
+// The address is already the first line of the message; repeating it read as a different property.
+check('property condition drops the repeated address',
+  CALL.includes('🔧 Property Condition: 4bd/4ba, needs repairs'), true);
+check('the appointment says what kind of visit it is',
+  CALL.includes('(In-Person Property Visit)'), true);
 
-console.log('\n--- and a long note says it was cut, rather than stopping mid-sentence ---');
-// A note that just stops reads as the whole story. Whoever is at the property needs to know there
-// is more of it in REI.
-const LONG = buildInspectionNote({ notes: 'x'.repeat(4000) }, {});
-check('it is truncated', LONG.includes('x'.repeat(4000)), false);
-check('...and says so', LONG.includes('truncated — the rest is on the REI contact'), true);
-
-console.log('\n--- absent blocks add no empty headings ---');
-check('no notes heading when REI had none', bare_.includes('📝 REI Notes:'), false);
-check('no activity heading when REI had none', bare_.includes('🕑 REI Activity:'), false);
-check('no next-action line when REI had none', bare_.includes('➡️ Next Action:'), false);
-
-console.log('\n=== Lines REI cannot fill appear as BLANKS, not omissions ===');
-// Dropping these would read as "there are no known issues", which is a different claim entirely.
-for (const label of ['Motivation Level', 'Reason for Selling', 'Occupancy', 'Property Condition', 'Known Issues']) {
-  check(`${label} is present and blank`, note.includes(`${label}: ${TO_FILL_IN}`), true);
-}
-for (const label of ['Estimated Value', 'Assessed Value', 'Estimated Open Loans Balance', 'Estimated Equity', 'Purchase Date']) {
-  check(`${label} is present and blank`, note.includes(`${label} - ${TO_FILL_IN}`), true);
-}
-/*
- * The heading now tells the truth about WHY those lines are blank, which is a different statement from
- * "these come from PropertyRadar". This fixture's notes carry no PropertyRadar block, so it must say
- * nobody has run one — not imply the numbers exist somewhere else and were left out.
- */
-check('with no PropertyRadar note, the heading says so',
-  note.includes('no PropertyRadar note on this contact yet'), true);
-check('and with one, it says where the numbers came from',
-  buildInspectionNote({ notes: 'Estimated Value: $1,491,101' }, {})
-    .includes('from the PropertyRadar note on the REI contact'), true);
-
-console.log('\n=== Missing facts become blanks too, never silent gaps ===');
-const bare = buildInspectionNote({}, {});
-check('a blank record still lists every line', bare.split('\n').filter((l) => l.includes(TO_FILL_IN)).length >= 10, true);
-check('...and does not invent an address', bare.includes(`Property: ${TO_FILL_IN}`), true);
-check('no beds line when REI had none', bare.includes('bd ·'), false);
-check('no REI-notes line when there were none', bare.includes('📝 From REI'), false);
+console.log('\n--- and the long dump is gone ---');
+check('no raw REI notes block', CALL.includes('📝 REI Notes:'), false);
+check('no activity block', CALL.includes('🕑 REI Activity:'), false);
+check('no call-summary bullets pasted in', CALL.includes('CALL SUMMARY'), false);
+check('the REI link is still there for anyone who wants the rest',
+  note.includes('https://my.reiblackbook.com/contacts/20473369'), true);
 
 console.log('\n=== The seller warning is opt-in and explicit ===');
 check('absent by default', note.includes('THE SELLER IS IN THIS GROUP'), false);

@@ -13,7 +13,9 @@
  * Covered by tests/whatsapp-note.test.mjs.
  */
 
-import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes } from './propertyradar.mjs';
+import {
+  extractPropertyRadar, hasAnyPropertyRadar, extractCallSummary
+} from './propertyradar.mjs';
 
 /** Lines nobody can fill from REI. Confirmed absent — see _notAvailableInRei in the selector config. */
 export const TO_FILL_IN = '_______';
@@ -66,7 +68,7 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     line('🧑', 'Seller', v('sellerName')),
     line('📞', 'Phone', v('phone')),
     line('🔗', 'Rei Blackbook Link', v('reiLink')),
-    line('📅', 'Appointment', appointmentText),
+    line('📅', 'Appointment', appointmentText && `${appointmentText} (In-Person Property Visit)`),
     line('📣', 'Lead Source', v('leadSource'))
   ];
 
@@ -99,27 +101,47 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   const toFill = [
     '',
     hasAnyPropertyRadar(radar)
-      ? '📊 Lead Summary  (from the PropertyRadar note on the REI contact)'
-      : '📊 Lead Summary  (no PropertyRadar note on this contact yet)',
+      ? '📊 Lead Summary:'
+      : '📊 Lead Summary:  (no PropertyRadar note on this contact yet)',
     `💵 Estimated Value - ${radar.estimatedValue || TO_FILL_IN}`,
     `🏛️ Assessed Value - ${radar.assessedValue || TO_FILL_IN}`,
     `🏦 Estimated Open Loans Balance - ${radar.openLoansBalance || TO_FILL_IN}`,
     `📈 Estimated Equity - ${radar.estimatedEquity || TO_FILL_IN}`,
     `🗓️ Purchase Date - ${radar.purchaseDate || TO_FILL_IN}`
   ];
-  if (radar.vestedOwner) toFill.push(`🧾 Vested Owner - ${radar.vestedOwner}`);
 
   /*
-   * REI has no field for any of these, and no note reliably carries them either — they are what the
-   * person standing at the property fills in. Occupancy is the exception: PropertyRadar reports it.
+   * The five judgement lines, taken from where the VA already wrote them.
+   *
+   * These printed as blanks while the answers sat a few lines further down the same notes: the call
+   * summary carries "Seller Motivation", "Lead Temperature", "Objections/Concerns" and "Property
+   * Details" as labelled facts. Occupancy comes from PropertyRadar. Nothing here is inferred or
+   * reworded — each line is the VA's own text or a blank, because paraphrasing a motivation read puts
+   * words in the mouth of whoever spoke to the seller.
    */
+  const summary = extractCallSummary(visit.notes || '');
+
+  /*
+   * "Property Details" in the call summary usually opens with the address, which is already the first
+   * line of this message. Repeating it there cost a line and read as though it might be a DIFFERENT
+   * property. Only a leading duplicate is removed; anything else the VA wrote stays.
+   */
+  let condition = summary.propertyCondition;
+  const address = v('propertyAddress');
+  if (condition && address) {
+    const head = address.split(',')[0].trim();
+    if (head && condition.toLowerCase().startsWith(head.toLowerCase())) {
+      condition = condition.replace(/^[^—–-]*[—–-]\s*/, '').trim() || condition;
+    }
+  }
+
   toFill.push(
     '',
-    line('🌡️', 'Motivation Level', ''),
-    line('🤝', 'Reason for Selling', ''),
+    line('🌡️', 'Motivation Level', summary.motivationLevel),
+    line('🤝', 'Reason for Selling', summary.reasonForSelling),
     line('👥', 'Occupancy', radar.occupancy),
-    line('🔧', 'Property Condition', ''),
-    line('⚠️', 'Known Issues', '')
+    line('🔧', 'Property Condition', condition),
+    line('⚠️', 'Known Issues', summary.knownIssues)
   );
 
   /*
@@ -130,18 +152,16 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * read. Multi-line values keep their line breaks — the appointment history in there is a list, and
    * flattening it to one paragraph makes it unreadable.
    */
-  const multiline = (key) => {
-    const raw = visit[key];
-    return raw === undefined || raw === null ? '' : String(raw).replace(/[ \t]+$/gm, '').trim();
-  };
-  const notes = tidyReiNotes(multiline('notes'));
-  const activity = multiline('latestActivity');
-  const nextAction = v('nextAction');
-
+  /*
+   * No raw notes dump.
+   *
+   * Pasting REI's whole notes field in produced a message thousands of characters long — engagement
+   * counters, a nine-bullet call summary, a comp verdict — and the client's answer on seeing it was
+   * "this was only needed in there... no other long notes". Everything worth carrying is now a labelled
+   * line above, read out of those same notes. The REI link is in the message for anyone who wants the
+   * rest, and it is one tap away.
+   */
   const tail = [];
-  if (notes) tail.push('', '📝 REI Notes:', clip_(notes, 3500));
-  if (activity) tail.push('', '🕑 REI Activity:', clip_(activity, 1200));
-  if (nextAction) tail.push('', `➡️ Next Action: ${nextAction}`);
 
   const warning = includeSellerWarning
     ? ['', '⚠️ THE SELLER IS IN THIS GROUP — do not post offer numbers, equity or motivation here.']

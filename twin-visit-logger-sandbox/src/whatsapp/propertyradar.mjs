@@ -133,3 +133,56 @@ export function tidyReiNotes(text) {
 
   return t.replace(/\n{3,}/g, '\n\n').replace(/•\s*$/gm, '').trim();
 }
+
+/**
+ * Read one labelled field out of the VA's call summary.
+ *
+ * The summary is a list of labelled facts separated by "++" or newlines — "Seller Motivation: Not
+ * urgent...", "Lead Temperature: WARM...", "Objections/Concerns: ...". Those are exactly the judgement
+ * lines the briefing was printing as blanks while the answers sat in the notes a few lines below.
+ *
+ * Stops at "++", a newline, or a bullet, so one field never swallows the next.
+ */
+export function labelledValue(text, label) {
+  const source = String(text || '');
+  const re = new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:\\s*([^\\n•]*?)(?=\\+\\+|\\n|•|$)`, 'i');
+  const found = re.exec(source);
+  if (!found) return '';
+  const value = found[1].replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '');
+  // "Not specified" / "N/A" are the VA saying there is no answer. A blank says the same thing without
+  // dressing it up as information.
+  return /^(not specified|n\/?a|none|unknown|tbd)$/i.test(value) ? '' : value;
+}
+
+/**
+ * The five judgement lines, read from the call summary where the VA has written them.
+ *
+ * Nothing is inferred or reworded — each line is either the VA's own text or blank. Paraphrasing a
+ * motivation read would put words in the mouth of whoever spoke to the seller.
+ */
+export function extractCallSummary(notesText) {
+  const t = String(notesText || '');
+  const temperature = labelledValue(t, 'Lead Temperature');
+  const motivation = labelledValue(t, 'Seller Motivation');
+
+  return {
+    /*
+     * "Warm — Not urgent, exploring options": the GRADE, then why.
+     *
+     * Only the grade is taken from Lead Temperature, not its whole sentence. Joining both in full gave
+     * "WARM — engaged seller — Not urgent — exploring options due to the repair needs" — four clauses and
+     * three dashes for one idea.
+     */
+    motivationLevel: (() => {
+      const grade = titleCase(temperature.split(/[—–-]/)[0].trim());
+      if (grade && motivation) return `${grade} — ${motivation}`;
+      return motivation || temperature;
+    })(),
+    reasonForSelling: labelledValue(t, 'Reason for Selling') || labelledValue(t, 'Reason for Sale'),
+    propertyCondition: labelledValue(t, 'Property Condition') || labelledValue(t, 'Property Details'),
+    knownIssues: labelledValue(t, 'Objections/Concerns') || labelledValue(t, 'Objections')
+      || labelledValue(t, 'Known Issues'),
+    timeline: labelledValue(t, 'Timeline'),
+    priceExpectation: labelledValue(t, 'Price Expectation')
+  };
+}
