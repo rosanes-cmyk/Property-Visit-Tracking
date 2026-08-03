@@ -126,5 +126,23 @@ if (!missing.length) {
   console.log('The Next arrow and the create button are only reachable mid-flow, so they are');
   console.log('exercised for real on the first run with --yes.');
 }
+/*
+ * The editable field in the participant picker has no testid, aria-label or title, so it never
+ * appears in the listing above — which is exactly why the first two rounds of guesses missed it.
+ * Dump the container's markup so it can be identified from real HTML instead of guessed at again.
+ */
+const inputAreaHtml = await page.evaluate(() => {
+  const box = document.querySelector("[data-testid='new-group-drawer-participants'] [data-testid='inputarea']")
+    || document.querySelector("[data-testid='inputarea']");
+  if (!box) return null;
+  return box.outerHTML.replace(/\s+/g, ' ').slice(0, 900);
+});
+if (inputAreaHtml) {
+  console.log('\n=== Inside the participant input container ===');
+  console.log(inputAreaHtml);
+  console.log('\n(The client clicks this container and types with the keyboard, so it does not need');
+  console.log('a selector for the inner element. This is here only for diagnosis.)');
+}
+
 console.log('\nNothing was created or sent.');
 await context.close();

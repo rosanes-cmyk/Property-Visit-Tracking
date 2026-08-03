@@ -40,14 +40,35 @@ async function writeState(state) {
 
 /** Same rule as the calendar module: match by name so a shared calendar is found, and fail loudly. */
 async function resolveCalendarId(calendar) {
-  const wanted = String(config.calendarName || '').trim();
-  if (!wanted) return config.calendarId;
   const list = await calendar.calendarList.list({ maxResults: 250 });
-  const hit = (list.data.items || []).find(
-    (c) => String(c.summary || '').trim().toLowerCase() === wanted.toLowerCase()
-  );
-  if (!hit) throw new Error(`Calendar named "${wanted}" is not in this account's calendar list.`);
-  return hit.id;
+  const all = list.data.items || [];
+  const wanted = String(config.calendarName || '').trim();
+
+  if (!wanted) {
+    // Falling back to CALENDAR_ID silently is how a run ends up reading somebody's personal primary
+    // calendar, finding 29 unrelated meetings, and reporting "nothing to do" as if all were well.
+    const fallback = all.find((c) => c.id === config.calendarId);
+    console.log(`WARNING: CALENDAR_NAME is not set in .env, so this is using CALENDAR_ID.`);
+    console.log(`         That resolves to: ${config.calendarId}` +
+      (fallback ? ` ("${fallback.summary}")` : ' (not in this account\'s calendar list)'));
+    console.log(`         For the property visits, set:  CALENDAR_NAME=Juan's Official Calendar`);
+    console.log(`         Calendars this account can see:`);
+    for (const c of all) console.log(`           - "${c.summary}"  [${c.accessRole}]`);
+    console.log('');
+    return { id: config.calendarId, name: fallback ? fallback.summary : '(unknown)' };
+  }
+
+  const hit = all.find((c) => String(c.summary || '').trim().toLowerCase() === wanted.toLowerCase());
+  if (!hit) {
+    throw new Error(
+      `Calendar named "${wanted}" is not in this account's calendar list.\n` +
+      `This account can see:\n` +
+      all.map((c) => `  - "${c.summary}"  [${c.accessRole}]`).join('\n') +
+      `\n\nIf Juan's calendar is not listed, the wrong Google account is authorized. ` +
+      `Delete credentials/token.json and run: node scripts/google-auth.mjs`
+    );
+  }
+  return { id: hit.id, name: hit.summary };
 }
 
 async function main() {
@@ -74,7 +95,8 @@ async function main() {
 
   const auth = await authorizeGoogle();
   const calendar = google.calendar({ version: 'v3', auth });
-  const calendarId = await resolveCalendarId(calendar);
+  const target = await resolveCalendarId(calendar);
+  const calendarId = target.id;
 
   const now = new Date();
   const res = await calendar.events.list({
@@ -98,17 +120,28 @@ async function main() {
     alreadyDone: new Set(Object.keys(state.groups))
   });
 
-  console.log(`Calendar: ${calendarId}`);
+  console.log(`Calendar: "${target.name}"  (${calendarId})`);
   console.log(`${events.length} event(s) in the next ${config.whatsappLookaheadDays} days`);
   console.log(`${create.length} group(s) to create · ${skipped.length} skipped\n`);
 
-  for (const s of skipped) {
-    const title = s.event?.summary || '(no title)';
-    if (s.reason === 'not a Property Visit event') continue;   // other people's meetings, not news
-    console.log(`  skip: ${title} — ${s.reason}`);
+  // Group the skips by reason. A bare "29 skipped" hides the difference between "29 unrelated
+  // meetings, working as intended" and "pointed at entirely the wrong calendar".
+  const byReason = {};
+  for (const s of skipped) (byReason[s.reason] = byReason[s.reason] || []).push(s.event?.summary || '(no title)');
+  for (const reason of Object.keys(byReason)) {
+    const titles = byReason[reason];
+    console.log(`  ${titles.length} × ${reason}`);
+    for (const t of titles.slice(0, 5)) console.log(`      ${t}`);
+    if (titles.length > 5) console.log(`      …and ${titles.length - 5} more`);
   }
+
   if (!create.length) {
     console.log('\nNothing to do.');
+    if (byReason['not a Property Visit event']?.length === events.length && events.length) {
+      console.log('\nNONE of the events on this calendar are property visits. Either this is the');
+      console.log('wrong calendar, or no visit has been booked yet. A visit event is titled');
+      console.log('"Property Visit - <address>" and is created by the tracker, not by hand.');
+    }
     return;
   }
 

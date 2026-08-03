@@ -132,9 +132,15 @@ export async function createGroup(page, selectors, { name, participants, apply =
   if (!picker.locator) throw new Error('Could not find the participant search box. Run: npm run whatsapp:doctor');
 
   for (const person of participants) {
-    await picker.locator.fill('').catch(() => {});
-    await picker.locator.type(person.number, { delay: 40 });
-    await page.waitForTimeout(1200);
+    // Typed through the KEYBOARD, not into a located element. The editable field inside
+    // [data-testid='inputarea'] carries no testid, aria-label or title, so no selector finds it
+    // reliably — but clicking the container focuses it, and keyboard input then lands correctly.
+    // This also survives WhatsApp swapping the inner element, which it does often.
+    await picker.locator.click().catch(() => {});
+    await page.keyboard.press('Control+A').catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+    await page.keyboard.type(person.number, { delay: 40 });
+    await page.waitForTimeout(1400);
 
     const rows = page.locator((selectors.participantResults || []).join(', ') || "[role='listitem']");
     const rowCount = await rows.count().catch(() => 0);
@@ -177,7 +183,9 @@ export async function createGroup(page, selectors, { name, participants, apply =
   const subject = await firstVisible(page, selectors.groupSubjectInput || []);
   if (!subject.locator) throw new Error('Could not find the group subject field. Run: npm run whatsapp:doctor');
   await subject.locator.click();
-  await page.keyboard.type(name, { delay: 30 });
+  await page.keyboard.press('Control+A').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await page.keyboard.type(name, { delay: 30 });   // keyboard, for the same reason as above
   await page.waitForTimeout(400);
   step(`typed subject "${name}"`);
 
