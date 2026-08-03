@@ -143,3 +143,51 @@ What it will and will not do:
 - **The right task only.** Phone *and* date must both match. A seller with two properties has two
   tasks, and completing the wrong one would hide a visit that is still coming.
 - **Nothing happens without `--yes`.** The dry run reports what it would complete and why.
+
+## Running it without PowerShell
+
+Two scheduled tasks, installed in one command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1
+```
+
+| Task | Every | What it does |
+|---|---|---|
+| Twin Visit Logger Sandbox | 2 min | REI email → scrape → sheet → Juan's calendar |
+| Twin Visit Logger WhatsApp | 15 min | creates the WhatsApp group for any new visit |
+
+The WhatsApp one runs far less often on purpose: a group does not need to exist within two minutes of
+a booking, it drives a second browser, and hitting WhatsApp Web every couple of minutes is how an
+account attracts attention.
+
+Change either interval:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1 -IntervalMinutes 3 -WhatsAppIntervalMinutes 30
+```
+
+REI only, no WhatsApp: add `-SkipWhatsApp`.
+
+Watch what they do:
+
+```powershell
+Get-Content logs\scheduled-task.log -Tail 30
+Get-Content logs\whatsapp-task.log -Tail 30
+```
+
+Stop everything:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows-task.ps1
+```
+
+Things to know:
+
+- **They only run while you are logged in to Windows.** If the PC sleeps, nothing runs; the next run
+  after it wakes picks up whatever accumulated.
+- Both run hidden — no window appears, nothing steals focus.
+- Each has its own run lock, so an overlapping launch exits instead of two browsers fighting over the
+  same profile. Overlaps waste a launch; they never duplicate a row, an event or a group.
+- Sessions expire. If the log starts saying REI wants a login, run `node scripts\rei-login.mjs`; if it
+  says WhatsApp is showing a QR, run `node scripts\whatsapp-login.mjs`.

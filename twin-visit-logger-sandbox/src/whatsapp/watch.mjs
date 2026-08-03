@@ -20,6 +20,7 @@ import { launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
+import { acquireLock } from '../utils/lock.mjs';
 import { fieldFromDescription, localDay } from './plan.mjs';
 
 const APPLY = process.argv.includes('--yes');
@@ -301,7 +302,22 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
   }
 }
 
-main().catch((error) => {
+/*
+ * A second run must not start while one is in flight. Playwright's persistent profile is locked by
+ * the running instance, so an overlapping launch cannot open WhatsApp at all — and on a schedule
+ * that would look like a random failure rather than two runs colliding. Its own named lock, separate
+ * from the REI scrape's, so the two schedules never block each other.
+ */
+const release = await acquireLock('whatsapp');
+if (!release) {
+  console.log('Another WhatsApp run is still going — exiting so the two do not collide.');
+  process.exit(0);
+}
+try {
+  await main();
+} catch (error) {
   console.error(`\nFailed: ${error.message}`);
+  await release();
   process.exit(1);
-});
+}
+await release();
