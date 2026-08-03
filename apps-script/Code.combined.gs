@@ -505,7 +505,25 @@ function buildBoard_(ss) {
         gift = colL('Gift Status'), handoff = colL('Transaction Handoff Status'), disp2 = colL('Final Disposition'),
         addr = colL('Property Address'), src = colL('Source');
 
+  const hdr = ['Address','Seller','Stage','Next Action','Owner','Due','Days Overdue','Blocker','Last Contact Result','REI Link'];
+  /*
+   * Section 0 exists because of a straightforward gap: every other section filters on a stage like
+   * Verbal Agreement, Offer Sent, Stalled or Days Overdue > 0, and a visit that has merely been BOOKED
+   * matches none of them. So the one thing this automation creates — an upcoming property visit — could
+   * not appear on the board at all until it went overdue or became an exception. A visit booked for
+   * tomorrow is the most actionable row in the workbook, and it was the only one with nowhere to sit.
+   *
+   * It carries its own select and header so the date column shows the VISIT date rather than the next
+   * action due date, which is the date that matters for a visit that has not happened yet.
+   */
+  const upcomingSel = disp.map(function (d) {
+    return colL(d === 'Next Action Due Date' ? 'Visit Date' : d);
+  }).join(',');
+  const upcomingHdr = hdr.map(function (h) { return h === 'Due' ? 'Visit Date' : h; });
+
   const sections = [
+    ['0. Visits Booked — Upcoming', stage + "='Visit Scheduled'", colL('Visit Date'),
+      upcomingSel, upcomingHdr],
     ['1. Contracts Possible This Week', '(' + stage + "='Verbal Agreement' or " + stage + "='Contract Sent' or " + stage + "='Active Negotiation')", prio + ' desc, ' + due],
     ['2. Visited — No Offer Decision', stage + "='Visit Completed — Needs Review'", ov + ' desc, ' + due],
     ['3. Offer Sent — Follow-Up Due', stage + "='Offer Sent'", ov + ' desc, ' + due],
@@ -517,17 +535,20 @@ function buildBoard_(ss) {
     ['9. Revival Opportunities', '(' + disp2 + "='Lost' and " + colL('Days Since Last Activity') + '>=45)', colL('Days Since Last Activity') + ' desc'],
     ['10. Exceptions Requiring Review', '(' + dq + "='Exception' or " + dq + "='Incomplete')", stage],
   ];
-  const hdr = ['Address','Seller','Stage','Next Action','Owner','Due','Days Overdue','Blocker','Last Contact Result','REI Link'];
   let row = 4;
   sections.forEach(function(s){
     sh.getRange(row,1,1,10).merge().setValue(s[0]).setFontWeight('bold').setFontSize(12)
       .setFontColor('#ffffff').setBackground('#2e75b6');
     row++;
-    sh.getRange(row,1,1,hdr.length).setValues([hdr]).setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
+    // A section may override the columns it selects and their headers (see section 0).
+    const sectionSel = s[3] || sel;
+    const sectionHdr = s[4] || hdr;
+    sh.getRange(row,1,1,sectionHdr.length).setValues([sectionHdr])
+      .setFontWeight('bold').setBackground('#ddebf7').setFontSize(9);
     row++;
     // live Board excludes Source=TEST records (they live in the Test Data sheet)
     const q = '=IFERROR(QUERY(' + CFG.DATA_SHEET + '!A' + CFG.FIRST_DATA_ROW + ':BZ' + CFG.MAX_ROWS + ',' +
-      '"select ' + sel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and " + s[1] + ' order by ' + s[2] +
+      '"select ' + sectionSel + ' where ' + addr + ' is not null and ' + src + " <> 'TEST' and " + s[1] + ' order by ' + s[2] +
       ' limit 50",0),"— none —")';
     sh.getRange(row,1).setFormula(q);
     row += 8;
