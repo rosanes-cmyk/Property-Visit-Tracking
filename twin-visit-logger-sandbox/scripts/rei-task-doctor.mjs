@@ -57,5 +57,50 @@ if (tasks.length) {
   console.log('  Skipped — no task row to look inside.');
 }
 
+/*
+ * Dump what IS inside the row.
+ *
+ * Reporting "no match" for six candidates says the guesses were wrong and nothing about what is right.
+ * Every WhatsApp selector in this project was resolved by dumping real markup and reading the answer off
+ * it, and a run has now failed with "no completion control found inside the task row" — so the same
+ * approach applies here. This prints the row's own HTML and every identifiable element in it.
+ */
+if (tasks.length) {
+  const row = page.locator(tasks[0].selector).nth(tasks[0].index);
+
+  console.log('\n=== Everything identifiable INSIDE the first task row ===');
+  const inside = await row.evaluate((el) => {
+    const out = [];
+    for (const node of el.querySelectorAll('*')) {
+      const attrs = ['data-testid', 'data-test', 'aria-label', 'role', 'title', 'type', 'name', 'id'];
+      const found = attrs.filter((a) => node.getAttribute(a)).map((a) => `${a}='${node.getAttribute(a)}'`);
+      const clickable = ['BUTTON', 'INPUT', 'A', 'SVG'].includes(node.tagName)
+        || node.getAttribute('role') || node.onclick || (node.className || '').toString().includes('btn');
+      if (!found.length && !clickable) continue;
+      const box = node.getBoundingClientRect();
+      out.push({
+        tag: node.tagName.toLowerCase(),
+        attrs: found.join(' '),
+        cls: String(node.className || '').slice(0, 60),
+        text: (node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40),
+        visible: box.width > 0 && box.height > 0
+      });
+    }
+    return out.slice(0, 40);
+  }).catch(() => []);
+
+  for (const el of inside) {
+    console.log(`  ${el.visible ? 'visible' : 'hidden '} <${el.tag}> ${el.attrs}` +
+      `${el.cls ? `  class="${el.cls}"` : ''}${el.text ? `  "${el.text}"` : ''}`);
+  }
+  if (!inside.length) console.log('  Nothing with an identifying attribute. The row markup below is the only lead.');
+
+  console.log('\n=== The task row markup (first 2500 chars) ===');
+  const html = await row.evaluate((el) => el.outerHTML.replace(/\s+/g, ' ')).catch(() => '');
+  console.log(html.slice(0, 2500) || '  (could not read the row HTML)');
+  console.log('\nPaste the two sections above back and the completeControl selector can be corrected');
+  console.log('from real markup instead of guessed at a third time.');
+}
+
 console.log('\nNothing was clicked. Put any corrections into the "tasks" block of config/rei-selectors.json.');
 await context.close();
