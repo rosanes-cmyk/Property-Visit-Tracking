@@ -58,16 +58,18 @@
     "[data-testid='drawer-left'] [role='button'][aria-label='Create group']"
   ],
   "conversationTitle": [
+    "#main header",
+    "#main header span[dir='auto']",
+    "#main header span[title]",
     "[data-testid='conversation-info-header'] [data-testid='cell-frame-title']",
-    "header [data-testid='cell-frame-title']",
-    "header span[title]",
     "[data-testid='conversation-header'] span[title]"
   ],
   "messageBox": [
-    "footer div[contenteditable='true']",
-    "[data-testid='conversation-compose-box-input']",
-    "div[contenteditable='true'][data-tab='10']",
-    "footer [role='textbox']"
+    "#main footer div[contenteditable='true']",
+    "#main div[contenteditable='true'][data-tab='10']",
+    "#main footer [role='textbox']",
+    "#main [data-testid='conversation-compose-box-input']",
+    "footer div[contenteditable='true']"
   ],
-  "_postingComment": "conversationTitle and messageBox are UNCONFIRMED - the message box was never on screen during a doctor run. This is acceptable ONLY because postGroupNote verifies the open conversation's title matches the group name before typing: a wrong messageBox selector then finds nothing and posts nothing, instead of posting into whatever chat happens to be open."
+  "_postingComment": "CONFIRMED behaviour on this build (2026-08-03 run): the conversation header's title ATTRIBUTE reads 'click here for group info', not the group name - so the rendered text is read first and WhatsApp's furniture is filtered by plausibleTitle() in post-gate.mjs. '#main header' is listed first for that reason: its innerText begins with the real subject. conversationTitle and messageBox are scoped to #main - WhatsApp's conversation panel - which is the whole safety story. #main exists ONLY while a conversation is open, so a stale selector resolves to nothing rather than to the left pane's header or the search box. An earlier unscoped 'header span[title]' could match the CHAT LIST header and report a title while no chat was open at all. Confirm them on your build with: node scripts/whatsapp-doctor.mjs --open \"<an existing group name>\"."
 }

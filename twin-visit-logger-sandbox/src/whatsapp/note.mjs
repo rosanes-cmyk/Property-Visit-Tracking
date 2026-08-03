@@ -16,6 +16,13 @@
 /** Lines nobody can fill from REI. Confirmed absent — see _notAvailableInRei in the selector config. */
 export const TO_FILL_IN = '_______';
 
+/**
+ * The heading every note starts with — and therefore how a note is recognised again later, which is
+ * what stops a second run posting a duplicate into the same group. Defined here, next to the text it
+ * heads, so the two cannot drift apart.
+ */
+export const NOTE_MARKER = '🏠 PROPERTY INSPECTION';
+
 function line(icon, label, value) {
   return `${icon} ${label}: ${value || TO_FILL_IN}`;
 }
@@ -31,7 +38,7 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   };
 
   const facts = [
-    '🏠 PROPERTY INSPECTION',
+    NOTE_MARKER,
     line('📍', 'Property', v('propertyAddress')),
     line('🧑', 'Seller', v('sellerName')),
     line('📞', 'Phone', v('phone')),

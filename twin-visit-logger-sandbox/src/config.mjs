@@ -59,10 +59,12 @@ const raw = {
   // visit is confirmed on the calendar and in a WhatsApp group. Off unless explicitly enabled.
   // Everything else about REI stays read-only.
   reiCompleteTasks: bool(process.env.REI_COMPLETE_TASKS, false),
-  // Post the PROPERTY INSPECTION note into the group after creating it. OFF by default: this is the
-  // only thing in the project that sends a message to real people. It refuses outright if the note
-  // carries anything a seller must not read and a seller is in the group.
-  whatsappPostNote: bool(process.env.WHATSAPP_POST_NOTE, false),
+  // Post the PROPERTY INSPECTION note into the group after creating it. ON by default, because a
+  // group with no briefing in it is not what was asked for — the note IS the deliverable, the group is
+  // just where it goes. Set WHATSAPP_POST_NOTE=false to create groups silently.
+  // It still refuses outright if the note carries anything a seller must not read and a seller is in
+  // the group, and it only ever types into a conversation whose header it has verified.
+  whatsappPostNote: bool(process.env.WHATSAPP_POST_NOTE, true),
   // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
   // US sellers read from REI. A number that already has a country code is used as-is, and one
   // starting with a 0 (a local trunk prefix) is refused rather than guessed at.

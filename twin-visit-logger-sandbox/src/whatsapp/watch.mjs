@@ -8,7 +8,8 @@
  * workbook's Apps Script — so watching the calendar covers every way a visit gets booked, and there
  * is exactly one definition of "a visit is happening".
  *
- * It never sends a message. It creates the group and stops.
+ * The one message it posts is the inspection note, into the group it just created and nowhere else —
+ * WHATSAPP_POST_NOTE=false turns that off. It never messages a seller and never replies to anyone.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,8 +17,12 @@ import { google } from 'googleapis';
 import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
 import { planForEvents, suspiciousNumber } from './plan.mjs';
-import { launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers, postGroupNote } from './client.mjs';
+import {
+  launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers, postGroupNote,
+  openGroupByName
+} from './client.mjs';
 import { buildInspectionNote, containsSellerSensitive } from './note.mjs';
+import { eventsFinished } from './post-gate.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
@@ -25,6 +30,16 @@ import { acquireLock } from '../utils/lock.mjs';
 import { fieldFromDescription, localDay } from './plan.mjs';
 
 const APPLY = process.argv.includes('--yes');
+
+/*
+ * --only "text"  restricts the run to groups whose name contains that text, case-insensitively.
+ * For trying something out on the test lead without touching a real seller's visit:
+ *   node src/whatsapp/watch.mjs --yes --only "Test, Test"
+ */
+const ONLY = (() => {
+  const i = process.argv.indexOf('--only');
+  return i >= 0 ? String(process.argv[i + 1] || '').trim().toLowerCase() : '';
+})();
 const STATE_FILE = path.resolve('./data/whatsapp-groups.json');
 
 async function readState() {
@@ -112,7 +127,7 @@ async function main() {
   const events = res.data.items || [];
 
   const state = await readState();
-  const { create, skipped } = planForEvents(events, {
+  const { create: planned, skipped } = planForEvents(events, {
     timezone: config.calendarTimezone,
     teamNumbers: config.whatsappTeamNumbers,
     includeSeller: config.whatsappIncludeSeller,
@@ -120,8 +135,19 @@ async function main() {
     defaultCountry: config.phoneDefaultCountry,
     template: config.whatsappGroupTemplate,
     now,
-    alreadyDone: new Set(Object.keys(state.groups))
+    /*
+     * "Done" means the group exists AND, when note posting is on, the note is in it. Treating a
+     * recorded group as finished regardless is what left the first real group sitting in WhatsApp
+     * with no note and no way back to it: the next run skipped the event before ever looking.
+     */
+    alreadyDone: eventsFinished(state.groups, { requireNote: config.whatsappPostNote })
   });
+
+  const create = ONLY ? planned.filter((p) => p.name.toLowerCase().includes(ONLY)) : planned;
+  if (ONLY) {
+    console.log(`--only "${ONLY}" → ${create.length} of ${planned.length} kept; ` +
+      `${planned.length - create.length} left alone this run\n`);
+  }
 
   console.log(`Calendar: "${target.name}"  (${calendarId})`);
   console.log(`${events.length} event(s) in the next ${config.whatsappLookaheadDays} days`);
@@ -173,13 +199,22 @@ async function main() {
      * find it — and tells us definitively which numbers have no WhatsApp account at all.
      */
     const everyNumber = [...new Set(create.flatMap((p) => p.participants.map((x) => x.number)))];
-    console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
-    const reach = await warmUpNumbers(page, everyNumber, selectors);
-    if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
-    if (reach.notOnWhatsApp.length) {
-      console.log(`  NO WhatsApp account: ${reach.notOnWhatsApp.join(', ')}`);
-      console.log('  Those cannot be added by anyone, automation or not. Check the digits, or the');
-      console.log('  person genuinely does not use WhatsApp on that number.');
+
+    // A run where every group already exists is only here to post a missing note — no picker is
+    // involved, so there is nothing to warm up. Skipping it also avoids opening four chats for no
+    // reason, which is a visible act in someone else's WhatsApp.
+    const needsPicker = create.some((p) => !state.groups[p.eventId]?.name);
+    if (!needsPicker) {
+      console.log('\nEvery group already exists — skipping the number warm-up; this run only posts notes.');
+    } else {
+      console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
+      const reach = await warmUpNumbers(page, everyNumber, selectors);
+      if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
+      if (reach.notOnWhatsApp.length) {
+        console.log(`  NO WhatsApp account: ${reach.notOnWhatsApp.join(', ')}`);
+        console.log('  Those cannot be added by anyone, automation or not. Check the digits, or the');
+        console.log('  person genuinely does not use WhatsApp on that number.');
+      }
     }
 
     for (const plan of create) {
@@ -189,8 +224,24 @@ async function main() {
       // makes a lost state file harmless instead of a source of duplicate groups.
       if (await groupExists(page, selectors, plan.name)) {
         console.log('    already exists on WhatsApp — recording it, not creating another');
-        state.groups[plan.eventId] = { name: plan.name, foundExisting: true, at: new Date().toISOString() };
+        state.groups[plan.eventId] = {
+          ...(state.groups[plan.eventId] || {}),
+          name: plan.name,
+          foundExisting: true,
+          at: new Date().toISOString()
+        };
         await writeState(state);
+
+        // ...and it may still be missing its note — that is precisely why it came round again.
+        if (config.whatsappPostNote) {
+          const opened = await openGroupByName(page, selectors, plan.name);
+          if (!opened.opened) {
+            console.log(`    could not open it to post the note: ${opened.reason}`);
+          } else if (await maybePostNote(page, selectors, plan)) {
+            state.groups[plan.eventId].notePosted = true;
+            await writeState(state);
+          }
+        }
         continue;
       }
 
@@ -211,7 +262,10 @@ async function main() {
         };
         await writeState(state);
         console.log('    recorded');
-        await maybePostNote(page, selectors, plan);
+        if (await maybePostNote(page, selectors, plan)) {
+          state.groups[plan.eventId].notePosted = true;
+          await writeState(state);
+        }
       }
     }
   } finally {
@@ -226,16 +280,19 @@ async function main() {
 }
 
 /**
- * Post the inspection note into the group just created.
+ * Post the inspection note into the group, which must already be the conversation on screen.
  *
- * Off unless WHATSAPP_POST_NOTE=true. The note carries the facts REI holds and leaves the rest as
+ * Returns true when the note is in the group — including when it was already there from an earlier
+ * run, because the caller records "this event needs nothing more", not "keys were pressed".
+ *
+ * On unless WHATSAPP_POST_NOTE=false. The note carries the facts REI holds and leaves the rest as
  * visible blanks, because REI has no fields for motivation, occupancy, condition, known issues or any
  * of the PropertyRadar figures.
  */
 async function maybePostNote(page, selectors, plan) {
   if (!config.whatsappPostNote) {
-    console.log('    note not posted (set WHATSAPP_POST_NOTE=true to enable)');
-    return;
+    console.log('    note not posted (WHATSAPP_POST_NOTE=false)');
+    return false;
   }
 
   const from = (label) => fieldFromDescription(plan.rawDescription, label);
@@ -260,7 +317,7 @@ async function maybePostNote(page, selectors, plan) {
     if (sensitive.length) {
       console.log(`    NOTE NOT POSTED — the seller is in this group and the note covers: ${sensitive.join(', ')}`);
       console.log('    Either set WHATSAPP_INCLUDE_SELLER=false, or post a shortened note by hand.');
-      return;
+      return false;
     }
   }
 
@@ -270,6 +327,7 @@ async function maybePostNote(page, selectors, plan) {
     apply: APPLY
   });
   console.log(`    note: ${posted.reason}`);
+  return posted.posted;
 }
 
 /**

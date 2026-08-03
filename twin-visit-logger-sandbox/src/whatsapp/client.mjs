@@ -8,13 +8,15 @@
  * `npm run whatsapp:doctor` after any WhatsApp update; its markup changes often.
  *
  * Hard rules, enforced in code below:
- *   - This module NEVER sends a message. There is no send function, and the composer is never typed
- *     into. It creates a group and stops.
+ *   - postGroupNote is the ONLY function that sends anything, and only into a conversation whose
+ *     header it has confirmed matches the group name. Nothing else touches the composer.
  *   - Nothing happens unless apply is true. The default path opens, looks, and reports.
  *   - A participant is only clicked when the contact row confirms the number we searched for.
+ *   - No selector that could match a send/delete/leave control is ever used (assertSafe).
  */
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { plausibleTitle, titlesMatch, noteAlreadyPresent } from './post-gate.mjs';
 
 export const WHATSAPP_URL = 'https://web.whatsapp.com/';
 
@@ -316,47 +318,127 @@ export async function createGroup(page, selectors, { name, participants, apply =
 }
 
 /**
- * Post ONE message into the group that was just created.
+ * Read the title of the conversation currently open, or '' if none is.
+ *
+ * Scoped to `#main` — WhatsApp's conversation panel — for a reason that cost a whole run: an
+ * unscoped `header span[title]` can match the LEFT pane's header, so it reported a title while no
+ * conversation was open at all. `#main` exists only when a conversation is open, which makes its
+ * absence the answer rather than a false positive.
+ *
+ * The header reads "<subject>\n<participant list>", so only the first line is the title.
+ *
+ * The RENDERED TEXT is read before the title attribute, and WhatsApp's own furniture is filtered out,
+ * because the header's title attribute says "click here for group info" — reading that first is what
+ * made a run refuse to post into two correctly-created groups.
+ */
+export async function readConversationTitle(page, selectors) {
+  for (const candidate of selectors.conversationTitle || []) {
+    assertSafe(candidate);
+    const el = page.locator(candidate).first();
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const text = plausibleTitle((await el.innerText().catch(() => '')) || '');
+    if (text) return text;
+    const attr = plausibleTitle((await el.getAttribute('title').catch(() => '')) || '');
+    if (attr) return attr;
+  }
+  return '';
+}
+
+/** Wait until the named conversation is the one on screen. Returns the title it settled on. */
+export async function waitForConversation(page, selectors, name, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '';
+  // WhatsApp opens a freshly created group by itself, but it takes a moment and the header paints
+  // after the message panel does. Polling beats one fixed pause, which is what made the first
+  // note-posting attempt read an empty header and refuse.
+  for (;;) {
+    last = await readConversationTitle(page, selectors);
+    if (titlesMatch(last, name)) return last;
+    if (Date.now() >= deadline) return last;
+    await page.waitForTimeout(700);
+  }
+}
+
+/**
+ * Open an existing group by exact subject. Search, click the row that matches, confirm the header.
+ *
+ * Used to repair a group that was created before note posting worked: it can be opened and given its
+ * note without anyone deleting and rebuilding it.
+ */
+export async function openGroupByName(page, selectors, name) {
+  const search = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 8000 });
+  if (!search.locator) return { opened: false, reason: 'could not find the search box' };
+
+  await search.locator.click();
+  await search.locator.fill(name).catch(async () => { await page.keyboard.type(name); });
+  await page.waitForTimeout(1400);
+
+  const rows = page.locator((selectors.searchResultTitles || []).join(', ') || "[role='listitem'] span[title]");
+  const count = await rows.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const row = rows.nth(i);
+    const attr = (await row.getAttribute('title').catch(() => '')) || '';
+    const text = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    if (attr.trim() !== name && text !== name) continue;
+    await row.click().catch(() => {});
+    const header = await waitForConversation(page, selectors, name);
+    return titlesMatch(header, name)
+      ? { opened: true, reason: 'opened', header }
+      : { opened: false, reason: `clicked the row but the header reads "${header || '(nothing)'}"` };
+  }
+  await clearSearch(page, search.locator);
+  return { opened: false, reason: 'no chat with that exact name in the search results' };
+}
+
+/** Everything visible in the open conversation. Used to spot a note this run already posted. */
+async function conversationText(page) {
+  return await page.evaluate(() => {
+    const main = document.querySelector('#main');
+    return main ? (main.innerText || '') : '';
+  }).catch(() => '');
+}
+
+/**
+ * Post ONE message into a group.
  *
  * This is the only place in the project that sends anything, and it is deliberately hard to misuse:
  *
- *   1. It verifies the OPEN CONVERSATION's header matches the group name it was given. If the header
- *      says anything else — a seller's 1:1 chat left open by the warm-up, another group, nothing at
- *      all — it refuses. Typing into whatever happens to be focused and pressing Enter is how
- *      automation messages the wrong person.
- *   2. It refuses if the text carries anything a seller must not read, when a seller is in the group.
- *   3. It sends once. There is no retry, because a retry that misfires sends twice.
- *
- * The composer selectors are UNCONFIRMED — WhatsApp's message box was never on screen during the
- * doctor run. The header check is what makes that acceptable: a wrong composer selector fails to
- * find anything and posts nothing, rather than posting somewhere unintended.
+ *   1. It WAITS for the open conversation's header to match the group name it was given, then checks
+ *      it. If the header says anything else — a seller's 1:1 chat left open by the warm-up, another
+ *      group, nothing at all — it refuses. Typing into whatever happens to be focused and pressing
+ *      Enter is how automation messages the wrong person.
+ *   2. It refuses if the group already contains the note, so re-running never posts twice.
+ *   3. The composer is looked up INSIDE `#main`, so even a stale selector cannot resolve to the
+ *      search box or to another panel's text field.
+ *   4. It sends once. There is no retry, because a retry that misfires sends twice.
  */
 export async function postGroupNote(page, selectors, { groupName, text, apply = false }) {
-  const report = { posted: false, reason: '' };
+  const report = { posted: false, alreadyThere: false, reason: '' };
 
   // --- 1. Is the right conversation actually open? ---
-  const headerCandidates = selectors.conversationTitle || [];
-  let header = '';
-  for (const candidate of headerCandidates) {
-    const el = page.locator(candidate).first();
-    if (!(await el.isVisible().catch(() => false))) continue;
-    header = ((await el.getAttribute('title').catch(() => '')) ||
-              (await el.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
-    if (header) break;
-  }
+  const header = await waitForConversation(page, selectors, groupName);
   if (!header) {
-    report.reason = 'could not read the open conversation title — refusing to type anywhere';
+    report.reason = 'no conversation is open (nothing matched #main header) — refusing to type anywhere';
     return report;
   }
-  if (header !== String(groupName).trim()) {
+  if (!titlesMatch(header, groupName)) {
     report.reason = `the open conversation is "${header}", not "${groupName}" — refusing to post`;
     return report;
   }
 
-  // --- 2. Find the composer ---
+  // --- 2. Is the note already in there? ---
+  if (noteAlreadyPresent(await conversationText(page))) {
+    report.alreadyThere = true;
+    report.posted = true;         // the desired end state holds, which is what the caller records
+    report.reason = 'the note is already in this group — not posting a second one';
+    return report;
+  }
+
+  // --- 3. Find the composer ---
   const composer = await firstVisible(page, selectors.messageBox || [], { perCandidateMs: 6000 });
   if (!composer.locator) {
-    report.reason = 'could not find the message box (selectors unconfirmed) — nothing was posted';
+    report.reason = 'could not find the message box inside the open chat — nothing was posted. ' +
+      'Run: node scripts\\whatsapp-doctor.mjs --open "' + groupName + '"';
     return report;
   }
 
@@ -365,7 +447,7 @@ export async function postGroupNote(page, selectors, { groupName, text, apply = 
     return report;
   }
 
-  // --- 3. Type and send, once ---
+  // --- 4. Type and send, once ---
   await composer.locator.click();
   // Shift+Enter for the line breaks, so a multi-line note does not send itself line by line.
   const lines = String(text).split('\n');
@@ -375,10 +457,12 @@ export async function postGroupNote(page, selectors, { groupName, text, apply = 
   }
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(2500);
 
-  report.posted = true;
-  report.reason = 'posted';
+  // Read it back. "posted" should mean the message is in the chat, not that keys were pressed.
+  const landed = noteAlreadyPresent(await conversationText(page));
+  report.posted = landed;
+  report.reason = landed ? 'posted' : 'typed it, but the message did not appear in the chat — check the window';
   return report;
 }
 

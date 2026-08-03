@@ -1,8 +1,21 @@
 # The note that goes in the visit WhatsApp group
 
-Paste this into the group after it appears. The groups are **team only** — no seller — so the
-financials and motivation notes are safe here. If that ever changes, cut the Lead Summary and
-Motivation lines before posting.
+**The automation posts this itself** — `WHATSAPP_POST_NOTE` is on by default, so a group created by
+`src/whatsapp/watch.mjs --yes` gets the note straight after it is created. What is left for a person is
+filling in the blanks (`_______`): the PropertyRadar figures and the four judgement lines. Nobody has to
+paste the skeleton by hand.
+
+The groups are **team only** — no seller — so the financials and motivation notes are safe here. If
+that ever changes, the automation refuses to post at all rather than posting a shortened version, and
+the Lead Summary and Motivation lines have to be cut by hand.
+
+Two things the posting code guarantees, both learned the hard way:
+
+- It reads back the open conversation's title and refuses unless it matches the group name. The
+  header's `title` attribute says "click here for group info", not the subject, which is why the
+  first two attempts refused to post into groups that had been created perfectly.
+- It recognises its own note by the `🏠 PROPERTY INSPECTION` heading, so re-running never posts a
+  second copy — and a group that somehow ended up without one gets picked up again on the next run.
 
 ---
 

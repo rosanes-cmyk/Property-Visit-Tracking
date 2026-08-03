@@ -11,7 +11,10 @@
  * Read-only. It opens menus and closes them with Escape. It creates nothing and sends nothing.
  */
 import fs from 'node:fs/promises';
-import { launchWhatsApp, firstVisible, WHATSAPP_URL } from '../src/whatsapp/client.mjs';
+import {
+  launchWhatsApp, firstVisible, WHATSAPP_URL, openGroupByName, readConversationTitle
+} from '../src/whatsapp/client.mjs';
+import { titlesMatch } from '../src/whatsapp/post-gate.mjs';
 import { config } from '../src/config.mjs';
 
 const selectors = JSON.parse(await fs.readFile(config.whatsappSelectorConfig, 'utf8'));
@@ -144,5 +147,55 @@ if (inputAreaHtml) {
   console.log('a selector for the inner element. This is here only for diagnosis.)');
 }
 
-console.log('\nNothing was created or sent.');
+/*
+ * The conversation header and the message box only exist while a chat is OPEN, so they cannot be
+ * checked from the main screen — which is why they stayed unconfirmed while every other selector was
+ * verified, and why the first note-posting run had nothing to type into.
+ *
+ * Opening a chat is a visible act (it marks the chat read), so it happens only when asked for:
+ *
+ *   node scripts/whatsapp-doctor.mjs --open "1390 Estudillo Ave, San Leandro, CA 94577"
+ *
+ * It opens, reads, and reports. It does not type and it does not send.
+ */
+const openIndex = process.argv.indexOf('--open');
+const openName = openIndex >= 0 ? process.argv[openIndex + 1] : '';
+
+if (!openName) {
+  console.log('\nconversationTitle / messageBox were NOT checked — they only exist while a chat is open.');
+  console.log('To check them against a group you already have:');
+  console.log('  node scripts\\whatsapp-doctor.mjs --open "Full Group Name"');
+} else {
+  console.log(`\n=== Opening "${openName}" to check the posting selectors (read-only) ===`);
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(500);
+
+  const opened = await openGroupByName(page, selectors, openName);
+  console.log(opened.opened ? `OK       opened it — header reads "${opened.header}"` : `FAILED   ${opened.reason}`);
+
+  if (opened.opened) {
+    for (const key of ['conversationTitle', 'messageBox']) {
+      const hit = await firstVisible(page, selectors[key] || [], { perCandidateMs: 4000 });
+      console.log(`${hit.selector ? 'OK      ' : 'MISSING '} ${key}${hit.selector ? `  ->  ${hit.selector}` : ''}`);
+    }
+    const title = await readConversationTitle(page, selectors);
+    console.log(`\nTitle read back: "${title}"`);
+    console.log(`Matches the name you asked for: ${titlesMatch(title, openName) ? 'YES' : 'NO'}`);
+
+    // If the composer was not found, dump the footer so a real selector can be read off actual markup
+    // instead of guessed at for a third time.
+    const footerHtml = await page.evaluate(() => {
+      const footer = document.querySelector('#main footer');
+      return footer ? footer.outerHTML.replace(/\s+/g, ' ').slice(0, 1200) : null;
+    }).catch(() => null);
+    if (footerHtml) {
+      console.log('\n=== #main footer markup (the composer lives in here) ===');
+      console.log(footerHtml);
+    } else {
+      console.log('\nNo #main footer on the page — either no chat is open, or this build has moved it.');
+    }
+  }
+}
+
+console.log('\nNothing was created, typed or sent.');
 await context.close();
