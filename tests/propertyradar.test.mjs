@@ -122,6 +122,7 @@ const SUMMARY = 'CALL SUMMARY – August 3, 2026++ Contact Result: Answered++ ' 
   'Timeline: No pressure; visit tomorrow++ Price Expectation: Not specified.++ ' +
   'Property Details: 4bd/4ba, needs repairs++ ' +
   'Objections/Concerns: Cautious — wants Juan to visit first++ ' +
+  'Next Step: Juan to visit; Cherry to run comps++ ' +
   'Lead Temperature: WARM — engaged seller, cautious but moving forward';
 const cs = extractCallSummary(SUMMARY);
 
@@ -135,6 +136,7 @@ check('timeline', cs.timeline, 'No pressure; visit tomorrow');
 // "Not specified" is the VA saying there is no answer. A blank says that without dressing it up.
 check('"Not specified" reads as blank', cs.priceExpectation, '');
 check('no Reason for Selling label means blank', cs.reasonForSelling, '');
+check('next step is what happens after the visit', cs.nextStep, 'Juan to visit; Cherry to run comps');
 
 console.log('\n--- labelledValue stops at the next field ---');
 check('stops at "++"', labelledValue('Timeline: tomorrow++ Price: 400k', 'Timeline'), 'tomorrow');

@@ -4,11 +4,16 @@
  * Pure: data in, text out. No browser, no network, no dependencies — so the exact wording that
  * reaches a real group chat is unit-testable.
  *
- * Two halves, and the split is deliberate:
- *   - Facts REI actually holds are filled in.
- *   - Lines REI does NOT hold are printed with a blank and a marker, so the gap is obvious to whoever
- *     opens the group. Silently omitting them would read as "there are no known issues", which is a
- *     very different statement from "nobody has written the known issues down yet".
+ * It is a SUMMARY, not a copy of REI. Pasting the notes field in produced thousands of characters of
+ * engagement counters, call-summary bullets and comp verdicts; the client's answer on seeing it was "this
+ * was only needed in there... no other long notes". So every fact is a labelled line, read out of those
+ * same notes, and the REI link carries anyone who wants the rest.
+ *
+ * Two kinds of line, and the split is deliberate:
+ *   - Facts that can be read from REI are filled in.
+ *   - The five lines someone must fill at the property are printed with a visible blank. Silently
+ *     omitting them would read as "there are no known issues", which is a very different statement from
+ *     "nobody has written the known issues down yet".
  *
  * Covered by tests/whatsapp-note.test.mjs.
  */
@@ -38,18 +43,6 @@ export const NOTE_HEADING = `🏠 ${NOTE_MARKER}`;
 
 function line(icon, label, value) {
   return `${icon} ${label}: ${value || TO_FILL_IN}`;
-}
-
-/**
- * Trim to a length, and SAY SO when something was cut.
- *
- * A note that stops mid-sentence with no marker reads as the whole story. Whoever is standing at the
- * property needs to know there is more of it in REI.
- */
-function clip_(text, max) {
-  const value = String(text || '');
-  if (value.length <= max) return value;
-  return `${value.slice(0, max).trimEnd()}\n… (truncated — the rest is on the REI contact)`;
 }
 
 /**
@@ -145,13 +138,17 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   );
 
   /*
-   * Everything REI actually wrote, carried across verbatim rather than paraphrased.
+   * Three more facts from the call summary, shown ONLY when the VA wrote them.
    *
-   * These are the lines the team asked for and were not getting: REI's Notes and its Activity history
-   * live in the calendar event as multi-line BLOCKS, and only the one-line "Next Action" was being
-   * read. Multi-line values keep their line breaks — the appointment history in there is a list, and
-   * flattening it to one paragraph makes it unreadable.
+   * Dropping the notes dump entirely lost these, and they matter: how much time there is, whether a price
+   * has been named, and what is expected after the visit. They are single lines, and an absent one is
+   * omitted rather than shown blank — unlike the five above, nobody is expected to fill these in at the
+   * door, so an empty label would be clutter rather than a prompt.
    */
+  if (summary.timeline) toFill.push(`⏳ Timeline: ${summary.timeline}`);
+  if (summary.priceExpectation) toFill.push(`💰 Price Expectation: ${summary.priceExpectation}`);
+  if (summary.nextStep) toFill.push(`➡️ Next Step: ${summary.nextStep}`);
+
   /*
    * No raw notes dump.
    *

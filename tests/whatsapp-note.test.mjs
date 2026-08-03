@@ -82,6 +82,18 @@ console.log('\n--- and the long dump is gone ---');
 check('no raw REI notes block', CALL.includes('📝 REI Notes:'), false);
 check('no activity block', CALL.includes('🕑 REI Activity:'), false);
 check('no call-summary bullets pasted in', CALL.includes('CALL SUMMARY'), false);
+
+console.log('\n--- the three summary lines appear only when the VA wrote them ---');
+// Dropping the dump lost these, and they matter: how much time there is, whether a price has been named,
+// and what is expected after the visit. Nobody fills these in at the door, so an absent one is omitted
+// rather than shown as a blank to complete.
+check('timeline is shown', CALL.includes('⏳ Timeline: No pressure'), true);
+check('price expectation is omitted when "Not specified"',
+  CALL.includes('💰 Price Expectation'), false);
+check('a named price IS shown',
+  buildInspectionNote({ notes: 'Price Expectation: wants 1.6M' }, {}).includes('💰 Price Expectation: wants 1.6M'), true);
+check('no empty summary lines on a bare record',
+  ['⏳ Timeline', '💰 Price Expectation', '➡️ Next Step'].some((l) => bare_.includes(l)), false);
 check('the REI link is still there for anyone who wants the rest',
   note.includes('https://my.reiblackbook.com/contacts/20473369'), true);
 

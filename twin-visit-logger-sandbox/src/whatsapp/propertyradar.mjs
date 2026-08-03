@@ -183,6 +183,9 @@ export function extractCallSummary(notesText) {
     knownIssues: labelledValue(t, 'Objections/Concerns') || labelledValue(t, 'Objections')
       || labelledValue(t, 'Known Issues'),
     timeline: labelledValue(t, 'Timeline'),
-    priceExpectation: labelledValue(t, 'Price Expectation')
+    priceExpectation: labelledValue(t, 'Price Expectation'),
+    // What happens after the visit. The VA writes it, and it is the one line that tells the visitor what
+    // is expected of them rather than about the property.
+    nextStep: labelledValue(t, 'Next Step')
   };
 }
