@@ -155,3 +155,8 @@ now built (`src/whatsapp/`, `build/migrate_legacy_data.py`).
 Still out of scope: direct REI API integration, auto-sending seller communication (creating a group
 is permitted; sending a message is not, and no send function exists), PDF reports, and advanced
 dashboard redesign.
+
+The visit WhatsApp groups are TEAM ONLY (`WHATSAPP_INCLUDE_SELLER=false`), decided by the client
+after seeing that their own hand-built groups contain no sellers. Adding one would expose whatever
+the team posts — offer numbers, motivation reads, equity estimates — to the person being negotiated
+with. Do not flip that default without the client saying so explicitly.

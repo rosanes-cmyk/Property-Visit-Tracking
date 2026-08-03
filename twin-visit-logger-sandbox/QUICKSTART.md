@@ -99,14 +99,15 @@ Set these in `.env` first:
 ```
 WHATSAPP_TEAM_NUMBERS=+14155550100,+14155550101
 WHATSAPP_OWN_NUMBER=+14155550100
-WHATSAPP_INCLUDE_SELLER=true
+WHATSAPP_INCLUDE_SELLER=false
 ```
 
 Read this before running it with `--yes`:
 
-- **`WHATSAPP_INCLUDE_SELLER=true` puts the seller in the group.** Anything the team posts there —
-  offer numbers, "seller seems motivated", condition notes — is visible to them. Set it to `false`
-  if the group is meant to be a team/photo space.
+- **Keep `WHATSAPP_INCLUDE_SELLER=false`.** These groups are a team and photo space, which is how the
+  team already builds them by hand. Setting it to `true` puts the seller in every visit group, where
+  they can read anything posted — offer numbers, "seller seems motivated", equity estimates,
+  condition notes. That is a negotiating position, not just a privacy question.
 - **It never sends a message.** It creates the group and stops. There is no send function in the
   code, and a selector that could match a send/delete/leave control is refused at runtime.
 - **Without `--yes` nothing is created.** The dry run walks the flow, reports which numbers WhatsApp
