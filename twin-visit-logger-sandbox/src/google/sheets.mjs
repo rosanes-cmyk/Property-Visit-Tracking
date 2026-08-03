@@ -412,16 +412,48 @@ export async function upsertVisit(auth, visit, existing = null) {
       const index = match.headerMap.get(header);
       if (index !== undefined) row[index] = safeSheetValue(value);
     }
-    const response = await sheets.spreadsheets.values.append({
+    /*
+     * values.update on an EXPLICIT row, never values.append.
+     *
+     * append does not write to the first column of the range you give it. The API documents that it
+     * "searches for a table within the range" and writes "starting with the first column of the table" —
+     * and on this tab Google decided the table began at column BM, index 64. So every appended row landed
+     * 64 columns to the right: the address under "Deal Stage", the seller under "Contract Status", the
+     * phone under "Closer". Five rows were written that way and none of them could ever be matched again,
+     * because the matcher reads Property Address at index 1 and found it empty. Hence the duplicates.
+     *
+     * Choosing the row ourselves and updating it removes the guesswork entirely.
+     */
+    const lastCol = columnLetter(Math.max(match.headers.length - 1, 0));
+    let newRowNumber = config.trackerHeaderRow + (match.scannedRows || 0) + 1;
+
+    /*
+     * Do not overwrite somebody else's row. The workbook's Apps Script writes to this tab too, so the row
+     * that was empty a second ago may not be. Check, and step down until one is genuinely empty.
+     */
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const target = `${quoteSheetName(config.trackerSheet)}!A${newRowNumber}:${lastCol}${newRowNumber}`;
+      const existingRow = await sheets.spreadsheets.values.get({
+        spreadsheetId: config.spreadsheetId,
+        range: target
+      });
+      const cells = existingRow.data.values?.[0] || [];
+      if (!cells.some((cell) => String(cell || '').trim())) break;
+      newRowNumber += 1;
+      if (attempt === 49) {
+        throw new Error(
+          `Could not find an empty row in "${config.trackerSheet}" within 50 rows of ${newRowNumber}. ` +
+          'Nothing was written.'
+        );
+      }
+    }
+
+    await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `${quoteSheetName(config.trackerSheet)}!A:${columnLetter(Math.max(match.headers.length - 1, 0))}`,
+      range: `${quoteSheetName(config.trackerSheet)}!A${newRowNumber}:${lastCol}${newRowNumber}`,
       valueInputOption: 'USER_ENTERED',
-      insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [row] }
     });
-    const updatedRange = response.data.updates?.updatedRange || '';
-    const rowMatch = updatedRange.match(/!(?:[A-Z]+)(\d+):/);
-    const newRowNumber = rowMatch ? Number(rowMatch[1]) : null;
     await applyDateTimeFormats(sheets, newRowNumber, match.headerMap);
     return { ...match, found: true, rowNumber: newRowNumber, appended: true };
   }
