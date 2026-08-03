@@ -32,6 +32,17 @@ const given = args.filter((a) => a !== '--yes');
 let link = given.find((a) => /^https?:\/\//i.test(a)) || '';
 const searchTerm = link ? '' : (given[0] || '').trim();
 
+/*
+ * When the visit is found on the calendar, remember WHICH event it is.
+ *
+ * syncCalendarEvent only recognises an existing event by the private extended properties this project
+ * writes (reiRecordId / reiLinkHash). An event created by the workbook's Apps Script does not carry
+ * them, so it would not be recognised and a SECOND event would be inserted — a duplicate on Juan's
+ * calendar for a visit happening tomorrow morning. We already know the exact event id, so it is passed
+ * in rather than searched for.
+ */
+let knownEventId = '';
+
 const auth = await authorizeGoogle();
 
 /*
@@ -79,6 +90,7 @@ if (searchTerm) {
     process.exit(1);
   }
 
+  knownEventId = hits[0].id || '';
   link = fieldFromDescription(hits[0].description || '', 'REI BlackBook');
   if (!link) {
     console.log('\nThat event has no REI BlackBook link in its description, so the contact cannot be');
@@ -148,8 +160,14 @@ if (!visit.assignedOwner) {
 }
 
 const match = await findExistingVisit(auth, visit);
+const eventIdToUse = match.calendarEventId || knownEventId;
 console.log(`\nTracker: ${match.found ? `row ${match.rowNumber} already exists — it will be UPDATED` : 'no existing row — one will be ADDED'}`);
-console.log(`Calendar: ${match.calendarEventId ? `event ${match.calendarEventId} is on file — it will be UPDATED` : 'no event id on file — one will be created or matched by REI record id'}`);
+if (eventIdToUse) {
+  console.log(`Calendar: event ${eventIdToUse} will be UPDATED` +
+    (match.calendarEventId ? ' (id from the tracker row)' : ' (the event found on the calendar above — no duplicate)'));
+} else {
+  console.log('Calendar: no event found — a new one will be created');
+}
 
 if (!APPLY) {
   console.log('\nDRY RUN — nothing was written. Re-run with --yes once the above looks right.');
@@ -157,7 +175,7 @@ if (!APPLY) {
 }
 
 // Calendar first, so the row can carry the event id in one write rather than two.
-const calendarEventId = await syncCalendarEvent(auth, visit, match.calendarEventId || '');
+const calendarEventId = await syncCalendarEvent(auth, visit, eventIdToUse);
 const written = await upsertVisit(auth, { ...visit, calendarEventId }, match);
 
 console.log('\n=== Written ===');
