@@ -85,20 +85,30 @@ check('property', fieldFromDescription(DESC, 'Property'), '2145 Capitol Ave, Eas
 check('"Not found" reads as empty, not as a value', fieldFromDescription(DESC, 'Email'), '');
 check('missing label', fieldFromDescription(DESC, 'Nonsense'), '');
 
-console.log('\n=== Group names ===');
+console.log('\n=== Group names match the team\'s own convention ===');
+// Their existing groups are named for the FULL address with no date, e.g.
+// "728 Tampico, Walnut Creek, CA 94598". Dateless on purpose: one group per PROPERTY, reused on a
+// reschedule or a second visit, rather than a new group each time.
 const AUG5 = new Date('2026-08-05T14:00:00-07:00');
-check('the full street name fits', groupName('2145 Capitol Ave, East Palo Alto', AUG5, TZ),
-  'Visit 2145 Capitol Ave Aug 5');
-check('only the street is used, not the whole address',
-  groupName('27833 Gainesville Ave, Hayward, CA 94545, UNITED STATES', AUG5, TZ),
-  'Visit 27833 Gainesville Ave Aug 5');
-check('a missing date still yields a usable name',
-  groupName('2145 Capitol Ave, EPA', null, TZ), 'Visit 2145 Capitol Ave');
+check('the real example from their WhatsApp',
+  groupName('728 Tampico, Walnut Creek, CA 94598', AUG5, TZ),
+  '728 Tampico, Walnut Creek, CA 94598');
+check('a full address is kept whole', groupName('15340 Canyon 2 Rd, Guerneville, CA 95446', AUG5, TZ),
+  '15340 Canyon 2 Rd, Guerneville, CA 95446');
+check('the country suffix REI appends is dropped',
+  groupName('2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES', AUG5, TZ),
+  '2145 Capitol Ave, East Palo Alto, CA, 94303');
+check('no date in the name, so a reschedule reuses the same group',
+  /Aug|\d{1,2}\/\d{1,2}/.test(groupName('728 Tampico, Walnut Creek, CA 94598', AUG5, TZ)), false);
+check('a missing date changes nothing', groupName('2145 Capitol Ave, EPA', null, TZ),
+  '2145 Capitol Ave, EPA');
 
-// When it must be shortened, the date is what has to survive.
-const absurd = groupName(`${'Very Long Street Name '.repeat(8)}Ave, Hayward, CA`, AUG5, TZ);
+// A template CAN still ask for the date; then shortening must protect it.
+const dated = groupName('27833 Gainesville Ave, Hayward, CA 94545', AUG5, TZ, 'Visit {address} {date}');
+check('the {address} token still means street only', dated, 'Visit 27833 Gainesville Ave Aug 5');
+const absurd = groupName(`${'Very Long Street Name '.repeat(8)}Ave, Hayward, CA`, AUG5, TZ, 'Visit {address} {date}');
 check('an over-long name is capped', absurd.length <= GROUP_NAME_MAX, true);
-check('...and the date is still on the end', absurd.endsWith('Aug 5'), true);
+check('...and the date survives the trim', absurd.endsWith('Aug 5'), true);
 check('a tighter cap can be imposed without a code change',
   groupName('2145 Capitol Ave, EPA', AUG5, TZ, 'Visit {address} {date}', 25).length <= 25, true);
 
@@ -132,7 +142,7 @@ const opts = { timezone: TZ, teamNumbers: TEAM, includeSeller: true, now: NOW };
 
 const good = planForEvent(base, opts);
 check('a future visit is planned', good.create, true);
-check('...named for the property and date', good.name, 'Visit 2145 Capitol Ave Aug 5');
+check('...named for the property', good.name, '2145 Capitol Ave, East Palo Alto, CA, 94303');
 check('...with the seller in it', good.sellerIncluded, true);
 check('...and three participants', good.participants.length, 3);
 
@@ -149,7 +159,7 @@ check('nobody valid to add',
   reason({}, { teamNumbers: [], includeSeller: false }),
   'no valid participant numbers — nobody to add');
 check('already created', planForEvent(base, { ...opts, alreadyDone: new Set(['evt1']) }).reason,
-  'group already created (Visit 2145 Capitol Ave Aug 5)');
+  'group already created (2145 Capitol Ave, East Palo Alto, CA, 94303)');
 
 console.log('\n=== Today\'s visit still counts, even later in the day ===');
 check("a visit at 8am when it is already 9am",

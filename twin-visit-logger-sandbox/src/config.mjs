@@ -53,7 +53,7 @@ const raw = {
   // own owner, so it is excluded from every participant list.
   whatsappOwnNumber: process.env.WHATSAPP_OWN_NUMBER || '',
   whatsappIncludeSeller: bool(process.env.WHATSAPP_INCLUDE_SELLER, false),
-  whatsappGroupTemplate: process.env.WHATSAPP_GROUP_TEMPLATE || 'Visit {address} {date}',
+  whatsappGroupTemplate: process.env.WHATSAPP_GROUP_TEMPLATE || '{fullAddress}',
   whatsappLookaheadDays: int(process.env.WHATSAPP_LOOKAHEAD_DAYS, 30),
   // The ONE write this project makes to REI: marking a booked-appointment task complete once the
   // visit is confirmed on the calendar and in a WhatsApp group. Off unless explicitly enabled.

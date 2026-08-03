@@ -115,21 +115,41 @@ function formatIn(date, timezone, options) {
 export const GROUP_NAME_MAX = 100;
 
 /**
+ * Matches the naming the team already uses by hand — the full address, no date, e.g.
+ * "728 Tampico, Walnut Creek, CA 94598". Deliberately dateless: one group per PROPERTY, reused if
+ * the visit is rescheduled or a second visit happens, rather than a new group each time.
+ * Tokens: {fullAddress} · {address} (street only) · {date}
+ */
+export const DEFAULT_GROUP_TEMPLATE = '{fullAddress}';
+
+/**
  * Build the group subject. If it has to be shortened, the ADDRESS gives way and the date survives:
  * a group named for the wrong day is worse than one with a clipped street.
  */
-export function groupName(address, start, timezone, template = 'Visit {address} {date}', max = GROUP_NAME_MAX) {
+export function groupName(address, start, timezone, template = DEFAULT_GROUP_TEMPLATE, max = GROUP_NAME_MAX) {
   const date = start ? formatIn(start, timezone, { month: 'short', day: 'numeric' }) : '';
-  const build = (street) => template
-    .replace('{address}', street)
+  // The country suffix REI appends is noise in a chat title; the team's own groups never carry it.
+  const full = String(address ?? '').replace(/,\s*(united states|usa|us)\s*$/i, '').replace(/\s+/g, ' ').trim();
+
+  // Whichever address token the template uses is the one that gets shortened.
+  const usesFull = template.includes('{fullAddress}');
+  const value = usesFull ? full : shortAddress(full);
+  const fill = (addr) => template
+    .replace('{fullAddress}', addr)
+    .replace('{address}', addr)
     .replace('{date}', date)
     .replace(/\s+/g, ' ')
     .trim();
 
-  const street = shortAddress(address);
-  const built = build(street);
+  const built = fill(value);
   if (built.length <= max) return built;
-  return build(street.slice(0, Math.max(0, street.length - (built.length - max))).trim()).slice(0, max);
+
+  // Give the address exactly the room left over once everything else in the template is placed.
+  // Measuring the FULL address while the template substitutes the street was the earlier mistake:
+  // the arithmetic came out short and a trailing .slice() cut the date off the end, which is the one
+  // part that must survive.
+  const room = Math.max(0, max - fill('').length - 1);
+  return fill(value.slice(0, room).trim());
 }
 
 /**
@@ -165,7 +185,7 @@ export function planForEvent(event, options) {
     includeSeller = false,
     ownNumber = '',
     defaultCountry = '1',
-    template = 'Visit {address} {date}',
+    template = DEFAULT_GROUP_TEMPLATE,
     now = new Date(),
     alreadyDone = new Set()
   } = options || {};
