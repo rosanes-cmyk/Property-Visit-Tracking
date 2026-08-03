@@ -1,17 +1,24 @@
 # Install the Windows scheduled tasks so everything runs without opening PowerShell.
 #
 #   powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1
-#   powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1 -IntervalMinutes 2 -WhatsAppIntervalMinutes 15
+#   powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1 -IntervalMinutes 2 -WhatsAppIntervalMinutes 5
 #   powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1 -SkipWhatsApp
 #
-# TWO tasks, on purpose, because the two jobs have very different costs:
+# TWO tasks, on purpose, because they are two different jobs:
 #
 #   "Twin Visit Logger Sandbox"   every 2 min   REI email -> scrape -> sheet -> Juan's calendar
-#   "Twin Visit Logger WhatsApp"  every 15 min  create the WhatsApp group for any new visit
+#   "Twin Visit Logger WhatsApp"  every 2 min   create the WhatsApp group for any new visit
 #
-# The WhatsApp one runs far less often deliberately. A group does not need to exist within two
-# minutes of a booking, it drives a second browser, and hammering WhatsApp Web every couple of
-# minutes is how an account attracts attention. Fifteen minutes is plenty.
+# The WhatsApp one used to default to 15 minutes, on the reasoning that it drives a second browser and
+# that hammering WhatsApp Web attracts attention. That reasoning was wrong, and the code says so: the
+# watcher reads the calendar, and if there is no new visit it RETURNS BEFORE OPENING WHATSAPP AT ALL.
+# An idle run costs one Calendar API call. WhatsApp Web is only opened when a group genuinely needs
+# creating, which is a handful of times a week no matter how often the timer fires. So there was
+# nothing to save, and a quarter of an hour of pointless delay between the calendar event and the
+# group. Both run every 2 minutes now.
+#
+# Overlap is handled: each runner takes a NAMED lock, so a second launch while one is still working
+# exits immediately instead of two browsers fighting over the same profile.
 #
 # Both run hidden (run-hidden.vbs) and only while this Windows user is logged on - the runs need this
 # user's Google OAuth token, REI browser profile and WhatsApp session.
@@ -21,7 +28,7 @@
 # rather than duplicating work, so nothing breaks - it just wastes launches.
 param(
   [int]$IntervalMinutes = 2,
-  [int]$WhatsAppIntervalMinutes = 15,
+  [int]$WhatsAppIntervalMinutes = 2,
   [switch]$SkipWhatsApp
 )
 
