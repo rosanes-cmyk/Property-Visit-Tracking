@@ -21,7 +21,8 @@
     "whatsapp:login": "node scripts/whatsapp-login.mjs",
     "whatsapp:doctor": "node scripts/whatsapp-doctor.mjs",
     "whatsapp:watch": "node src/whatsapp/watch.mjs",
-    "rei:task-doctor": "node scripts/rei-task-doctor.mjs"
+    "rei:task-doctor": "node scripts/rei-task-doctor.mjs",
+    "where": "node scripts/where-am-i-writing.mjs"
   },
   "dependencies": {
     "@google-cloud/local-auth": "latest",

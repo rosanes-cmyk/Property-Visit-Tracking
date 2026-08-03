@@ -144,17 +144,29 @@ export async function processInbox(auth, logger) {
         }
 
         let calendarEventId = match.calendarEventId || '';
+        let written = null;
         if (!config.dryRun) {
           calendarEventId = await syncCalendarEvent(auth, partialVisit, calendarEventId);
-          await upsertVisit(auth, { ...partialVisit, calendarEventId }, match);
+          written = await upsertVisit(auth, { ...partialVisit, calendarEventId }, match);
           await addLabel(auth, email.id, processedLabelId);
         }
 
         processed += 1;
+        // Say WHERE, not just "synchronized". "It did not show up in the sheet" is unanswerable from
+        // a success line that names neither the workbook nor the tab nor the row — and the usual
+        // cause is SPREADSHEET_ID or TRACKER_SHEET in .env pointing somewhere other than the
+        // workbook being looked at.
         logger.info('Visit synchronized.', {
           gmailMessageId: email.id,
           reiRecordId: partialVisit.reiRecordId,
+          seller: partialVisit.sellerName || '',
+          address: partialVisit.propertyAddress || '',
+          wroteToWorkbook: `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit`,
+          wroteToTab: config.trackerSheet,
+          wroteToRow: written?.rowNumber ?? '(unknown)',
+          rowWasAppended: written?.appended ? 'new row' : 'updated an existing row',
           calendarEventId,
+          calendarTarget: config.calendarName || config.calendarId,
           dryRun: config.dryRun
         });
       } catch (error) {
