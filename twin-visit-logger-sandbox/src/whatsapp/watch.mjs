@@ -15,7 +15,7 @@ import path from 'node:path';
 import { google } from 'googleapis';
 import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
-import { planForEvents } from './plan.mjs';
+import { planForEvents, suspiciousNumber } from './plan.mjs';
 import { launchWhatsApp, assertLoggedIn, createGroup, groupExists } from './client.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
@@ -53,6 +53,23 @@ async function resolveCalendarId(calendar) {
 async function main() {
   if (!config.whatsappTeamNumbers.length && !config.whatsappIncludeSeller) {
     throw new Error('Nobody to add. Set WHATSAPP_TEAM_NUMBERS in .env (comma-separated).');
+  }
+
+  // Check the configured numbers before touching anything. A mistyped number does not fail loudly —
+  // it just silently matches nobody, and the group ends up short a member.
+  const numberWarnings = [];
+  for (const [label, value] of [
+    ['WHATSAPP_OWN_NUMBER', config.whatsappOwnNumber],
+    ...config.whatsappTeamNumbers.map((n) => ['WHATSAPP_TEAM_NUMBERS', n])
+  ]) {
+    if (!value) continue;
+    const problem = suspiciousNumber(value);
+    if (problem) numberWarnings.push(`  ${label}: ${value} — ${problem}`);
+  }
+  if (numberWarnings.length) {
+    console.log('CHECK YOUR .env — these numbers look wrong:');
+    console.log(numberWarnings.join('\n'));
+    console.log('');
   }
 
   const auth = await authorizeGoogle();

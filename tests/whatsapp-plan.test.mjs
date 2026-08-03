@@ -12,7 +12,7 @@
  */
 import {
   toE164, fieldFromDescription, shortAddress, groupName, participants, planForEvent, planForEvents,
-  GROUP_NAME_MAX
+  GROUP_NAME_MAX, suspiciousNumber
 } from '../twin-visit-logger-sandbox/src/whatsapp/plan.mjs';
 
 let pass = 0, fail = 0;
@@ -40,6 +40,19 @@ check('letters', toE164('call the office'), '');
 check('empty', toE164(''), '');
 check('null', toE164(null), '');
 check('"Not found"', toE164('Not found'), '');
+
+console.log('\n=== Mistyped numbers are caught before a run ===');
+// The real case: a Philippine mobile entered as +9928379192 instead of +639928379192. Valid E.164
+// on its face, reads as +992 (Tajikistan), matches nobody, and fails silently.
+check('a PH mobile missing its 63 is flagged',
+  suspiciousNumber('+9928379192').includes('country code looks missing'), true);
+check('the same number written correctly passes', suspiciousNumber('+639928379192'), '');
+check('other PH team numbers pass', suspiciousNumber('+639668118312'), '');
+check('a US 10-digit (seller format) passes', suspiciousNumber('(650) 771-7814'), '');
+check('a US E.164 passes', suspiciousNumber('+14155550100'), '');
+check('unreadable input is reported, not silently accepted',
+  suspiciousNumber('call the office'), 'could not be read as a phone number');
+check('blank is not a complaint', suspiciousNumber(''), '');
 
 console.log('\n=== Reading the event description ===');
 const DESC = [

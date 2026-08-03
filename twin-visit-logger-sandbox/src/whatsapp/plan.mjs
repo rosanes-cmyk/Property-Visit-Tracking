@@ -25,6 +25,29 @@ export function toE164(value, defaultCountry = '1') {
   return '';
 }
 
+/**
+ * Flag a number that parses but is probably mistyped, so it is caught before a run rather than by
+ * a group quietly missing a member.
+ *
+ * The case this exists for: a Philippine mobile entered as +9928379192 instead of +639928379192.
+ * It is valid E.164 on its face — it just reads as +992 (Tajikistan) and matches nobody. Almost
+ * every real mobile written with a country code is 11 digits or more; 10 means a country code was
+ * probably dropped.
+ */
+export function suspiciousNumber(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const e164 = toE164(raw);
+  if (!e164) return 'could not be read as a phone number';
+  const digits = e164.slice(1);
+  if (digits.startsWith('1') && digits.length === 11) return '';          // US/Canada, correct
+  if (digits.length < 11) {
+    return `only ${digits.length} digits after the "+" — a country code looks missing ` +
+           `(a Philippine mobile is +63 then 10 digits, e.g. +639171234567)`;
+  }
+  return '';
+}
+
 /** Read "Label: value" out of the event description the calendar module writes. */
 export function fieldFromDescription(description, label) {
   const prefix = `${label}:`.toLowerCase();
