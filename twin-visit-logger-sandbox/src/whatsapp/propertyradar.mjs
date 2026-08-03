@@ -82,3 +82,54 @@ function titleCase(text) {
 export function hasAnyPropertyRadar(values) {
   return Object.values(values || {}).some((v) => String(v || '').trim());
 }
+
+/**
+ * Strip REI's UI furniture out of a notes blob, and drop what the briefing already shows properly.
+ *
+ * The raw notes arrive as a wall: engagement counters glued together ("Latest Engagement InsightsText
+ * RecievedAug 03, 2026, 11:32 AMCall Outgoing..."), a "Show More" link, a trailing author byline, and —
+ * now that the figures are parsed into their own clean lines above — a full duplicate of the
+ * PropertyRadar note. All of it costs the reader attention and tells them nothing.
+ *
+ * Conservative on purpose. It removes only blocks with a known, delimited shape. Anything unrecognised
+ * is left exactly as REI wrote it, because a briefing that quietly eats somebody's notes is worse than
+ * an ugly one.
+ */
+export function tidyReiNotes(text) {
+  let t = String(text || '');
+
+  // 1. The PropertyRadar note: well delimited, and its numbers are already shown as their own lines.
+  t = t.replace(/PropertyRadar Verification[\s\S]*?Source:\s*PropertyRadar/gi, '');
+
+  // 2. The engagement-counter strip REI puts above the notes. Ends at the RVM counter.
+  t = t.replace(/Latest Engagement Insights[\s\S]*?RVM-*/gi, '');
+
+  // 3. Expander links, and the byline REI appends after them.
+  t = t.replace(/\.{2,}\s*Show (More|Less)/gi, '');
+  t = t.replace(/Show (More|Less)/gi, '');
+  t = t.replace(/[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\s*$/,  '');
+
+  /*
+   * 4. Put a line break before the headings REI glues to the previous value. Only these three, matched
+   *    only where a letter runs straight into them — a general "split before any capital" would shred
+   *    ordinary prose.
+   */
+  t = t.replace(/([a-z.%)])(Notes|Next Step|CALL SUMMARY)\b/g, '$1\n\n$2');
+
+  /*
+   * 5. The same headings glued to the value AFTER them: "NotesDavid confirmed ownership",
+   *    "Next StepJuan to visit". A colon and a space is what the VA meant to type, and it is what makes
+   *    the line readable.
+   */
+  t = t.replace(/(^|\n)(Notes|Next Step)(?=[A-Z])/g, '$1$2: ');
+
+  /*
+   * 6. "++" is how the call summary separates its fields, and left inline it turns nine labelled facts
+   *    into one unreadable paragraph — which is how "Seller Motivation" and "Lead Temperature" ended up
+   *    buried mid-sentence. As bullets, the summary is skimmable at the door of the property, which is
+   *    the only place this message is ever read.
+   */
+  t = t.replace(/\s*\+\+\s*/g, '\n• ');
+
+  return t.replace(/\n{3,}/g, '\n\n').replace(/•\s*$/gm, '').trim();
+}

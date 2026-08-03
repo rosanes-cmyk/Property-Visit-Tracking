@@ -10,7 +10,7 @@
  *
  * The note below is copied verbatim from the live contact for 1390 Estudillo Ave.
  */
-import { extractPropertyRadar, hasAnyPropertyRadar } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
+import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -84,6 +84,33 @@ check('the value it has', partial.estimatedValue, '$980,000');
 check('and blanks for the rest', [partial.estimatedEquity, partial.purchaseDate], ['', '']);
 // Equity with no percentage should still come through — the number alone is worth having.
 check('equity without a percentage', extractPropertyRadar('Estimated Equity: $500,000').estimatedEquity, '$500,000');
+
+console.log('\n=== tidyReiNotes: what actually reaches the group ===');
+const MESSY = "Latest Engagement InsightsText RecievedAug 03, 2026, 11:32 AMCall OutgoingAug 03, 2026, 11:11 AMEmail--RVM--\n\n" +
+  "NotesDavid confirmed ownership.\n\nNext StepJuan to visit on August 4.\n\n" +
+  "CALL SUMMARY – August 3, 2026++ Contact Result: Answered++ Seller Motivation: Not urgent++ Lead Temperature: WARM....Show MoreAug 03, 2026Genesis Joy Mangohig\n\n" +
+  REAL;
+const tidy = tidyReiNotes(MESSY);
+
+check('the engagement counter strip is gone', tidy.includes('Latest Engagement Insights'), false);
+check('"Show More" is gone', /Show (More|Less)/.test(tidy), false);
+check('the trailing byline is gone', tidy.includes('Genesis Joy Mangohig'), false);
+// The figures are shown as their own clean lines above, so the raw block is pure duplication.
+check('the PropertyRadar block is not repeated', tidy.includes('Source: PropertyRadar'), false);
+check('"NotesDavid" becomes "Notes: David"', tidy.includes('Notes: David confirmed ownership.'), true);
+check('"Next StepJuan" becomes "Next Step: Juan"', tidy.includes('Next Step: Juan to visit'), true);
+check('"++" becomes bullets', tidy.includes('\n• Contact Result: Answered'), true);
+check('every summary field gets its own line',
+  ['• Contact Result:', '• Seller Motivation:', '• Lead Temperature:'].every((b) => tidy.includes(b)), true);
+check('no run of blank lines', /\n{3,}/.test(tidy), false);
+check('and it does not end on a stray bullet', /•\s*$/.test(tidy), false);
+
+console.log('\n--- and it leaves anything it does not recognise alone ---');
+// A briefing that quietly eats somebody's notes is worse than an ugly one.
+const PLAIN = 'Spoke to the tenant. Gate code is 4471. Dog in the yard — call ahead.';
+check('ordinary prose is untouched', tidyReiNotes(PLAIN), PLAIN);
+check('empty stays empty', tidyReiNotes(''), '');
+check('undefined does not throw', tidyReiNotes(undefined), '');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

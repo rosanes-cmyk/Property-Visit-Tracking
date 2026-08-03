@@ -13,7 +13,7 @@
  * Covered by tests/whatsapp-note.test.mjs.
  */
 
-import { extractPropertyRadar, hasAnyPropertyRadar } from './propertyradar.mjs';
+import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes } from './propertyradar.mjs';
 
 /** Lines nobody can fill from REI. Confirmed absent — see _notAvailableInRei in the selector config. */
 export const TO_FILL_IN = '_______';
@@ -93,6 +93,8 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * Where PropertyRadar is absent they stay blank, because a blank says "nobody has looked this up"
    * and an omitted line says nothing at all.
    */
+  // Parsed from the RAW notes: tidyReiNotes removes the PropertyRadar block once its numbers are
+  // showing as their own lines, so reading it after tidying would find nothing.
   const radar = extractPropertyRadar(visit.notes || '');
   const toFill = [
     '',
@@ -132,7 +134,7 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     const raw = visit[key];
     return raw === undefined || raw === null ? '' : String(raw).replace(/[ \t]+$/gm, '').trim();
   };
-  const notes = multiline('notes');
+  const notes = tidyReiNotes(multiline('notes'));
   const activity = multiline('latestActivity');
   const nextAction = v('nextAction');
 
