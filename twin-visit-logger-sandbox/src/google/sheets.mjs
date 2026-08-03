@@ -192,18 +192,43 @@ export async function findExistingVisit(auth, visit) {
         row,
         headers,
         headerMap,
-        calendarEventId: get(row, 'Calendar Event ID')
+        calendarEventId: get(row, 'Calendar Event ID'),
+        matchedOn: sameMessage ? 'Gmail Message ID'
+          : sameId ? 'REI Record ID'
+            : sameLink ? 'REI BlackBook Link' : 'Property Address',
+        scannedRows: rows.length
       };
     }
   }
 
+  /*
+   * Say what was searched for and whether the columns it needs even exist.
+   *
+   * A duplicate row was appended for a lead already in the sheet, and "no existing row" told us nothing
+   * about why: a missing header, an empty column, and a genuinely new lead all look identical from outside.
+   * These fields make the difference visible at the point of the decision.
+   */
   return {
     found: false,
     rowNumber: null,
     row: [],
     headers,
     headerMap,
-    calendarEventId: ''
+    calendarEventId: '',
+    matchedOn: '',
+    scannedRows: rows.length,
+    searchedFor: {
+      reiRecordId: targetId || '(none on the record)',
+      reiLink: targetLink || '(none on the record)',
+      normalizedAddress: targetAddress || '(none on the record)',
+      phoneDigits: targetPhone || '(none on the record)'
+    },
+    columnsPresent: {
+      'REI Record ID': indexFor('REI Record ID') !== undefined,
+      'REI BlackBook Link': indexFor('REI BlackBook Link') !== undefined,
+      'Property Address': indexFor('Property Address') !== undefined,
+      Phone: indexFor('Phone') !== undefined
+    }
   };
 }
 

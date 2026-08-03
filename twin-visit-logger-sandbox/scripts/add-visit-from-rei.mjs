@@ -170,6 +170,29 @@ if (!visit.assignedOwner) {
 }
 
 const match = await findExistingVisit(auth, visit);
+
+/*
+ * Print WHY, not just the verdict.
+ *
+ * A duplicate row was appended for a lead already in the tracker, and "no existing row — one will be ADDED"
+ * gave nothing to go on: a missing header column, an empty column, and a genuinely new lead all read the
+ * same from outside.
+ */
+console.log(`\nScanned ${match.scannedRows} existing row(s) in "${config.trackerSheet}"`);
+if (match.found) {
+  console.log(`  matched row ${match.rowNumber} on: ${match.matchedOn}`);
+} else {
+  console.log('  no match. Searched for:');
+  for (const [key, value] of Object.entries(match.searchedFor || {})) {
+    console.log(`    ${key.padEnd(20)} ${value}`);
+  }
+  const missing = Object.entries(match.columnsPresent || {})
+    .filter(([, present]) => !present).map(([name]) => name);
+  if (missing.length) {
+    console.log(`  COLUMNS MISSING FROM THE TAB: ${missing.join(', ')}`);
+    console.log('  Matching cannot work without them — every run will append another row.');
+  }
+}
 const eventIdToUse = match.calendarEventId || knownEventId;
 console.log(`\nTracker: ${match.found ? `row ${match.rowNumber} already exists — it will be UPDATED` : 'no existing row — one will be ADDED'}`);
 if (eventIdToUse) {
