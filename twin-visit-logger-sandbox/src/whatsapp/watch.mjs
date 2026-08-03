@@ -38,7 +38,7 @@ import { fieldFromDescription, localDay } from './plan.mjs';
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-4';
+const BUILD = '2026-08-03-note-5';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -48,6 +48,12 @@ const APPLY = process.argv.includes('--yes');
  * between machines. Nothing is duplicated by it: WhatsApp is still asked what exists first.
  */
 const FORCE = process.argv.includes('--force');
+
+/*
+ * --rewarm re-resolves every number through wa.me even if it is already in the chat list. Slow, and
+ * only needed if a chat has been deleted and the picker can no longer find someone.
+ */
+const REWARM = process.argv.includes('--rewarm');
 
 /*
  * --only "text"  restricts the run to groups whose name contains that text, case-insensitively.
@@ -286,15 +292,36 @@ async function main() {
      * other people's WhatsApp, and doing it for nothing is not free.
      */
     const everyNumber = [...new Set(needCreating.flatMap((p) => p.participants.map((x) => x.number)))];
-    if (everyNumber.length) {
-      console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
-      const reach = await warmUpNumbers(page, everyNumber, selectors);
+
+    /*
+     * ...and only for numbers not already warmed up. This is the slow part of the whole run by a wide
+     * margin: each number means navigating to wa.me, which RELOADS WhatsApp Web from scratch and makes
+     * it re-sync its message store. Four numbers is minutes, and it was being paid on every single run.
+     *
+     * Once a number has a chat in the list it stays there, so warming it a second time achieves
+     * nothing. The cache is self-correcting: if the picker later fails to find a number, that number is
+     * dropped from the cache below so the next run warms it again.
+     */
+    state.warmed = state.warmed || {};
+    const cold = REWARM ? everyNumber : everyNumber.filter((n) => !state.warmed[n]);
+    const alreadyWarm = everyNumber.length - cold.length;
+
+    if (alreadyWarm) {
+      console.log(`\n${alreadyWarm} number(s) already have a chat in the list — skipping their warm-up` +
+        ' (this is the slow part; --rewarm forces it).');
+    }
+    if (cold.length) {
+      console.log(`\nMaking ${cold.length} number(s) findable in the group picker...`);
+      console.log('  Each one reloads WhatsApp Web, which takes a while. This only happens once per number.');
+      const reach = await warmUpNumbers(page, cold, selectors);
       if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
       if (reach.notOnWhatsApp.length) {
         console.log(`  NO WhatsApp account: ${reach.notOnWhatsApp.join(', ')}`);
         console.log('  Those cannot be added by anyone, automation or not. Check the digits, or the');
         console.log('  person genuinely does not use WhatsApp on that number.');
       }
+      for (const n of reach.onWhatsApp) state.warmed[n] = new Date().toISOString();
+      await writeState(state);
     }
 
     // PASS 3 — create what is missing, and post its note.
@@ -308,7 +335,15 @@ async function main() {
       });
       for (const line of report.steps) console.log(`    ${line}`);
       if (report.notFound.length) {
-        console.log(`    NOT ON WHATSAPP (skipped): ${report.notFound.join(', ')}`);
+        console.log(`    NOT FOUND IN THE PICKER (skipped): ${report.notFound.join(', ')}`);
+        /*
+         * Forget these, so the next run warms them up again rather than trusting a cache that has just
+         * been proved wrong. Without this, one number that dropped out of the chat list would be
+         * skipped forever and every future group would quietly come out a member short.
+         */
+        for (const n of report.notFound) delete state.warmed[n];
+        await writeState(state);
+        console.log('    (their warm-up was cleared — the next run will resolve them again)');
       }
       if (report.created) {
         state.groups[plan.eventId] = {
