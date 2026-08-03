@@ -375,9 +375,35 @@ async function applyDateTimeFormats(sheets, rowNumber, headerMap) {
     .catch(() => {});   // Formatting is cosmetic: never fail a sync over it.
 }
 
+/**
+ * Refuse to write when the row could never be found again.
+ *
+ * Four rows for the same visit were appended before this existed — 381, 382, 383, 384 — because the tab has
+ * no column the matcher can use, so every run decided the lead was new. Appending without a way to match is
+ * not a partial success, it is a duplicate factory, and rule 8 of this project is that duplicate rows are not
+ * created. So it stops, and names the column to add.
+ *
+ * One of these three is enough. REI Record ID is the most reliable, but a link or an address will do.
+ */
+function assertMatchable(headerMap) {
+  const usable = ['REI Record ID', 'REI BlackBook Link', 'Property Address']
+    .filter((name) => headerMap.has(name));
+  if (usable.length) return;
+
+  throw new Error(
+    `The "${config.trackerSheet}" tab has none of the columns needed to recognise a visit again:\n` +
+    '  REI Record ID, REI BlackBook Link, Property Address\n\n' +
+    'Nothing was written, on purpose. Without one of these, every run treats the same visit as new and\n' +
+    'appends another row — which is how four rows for one visit got created.\n\n' +
+    'Fix: add a column with one of those exact names to the tracker tab (spelling and capitals must match),\n' +
+    'or set ADD_MISSING_COLUMNS=true in .env and re-run so they are added automatically.'
+  );
+}
+
 export async function upsertVisit(auth, visit, existing = null) {
   const sheets = google.sheets({ version: 'v4', auth });
   const match = existing || (await findExistingVisit(auth, visit));
+  assertMatchable(match.headerMap);
   const record = visitToRecord(visit);
 
   if (!match.found) {

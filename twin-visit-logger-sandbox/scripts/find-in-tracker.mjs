@@ -43,6 +43,19 @@ const dataRows = rows.slice(config.trackerHeaderRow);
 const filled = dataRows.filter((r) => r.some((c) => String(c || '').trim()));
 
 console.log(`Header row ${config.trackerHeaderRow}: ${header.length} column(s)`);
+/*
+ * Print the first columns WITH THEIR INDEX. Values landing in the wrong column is invisible until you can
+ * see which name sits at which position — that is how an address ended up under "Deal Stage", 64 columns
+ * right of where it belonged, and nobody could tell from looking at the sheet.
+ */
+console.log('  first 12: ' + header.slice(0, 12).map((h, i) => `${i}=${h || '(blank)'}`).join('  '));
+const needed = ['REI Record ID', 'REI BlackBook Link', 'Property Address', 'Calendar Event ID'];
+const absent = needed.filter((n) => !header.includes(n));
+if (absent.length) {
+  console.log(`  MISSING COLUMNS: ${absent.join(', ')}`);
+  console.log('  A visit cannot be recognised again without one of the first three, so every run would');
+  console.log('  append another row. Writing now refuses rather than duplicating.');
+}
 console.log(`Rows below it: ${dataRows.length}  ·  with any content: ${filled.length}\n`);
 
 if (!needle) {
