@@ -23,7 +23,7 @@ import {
   openGroupByName
 } from './client.mjs';
 import { buildInspectionNote, containsSellerSensitive } from './note.mjs';
-import { eventsFinished } from './post-gate.mjs';
+import { eventsFinished, MAX_TASK_ATTEMPTS } from './post-gate.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-20';
+const BUILD = '2026-08-03-note-21';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -184,7 +184,10 @@ async function main() {
      */
     alreadyDone: (FORCE || REPOST_NOTE)
       ? new Set()
-      : eventsFinished(state.groups, { requireNote: config.whatsappPostNote })
+      : eventsFinished(state.groups, {
+        requireNote: config.whatsappPostNote,
+        requireTaskClosed: config.reiCompleteTasks
+      })
   });
 
   const create = ONLY ? planned.filter((p) => p.name.toLowerCase().includes(ONLY)) : planned;
@@ -548,10 +551,20 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
       console.log(`    calendar verified: ${calendarVerified} · group verified: ${groupVerified}`);
       if (!gate.complete) { console.log(`    NOT completing — ${gate.reason}`); continue; }
 
+      const entry = state.groups[plan.eventId];
+      entry.reiTaskAttempts = (entry.reiTaskAttempts || 0) + 1;
+
       const result = await completeTask(page, selectors, task);
+      entry.reiTaskClosed = Boolean(result.confirmed);
+      await writeState(state);
+
       console.log(result.confirmed
         ? `    task marked complete (${result.clicked})`
         : `    clicked ${result.clicked || 'nothing'} but could not confirm — check REI by hand. Row now: ${result.rowText}`);
+      if (!result.confirmed && entry.reiTaskAttempts >= MAX_TASK_ATTEMPTS) {
+        console.log(`    ${entry.reiTaskAttempts} attempts — giving up on this task. Close it in REI by hand.`);
+        console.log('    Nothing else about this visit is affected; the group and the note are done.');
+      }
       await notifyChat(
         result.confirmed
           ? `REI task marked complete — ${plan.name}\nThe visit is on the calendar and the group exists, so the task is closed.`

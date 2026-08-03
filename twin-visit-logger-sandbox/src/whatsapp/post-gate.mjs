@@ -78,10 +78,26 @@ export function noteAlreadyPresent(conversationText) {
  * what makes the noteless group already sitting in WhatsApp self-heal instead of needing to be
  * deleted and rebuilt by hand.
  */
-export function eventsFinished(groups = {}, { requireNote = true } = {}) {
+/** Give up on closing a REI task after this many tries, rather than reopening REI every 2 minutes forever. */
+export const MAX_TASK_ATTEMPTS = 3;
+
+export function eventsFinished(groups = {}, { requireNote = true, requireTaskClosed = false } = {}) {
   const done = new Set();
   for (const [eventId, entry] of Object.entries(groups || {})) {
     if (!entry) continue;
+    /*
+     * An open REI task keeps the visit unfinished.
+     *
+     * "Group created and note posted" was treated as the end of the story, so once those were recorded
+     * the event was skipped before the task-closing step ever saw it — and the task could never be
+     * closed on a later run. The three outcomes are separate and a visit is done only when all three are.
+     *
+     * Bounded, though: after MAX_TASK_ATTEMPTS it stops, because reopening a REI browser every two
+     * minutes forever over a task that cannot be found is worse than leaving the task open and saying so.
+     */
+    if (requireTaskClosed && !entry.reiTaskClosed && (entry.reiTaskAttempts || 0) < MAX_TASK_ATTEMPTS) {
+      continue;
+    }
     /*
      * noteAttemptedAt counts as done, not just notePosted.
      *

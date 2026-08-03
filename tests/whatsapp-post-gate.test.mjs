@@ -8,7 +8,8 @@
  * and a group left permanently noteless because the run recorded it as finished.
  */
 import {
-  firstLine, titlesMatch, noteAlreadyPresent, eventsFinished, plausibleTitle, NOTE_MARKER
+  firstLine, titlesMatch, noteAlreadyPresent, eventsFinished, plausibleTitle, NOTE_MARKER,
+  MAX_TASK_ATTEMPTS
 } from '../twin-visit-logger-sandbox/src/whatsapp/post-gate.mjs';
 import { buildInspectionNote } from '../twin-visit-logger-sandbox/src/whatsapp/note.mjs';
 
@@ -114,6 +115,31 @@ check('an empty state finishes nothing', [...eventsFinished({}, {})], []);
 check('a missing state does not throw', [...eventsFinished(undefined, {})], []);
 check('requireNote defaults to true — the safe direction',
   eventsFinished({ x: { name: 'X' } }).has('x'), false);
+
+console.log('\n=== An open REI task keeps the visit unfinished ===');
+/*
+ * "Group created and note posted" was treated as the end of the story, so once those were recorded the
+ * event was skipped before the task-closing step ever saw it — and a run reported "0 of 1 kept" on the
+ * exact visit whose task was still open. The three outcomes are separate.
+ */
+const noted = { name: 'A', notePosted: true };
+check('group + note is NOT enough when task closing is on',
+  eventsFinished({ e: noted }, { requireTaskClosed: true }).has('e'), false);
+check('...and IS enough when task closing is off',
+  eventsFinished({ e: noted }, { requireTaskClosed: false }).has('e'), true);
+check('a closed task finishes it',
+  eventsFinished({ e: { ...noted, reiTaskClosed: true } }, { requireTaskClosed: true }).has('e'), true);
+
+console.log('\n--- but it gives up rather than reopening REI forever ---');
+// A task that cannot be found would otherwise launch a browser every two minutes for the rest of time.
+check(`under ${MAX_TASK_ATTEMPTS} attempts it tries again`,
+  eventsFinished({ e: { ...noted, reiTaskAttempts: MAX_TASK_ATTEMPTS - 1 } }, { requireTaskClosed: true }).has('e'), false);
+check(`at ${MAX_TASK_ATTEMPTS} attempts it stops`,
+  eventsFinished({ e: { ...noted, reiTaskAttempts: MAX_TASK_ATTEMPTS } }, { requireTaskClosed: true }).has('e'), true);
+check('the missing note still comes first',
+  eventsFinished({ e: { name: 'A', reiTaskClosed: true } }, { requireNote: true, requireTaskClosed: true }).has('e'), false);
+check('requireTaskClosed defaults to false, so nothing changes unless asked',
+  eventsFinished({ e: noted }).has('e'), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
