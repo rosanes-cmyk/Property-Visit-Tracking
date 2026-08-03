@@ -29,11 +29,19 @@ function buildDescription(visit) {
     `Contact Stage: ${visit.contactStage || 'Not found'}`,
     `Lead Source: ${visit.leadSource || 'Not found'}`,
     '',
+    /*
+     * 5000, not 2500. The notes on a worked contact run long — a call summary, a comp run, and the VA's
+     * PropertyRadar Verification note with the valuation and equity figures in it. At 2500 the
+     * PropertyRadar note fell off the end, and since the WhatsApp briefing reads its figures out of
+     * THIS text, they arrived at the property as blanks while sitting in REI all along.
+     *
+     * The whole description is capped at 7800 below, so activity comes down to 1500 to make room.
+     */
     'Notes:',
-    clip(visit.notes || 'No notes found.', 2500),
+    clip(visit.notes || 'No notes found.', 5000),
     '',
     'Latest Activity:',
-    clip(visit.latestActivity || 'No activity found.', 2000),
+    clip(visit.latestActivity || 'No activity found.', 1500),
     '',
     `Next Action: ${visit.nextAction || 'Not found'}`,
     `REI BlackBook: ${visit.reiLink}`

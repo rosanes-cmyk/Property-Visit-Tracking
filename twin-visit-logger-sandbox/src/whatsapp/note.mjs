@@ -13,6 +13,8 @@
  * Covered by tests/whatsapp-note.test.mjs.
  */
 
+import { extractPropertyRadar, hasAnyPropertyRadar } from './propertyradar.mjs';
+
 /** Lines nobody can fill from REI. Confirmed absent — see _notAvailableInRei in the selector config. */
 export const TO_FILL_IN = '_______';
 
@@ -80,24 +82,43 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   if (owner) facts.push(`👤 Assigned: ${owner}`);
 
   /*
-   * REI does not hold any of this — it comes from PropertyRadar and from the team's own judgement.
-   * Printed as blanks on purpose: an absent "Known Issues" line reads as "there are none".
+   * The PropertyRadar figures — filled in when the team's VA has pasted a "PropertyRadar Verification"
+   * note onto the REI contact, blank when nobody has.
+   *
+   * These five printed as PERMANENT blanks for most of this project, on my conclusion that REI has no
+   * fields for them. That was true and beside the point: the numbers were on the contact all along, in
+   * a note, written out in prose. "Not in REI" was the wrong test — the right one is "can it be read
+   * from what REI holds", and it could.
+   *
+   * Where PropertyRadar is absent they stay blank, because a blank says "nobody has looked this up"
+   * and an omitted line says nothing at all.
    */
+  const radar = extractPropertyRadar(visit.notes || '');
   const toFill = [
     '',
-    `📊 Lead Summary  (not in REI — from PropertyRadar)`,
-    `💵 Estimated Value - ${TO_FILL_IN}`,
-    `🏛️ Assessed Value - ${TO_FILL_IN}`,
-    `🏦 Estimated Open Loans Balance - ${TO_FILL_IN}`,
-    `📈 Estimated Equity - ${TO_FILL_IN}`,
-    `🗓️ Purchase Date - ${TO_FILL_IN}`,
+    hasAnyPropertyRadar(radar)
+      ? '📊 Lead Summary  (from the PropertyRadar note on the REI contact)'
+      : '📊 Lead Summary  (no PropertyRadar note on this contact yet)',
+    `💵 Estimated Value - ${radar.estimatedValue || TO_FILL_IN}`,
+    `🏛️ Assessed Value - ${radar.assessedValue || TO_FILL_IN}`,
+    `🏦 Estimated Open Loans Balance - ${radar.openLoansBalance || TO_FILL_IN}`,
+    `📈 Estimated Equity - ${radar.estimatedEquity || TO_FILL_IN}`,
+    `🗓️ Purchase Date - ${radar.purchaseDate || TO_FILL_IN}`
+  ];
+  if (radar.vestedOwner) toFill.push(`🧾 Vested Owner - ${radar.vestedOwner}`);
+
+  /*
+   * REI has no field for any of these, and no note reliably carries them either — they are what the
+   * person standing at the property fills in. Occupancy is the exception: PropertyRadar reports it.
+   */
+  toFill.push(
     '',
     line('🌡️', 'Motivation Level', ''),
     line('🤝', 'Reason for Selling', ''),
-    line('👥', 'Occupancy', ''),
+    line('👥', 'Occupancy', radar.occupancy),
     line('🔧', 'Property Condition', ''),
     line('⚠️', 'Known Issues', '')
-  ];
+  );
 
   /*
    * Everything REI actually wrote, carried across verbatim rather than paraphrased.

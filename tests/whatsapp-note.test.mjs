@@ -96,7 +96,16 @@ for (const label of ['Motivation Level', 'Reason for Selling', 'Occupancy', 'Pro
 for (const label of ['Estimated Value', 'Assessed Value', 'Estimated Open Loans Balance', 'Estimated Equity', 'Purchase Date']) {
   check(`${label} is present and blank`, note.includes(`${label} - ${TO_FILL_IN}`), true);
 }
-check('and it says where those come from', note.includes('from PropertyRadar'), true);
+/*
+ * The heading now tells the truth about WHY those lines are blank, which is a different statement from
+ * "these come from PropertyRadar". This fixture's notes carry no PropertyRadar block, so it must say
+ * nobody has run one — not imply the numbers exist somewhere else and were left out.
+ */
+check('with no PropertyRadar note, the heading says so',
+  note.includes('no PropertyRadar note on this contact yet'), true);
+check('and with one, it says where the numbers came from',
+  buildInspectionNote({ notes: 'Estimated Value: $1,491,101' }, {})
+    .includes('from the PropertyRadar note on the REI contact'), true);
 
 console.log('\n=== Missing facts become blanks too, never silent gaps ===');
 const bare = buildInspectionNote({}, {});
