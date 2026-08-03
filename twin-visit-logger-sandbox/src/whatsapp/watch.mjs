@@ -173,7 +173,7 @@ async function main() {
      */
     const everyNumber = [...new Set(create.flatMap((p) => p.participants.map((x) => x.number)))];
     console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
-    const reach = await warmUpNumbers(page, everyNumber);
+    const reach = await warmUpNumbers(page, everyNumber, selectors);
     if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
     if (reach.notOnWhatsApp.length) {
       console.log(`  NO WhatsApp account: ${reach.notOnWhatsApp.join(', ')}`);

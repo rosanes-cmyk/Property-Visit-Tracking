@@ -99,8 +99,15 @@ export function assertSafe(selector) {
 
 /** Does a group with this exact subject already exist? Search-only; opens nothing. */
 export async function groupExists(page, selectors, name) {
-  const search = await firstVisible(page, selectors.searchBox || []);
-  if (!search.locator) throw new Error('Could not find the search box. Run: npm run whatsapp:doctor');
+  // A generous per-candidate wait on purpose: this is the first thing touched after a navigation, and
+  // the default 1.5s is shorter than WhatsApp takes to repaint its header.
+  const search = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 8000 });
+  if (!search.locator) {
+    throw new Error(
+      'Could not find the search box after waiting.\n' +
+      'Run: node scripts/whatsapp-doctor.mjs   — it reports the page state and which selectors resolve.'
+    );
+  }
 
   await search.locator.click();
   await page.keyboard.press('Control+A').catch(() => {});
@@ -145,7 +152,14 @@ async function clearSearch(page, box) {
  * Returns { onWhatsApp: [...], notOnWhatsApp: [...] } — this is also a reliable way to tell the two
  * apart, because WhatsApp says so explicitly for a number that has no account.
  */
-export async function warmUpNumbers(page, numbers) {
+export async function waitForChatList(page, selectors, timeout = 45000) {
+  const joined = (selectors.chatList || []).map(assertSafe).join(', ');
+  if (!joined) return;
+  await page.waitForSelector(joined, { timeout }).catch(() => {});
+  await page.waitForTimeout(1200);   // the list appears a moment before the header controls do
+}
+
+export async function warmUpNumbers(page, numbers, selectors = {}) {
   const onWhatsApp = [];
   const notOnWhatsApp = [];
 
@@ -173,9 +187,11 @@ export async function warmUpNumbers(page, numbers) {
     }
   }
 
-  // Back to the chat list so the group flow starts where it expects to.
+  // Back to the chat list — and WAIT for it. A fixed pause here was not enough: the next step looked
+  // for the search box while WhatsApp was still repainting after the navigation, and failed with
+  // "Could not find the search box" on a page that was simply not ready yet.
   await page.goto(WHATSAPP_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await page.waitForTimeout(2500);
+  await waitForChatList(page, selectors);
   return { onWhatsApp, notOnWhatsApp };
 }
 
@@ -189,19 +205,19 @@ export async function createGroup(page, selectors, { name, participants, apply =
   const report = { name, apply, created: false, added: [], notFound: [], steps: [] };
   const step = (text) => report.steps.push(text);
 
-  const menu = await firstVisible(page, selectors.newChatButton || []);
+  const menu = await firstVisible(page, selectors.newChatButton || [], { perCandidateMs: 8000 });
   if (!menu.locator) throw new Error('Could not find the "New chat" button. Run: npm run whatsapp:doctor');
   await menu.locator.click();
   await page.waitForTimeout(600);
   step('opened New chat');
 
-  const newGroup = await firstVisible(page, selectors.newGroupButton || []);
+  const newGroup = await firstVisible(page, selectors.newGroupButton || [], { perCandidateMs: 8000 });
   if (!newGroup.locator) throw new Error('Could not find "New group". Run: npm run whatsapp:doctor');
   await newGroup.locator.click();
   await page.waitForTimeout(800);
   step('opened New group');
 
-  const picker = await firstVisible(page, selectors.participantSearch || []);
+  const picker = await firstVisible(page, selectors.participantSearch || [], { perCandidateMs: 8000 });
   if (!picker.locator) throw new Error('Could not find the participant search box. Run: npm run whatsapp:doctor');
 
   for (const person of participants) {
