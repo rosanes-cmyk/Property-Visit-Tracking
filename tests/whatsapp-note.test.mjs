@@ -68,18 +68,18 @@ const CALL = buildInspectionNote({
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
 
 check('motivation is the grade then the reason',
-  CALL.includes('🌡️ Motivation Level: Warm — Not urgent, exploring options'), true);
+  CALL.includes('🌡️ Motivation: Warm — Not urgent, exploring options'), true);
 check('known issues come from Objections/Concerns',
-  CALL.includes('⚠️ Known Issues: Cautious — wants Juan to visit first'), true);
+  CALL.includes('⚠️ Known issues: Cautious — wants Juan to visit first'), true);
 check('occupancy comes from PropertyRadar', CALL.includes('👥 Occupancy: Owner Occupied'), true);
 // The address is already the first line of the message; repeating it read as a different property.
 check('property condition drops the repeated address',
-  CALL.includes('🔧 Property Condition: 4bd/4ba, needs repairs'), true);
+  CALL.includes('🔧 Condition: 4bd/4ba, needs repairs'), true);
 check('the appointment says what kind of visit it is',
-  CALL.includes('(In-Person Property Visit)'), true);
+  CALL.includes('in-person property visit'), true);
 
 console.log('\n--- and the long dump is gone ---');
-check('no raw REI notes block', CALL.includes('📝 REI Notes:'), false);
+check('no raw REI notes block', CALL.includes('━━ ' + 'REI Notes'), false);
 check('no activity block', CALL.includes('🕑 REI Activity:'), false);
 check('no call-summary bullets pasted in', CALL.includes('CALL SUMMARY'), false);
 
@@ -88,12 +88,12 @@ const TRIP_NOTE = buildInspectionNote({
   propertyAddress: '1390 Estudillo Ave, San Leandro, CA 94577',
   notes: 'Leave Office: 8:15 AM\nDrive Time: ~1 hr 45 mins (via US-101 N)'
 }, { appointmentText: 'Mon, Jul 13, 2026, 10:00 AM' });
-check('leave time', TRIP_NOTE.includes('🚪 Leave Office: 8:15 AM'), true);
-check('drive time', TRIP_NOTE.includes('🚗 Drive Time: ~1 hr 45 mins (via US-101 N)'), true);
+check('leave time', TRIP_NOTE.includes('🚪 Leave office: 8:15 AM'), true);
+check('drive time', TRIP_NOTE.includes('🚗 Drive: ~1 hr 45 mins (via US-101 N)'), true);
 check('a directions link is always there when an address is',
   TRIP_NOTE.includes('🗺️ Directions: https://www.google.com/maps/dir/?api=1&destination='), true);
 check('no drive lines when nobody wrote them',
-  ['🚪 Leave Office', '🚗 Drive Time'].some((l) => bare_.includes(l)), false);
+  ['🚪 Leave office', '🚗 Drive: '].some((l) => bare_.includes(l)), false);
 check('no directions line without an address', bare_.includes('🗺️ Directions'), false);
 
 console.log('\n=== Values already extracted upstream are used as-is ===');
@@ -110,12 +110,12 @@ const PRE = buildInspectionNote({
   callSummary: 'Seller inherited the house and wants it gone',
   leaveOffice: '7:30 AM'
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
-check('the figure is used', PRE.includes('💵 Estimated Value - $900,000'), true);
-check('equity is used', PRE.includes('📈 Estimated Equity - $400,000 (44%)'), true);
+check('the figure is used', PRE.includes('💵 Estimated value: $900,000'), true);
+check('equity is used', PRE.includes('📈 Equity: $400,000 (44%)'), true);
 check('occupancy is used', PRE.includes('👥 Occupancy: Vacant'), true);
-check('motivation is used', PRE.includes('🌡️ Motivation Level: Hot — needs to close fast'), true);
-check('the call story is used', PRE.includes('📞 The call: Seller inherited the house'), true);
-check('leave time is used', PRE.includes('🚪 Leave Office: 7:30 AM'), true);
+check('motivation is used', PRE.includes('🌡️ Motivation: Hot — needs to close fast'), true);
+check('the call story is used', PRE.includes('Seller inherited the house'), true);
+check('leave time is used', PRE.includes('🚪 Leave office: 7:30 AM'), true);
 check('and it still says Lead Summary, not "no PropertyRadar note"',
   PRE.includes('📊 Lead Summary:  (no'), false);
 
@@ -127,17 +127,21 @@ check('timeline is shown', CALL.includes('⏳ Timeline: No pressure'), true);
 // The story, not a grade. It is what tells the person walking up to the door why they are there.
 check('the call narrative is shown',
   buildInspectionNote({ notes: 'Summary: David is exploring options and wants a visit first' }, {})
-    .includes('📞 The call: David is exploring options and wants a visit first'), true);
+    .includes('David is exploring options and wants a visit first'), true);
 // Juan reads this on a phone on the way to a property. The full version is one tap away.
 const LONG_CALL = buildInspectionNote({ notes: `Summary: ${'word '.repeat(200)}` }, {});
 check('a long narrative is cut', LONG_CALL.length < 1600, true);
-check('...and says where the rest is', LONG_CALL.includes('(full notes on the REI link)'), true);
+check('...and says where the rest is', LONG_CALL.includes('full notes on the REI link above'), true);
 check('price expectation is omitted when "Not specified"',
-  CALL.includes('💰 Price Expectation'), false);
+  CALL.includes('💰 Price expectation'), false);
 check('a named price IS shown',
-  buildInspectionNote({ notes: 'Price Expectation: wants 1.6M' }, {}).includes('💰 Price Expectation: wants 1.6M'), true);
-check('no empty summary lines on a bare record',
-  ['⏳ Timeline', '💰 Price Expectation', '➡️ Next Step'].some((l) => bare_.includes(l)), false);
+  buildInspectionNote({ notes: 'Price Expectation: wants 1.6M' }, {}).includes('💰 Price expectation: wants 1.6M'), true);
+// Timeline and price expectation are omitted when nobody wrote them; the after-the-visit line stays,
+// because "what happens next" is always a question worth leaving open.
+check('optional summary lines are omitted when empty',
+  ['⏳ Timeline', '💰 Price expectation'].some((l) => bare_.includes(l)), false);
+check('but the after-the-visit line stays as a blank to fill',
+  bare_.includes('━━ AFTER THE VISIT ━━'), true);
 check('the REI link is still there for anyone who wants the rest',
   note.includes('https://my.reiblackbook.com/contacts/20473369'), true);
 
@@ -148,9 +152,9 @@ check('present when asked for',
 
 console.log('\n=== containsSellerSensitive: the last check before anything is sent ===');
 check('an equity figure is caught',
-  containsSellerSensitive('📈 Estimated Equity - $430,493').length > 0, true);
+  containsSellerSensitive('Estimated Equity - $430,493').length > 0, true);
 check('a motivation read is caught',
-  containsSellerSensitive('🌡️ Motivation Level: Warm').includes('motivation assessment'), true);
+  containsSellerSensitive('Motivation Level: Warm').includes('motivation assessment'), true);
 check('an internal disposition is caught',
   containsSellerSensitive("Reason: we're passing on this one").includes('internal disposition'), true);
 check('"Dead Lead" is caught', containsSellerSensitive('Tags: Dead Lead, Lost Deal').length > 0, true);
@@ -194,6 +198,47 @@ console.log('\n=== The generated note IS flagged, because it names those fields 
 // The blank template still contains the words "Estimated Equity", so it must not be posted into a
 // group with a seller in it even though the numbers are absent.
 check('the blank template is treated as sensitive', containsSellerSensitive(note).length > 0, true);
+
+console.log('\n=== Sections, so it can be read one thing at a time ===');
+/*
+ * The verdict on the flat version was "it is so short, it should be understandable" — and both halves were
+ * fair. Nearly all the information was there; what was missing was shape. Somebody reading this on a phone
+ * outside a house needs to find one thing at a time.
+ */
+const FULLNOTE = buildInspectionNote({
+  propertyAddress: '1390 Estudillo Ave, San Leandro, CA 94577',
+  sellerName: 'David Jackowitz',
+  phone: '(510) 346-8546',
+  reiLink: 'https://my.reiblackbook.com/contacts/20533149',
+  leadSource: 'Direct Mail (Postcard)',
+  assignedOwner: 'Juan',
+  notes: 'Vested Owner: David B Jackowitz\nOccupancy: Owner Occupied\nEstimated Value: $1,491,101\n' +
+    'Leave Office: 10:00 AM\nDrive Time: ~56 mins (https://maps.app.goo.gl/tfL4u5Uam65aB28j9)\n' +
+    'Contact Result: Answered — 9 min 45 sec++ Summary: David is exploring options++ ' +
+    'Objections/Concerns: Cautious, wants a visit first++ Lead Temperature: WARM'
+}, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
+
+for (const heading of ['━━ WHEN ━━', '━━ WHO ━━', '━━ WHAT THE SELLER SAID ━━',
+  '━━ THE NUMBERS ━━', '━━ FILL IN AT THE VISIT ━━', '━━ AFTER THE VISIT ━━']) {
+  check(`${heading} is there`, FULLNOTE.includes(heading), true);
+}
+check('the heading still carries the marker, so a duplicate is recognised',
+  FULLNOTE.startsWith('🏠 PROPERTY INSPECTION'), true);
+// Who must actually sign. A trust or a second owner changes the whole conversation.
+check('owner of record is called out', FULLNOTE.includes('🧾 Owner of record: David B Jackowitz'), true);
+check('the call result is shown', FULLNOTE.includes('☎️ Call: Answered — 9 min 45 sec'), true);
+check("the VA's own maps link wins", FULLNOTE.includes('🗺️ Directions: https://maps.app.goo.gl/tfL4u5Uam65aB28j9'), true);
+check('and it is not printed twice', FULLNOTE.includes('🚗 Drive: ~56 mins'), true);
+
+console.log('\n--- an empty section is omitted, not left as a bare heading ---');
+// A heading with nothing under it says the section exists and is empty, which is never what happened.
+const NO_CALL = buildInspectionNote({ propertyAddress: '1 A St, B, CA' }, { appointmentText: 'Tue 11:00 AM' });
+check('no "what the seller said" heading with nothing said',
+  NO_CALL.includes('━━ WHAT THE SELLER SAID ━━'), false);
+check('but the numbers section stays, as blanks to look up',
+  NO_CALL.includes('━━ THE NUMBERS ━━'), true);
+check('and the fill-in section stays, as the job at the door',
+  NO_CALL.includes('━━ FILL IN AT THE VISIT ━━'), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

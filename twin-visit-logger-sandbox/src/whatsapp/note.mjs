@@ -54,103 +54,26 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     const raw = visit[key];
     return raw === undefined || raw === null ? '' : String(raw).replace(/\s+/g, ' ').trim();
   };
-
-  /*
-   * The travel plan, and a directions link. Computed before the lines are assembled because they sit
-   * directly under the appointment — when the visit is, when to leave, how long it takes, and one tap to
-   * navigate are all read in the same glance.
-   */
   const given = (key) => v(key);
-  const logistics = extractLogistics(visit.notes || '');
-  const leaveOffice = given('leaveOffice') || logistics.leaveOffice;
-  const driveTime = given('driveTime') || logistics.driveTime;
-  const maps = given('mapsLink') || mapsLink(v('propertyAddress'));
-
-  const facts = [
-    NOTE_HEADING,
-    line('📍', 'Property', v('propertyAddress')),
-    line('🧑', 'Seller', v('sellerName')),
-    line('📞', 'Phone', v('phone')),
-    line('🔗', 'Rei Blackbook Link', v('reiLink')),
-    line('📅', 'Appointment', appointmentText && `${appointmentText} (In-Person Property Visit)`),
-    line('📣', 'Lead Source', v('leadSource'))
-  ];
-  if (leaveOffice) facts.push(`🚪 Leave Office: ${leaveOffice}`);
-  if (driveTime) facts.push(`🚗 Drive Time: ${driveTime}`);
-  if (maps) facts.push(`🗺️ Directions: ${maps}`);
-
-  // Only shown when REI actually had them; a blank "4 Beds" line would be noise.
-  const beds = v('beds'), baths = v('baths'), sqft = v('sqft');
-  if (beds || baths || sqft) {
-    facts.push(`🏘️ Property: ${[beds && `${beds} bd`, baths && `${baths} ba`, sqft && `${sqft} sqft`]
-      .filter(Boolean).join(' · ')}`);
-  }
-
-  const stage = v('contactStage'), owner = v('assignedOwner');
-  if (stage) facts.push(`📂 Lead Stage: ${stage}`);
-  if (owner) facts.push(`👤 Assigned: ${owner}`);
 
   /*
-   * The PropertyRadar figures — filled in when the team's VA has pasted a "PropertyRadar Verification"
-   * note onto the REI contact, blank when nobody has.
-   *
-   * These five printed as PERMANENT blanks for most of this project, on my conclusion that REI has no
-   * fields for them. That was true and beside the point: the numbers were on the contact all along, in
-   * a note, written out in prose. "Not in REI" was the wrong test — the right one is "can it be read
-   * from what REI holds", and it could.
-   *
-   * Where PropertyRadar is absent they stay blank, because a blank says "nobody has looked this up"
-   * and an omitted line says nothing at all.
+   * Values may arrive ALREADY EXTRACTED, or as raw notes to parse. The calendar description carries the
+   * summary as labelled lines, so by the time this runs the work is usually done. Parsing raw notes is the
+   * fallback for callers that still hold them, which is how add-visit-from-rei works.
    */
-  /*
-   * Values may arrive ALREADY EXTRACTED, or as raw notes to parse.
-   *
-   * The calendar description now carries the summary as labelled lines rather than REI's notes verbatim,
-   * so there is nothing left there to parse — the work was done once, upstream. Anything passed in
-   * explicitly wins; parsing the raw notes is the fallback for callers that still hold them, which is how
-   * add-visit-from-rei works.
-   */
-  const radar = hasAnyPropertyRadar({
+  const radarGiven = {
     estimatedValue: given('estimatedValue'),
     assessedValue: given('assessedValue'),
     openLoansBalance: given('openLoansBalance'),
     estimatedEquity: given('estimatedEquity'),
     purchaseDate: given('purchaseDate'),
-    occupancy: given('occupancy')
-  })
-    ? {
-      estimatedValue: given('estimatedValue'),
-      assessedValue: given('assessedValue'),
-      openLoansBalance: given('openLoansBalance'),
-      estimatedEquity: given('estimatedEquity'),
-      purchaseDate: given('purchaseDate'),
-      occupancy: given('occupancy'),
-      vestedOwner: given('vestedOwner')
-    }
-    : extractPropertyRadar(visit.notes || '');
-  const toFill = [
-    '',
-    hasAnyPropertyRadar(radar)
-      ? '📊 Lead Summary:'
-      : '📊 Lead Summary:  (no PropertyRadar note on this contact yet)',
-    `💵 Estimated Value - ${radar.estimatedValue || TO_FILL_IN}`,
-    `🏛️ Assessed Value - ${radar.assessedValue || TO_FILL_IN}`,
-    `🏦 Estimated Open Loans Balance - ${radar.openLoansBalance || TO_FILL_IN}`,
-    `📈 Estimated Equity - ${radar.estimatedEquity || TO_FILL_IN}`,
-    `🗓️ Purchase Date - ${radar.purchaseDate || TO_FILL_IN}`
-  ];
+    occupancy: given('occupancy'),
+    vestedOwner: given('vestedOwner')
+  };
+  const radar = hasAnyPropertyRadar(radarGiven) ? radarGiven : extractPropertyRadar(visit.notes || '');
 
-  /*
-   * The five judgement lines, taken from where the VA already wrote them.
-   *
-   * These printed as blanks while the answers sat a few lines further down the same notes: the call
-   * summary carries "Seller Motivation", "Lead Temperature", "Objections/Concerns" and "Property
-   * Details" as labelled facts. Occupancy comes from PropertyRadar. Nothing here is inferred or
-   * reworded — each line is the VA's own text or a blank, because paraphrasing a motivation read puts
-   * words in the mouth of whoever spoke to the seller.
-   */
   const parsed = extractCallSummary(visit.notes || '');
-  const summary = {
+  const call = {
     motivationLevel: given('motivationLevel') || parsed.motivationLevel,
     reasonForSelling: given('reasonForSelling') || parsed.reasonForSelling,
     propertyCondition: given('propertyCondition') || parsed.propertyCondition,
@@ -158,16 +81,20 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     timeline: given('timeline') || parsed.timeline,
     priceExpectation: given('priceExpectation') || parsed.priceExpectation,
     nextStep: given('nextStep') || parsed.nextStep,
-    summary: given('callSummary') || parsed.summary
+    contactResult: given('contactResult') || parsed.contactResult,
+    story: given('callSummary') || parsed.summary
   };
 
+  const trip = extractLogistics(visit.notes || '');
+  const leaveOffice = given('leaveOffice') || trip.leaveOffice;
+  const driveTime = given('driveTime') || trip.driveTime;
+  const maps = given('mapsLink') || trip.mapsLink || mapsLink(v('propertyAddress'));
 
   /*
-   * "Property Details" in the call summary usually opens with the address, which is already the first
-   * line of this message. Repeating it there cost a line and read as though it might be a DIFFERENT
-   * property. Only a leading duplicate is removed; anything else the VA wrote stays.
+   * "Property Details" from the call summary usually opens with the address, which is already the heading.
+   * Repeating it read as though it might be a DIFFERENT property.
    */
-  let condition = summary.propertyCondition;
+  let condition = call.propertyCondition;
   const address = v('propertyAddress');
   if (condition && address) {
     const head = address.split(',')[0].trim();
@@ -176,56 +103,93 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     }
   }
 
-  toFill.push(
-    '',
-    line('🌡️', 'Motivation Level', summary.motivationLevel),
-    line('🤝', 'Reason for Selling', summary.reasonForSelling),
-    line('👥', 'Occupancy', radar.occupancy),
-    line('🔧', 'Property Condition', condition),
-    line('⚠️', 'Known Issues', summary.knownIssues)
-  );
+  /*
+   * SECTIONS, not one flat list of twenty labels.
+   *
+   * The client's verdict on the flat version was "it is so short, it should be understandable" — and both
+   * halves of that are fair. The information was nearly all there; what was missing was any shape. Somebody
+   * reading this on a phone outside a house needs to find one thing at a time: when to leave, who they are
+   * meeting, what was said, what the numbers are, what to fill in. Headings do that; length alone does not.
+   */
+  const out = [NOTE_HEADING];
+  if (address) out.push(`📍 ${address}`);
+
+  const section = (title, lines) => {
+    const real = lines.filter(Boolean);
+    if (!real.length) return;
+    out.push('', title, ...real);
+  };
+
+  section('━━ WHEN ━━', [
+    appointmentText && `📅 ${appointmentText} — in-person property visit`,
+    leaveOffice && `🚪 Leave office: ${leaveOffice}`,
+    driveTime && `🚗 Drive: ${driveTime}`,
+    maps && `🗺️ Directions: ${maps}`
+  ]);
+
+  section('━━ WHO ━━', [
+    `🧑 Seller: ${v('sellerName') || TO_FILL_IN}`,
+    `📞 Phone: ${v('phone') || TO_FILL_IN}`,
+    v('email') && `✉️ Email: ${v('email')}`,
+    // Who must actually sign. A trust or a second owner changes the whole conversation.
+    radar.vestedOwner && `🧾 Owner of record: ${radar.vestedOwner}`,
+    v('leadSource') && `📣 Lead source: ${v('leadSource')}`,
+    v('contactStage') && `📂 Lead stage: ${v('contactStage')}`,
+    v('assignedOwner') && `👤 Assigned: ${v('assignedOwner')}`,
+    v('reiLink') && `🔗 REI contact: ${v('reiLink')}`
+  ]);
+
+  section('━━ WHAT THE SELLER SAID ━━', [
+    call.contactResult && `☎️ Call: ${call.contactResult}`,
+    call.story && clipText(call.story, 500),
+    call.motivationLevel && `🌡️ Motivation: ${call.motivationLevel}`,
+    call.reasonForSelling && `🤝 Reason for selling: ${call.reasonForSelling}`,
+    call.timeline && `⏳ Timeline: ${call.timeline}`,
+    call.priceExpectation && `💰 Price expectation: ${call.priceExpectation}`
+  ]);
+
+  const beds = v('beds'), baths = v('baths'), sqft = v('sqft');
+  section('━━ THE NUMBERS ━━', [
+    (beds || baths || sqft) && `🏘️ ${[beds && `${beds} bd`, baths && `${baths} ba`, sqft && `${sqft} sqft`]
+      .filter(Boolean).join(' · ')}`,
+    hasAnyPropertyRadar(radar) ? null : '(no PropertyRadar note on this contact yet)',
+    `💵 Estimated value: ${radar.estimatedValue || TO_FILL_IN}`,
+    `🏛️ Assessed value: ${radar.assessedValue || TO_FILL_IN}`,
+    `🏦 Open loans: ${radar.openLoansBalance || TO_FILL_IN}`,
+    `📈 Equity: ${radar.estimatedEquity || TO_FILL_IN}`,
+    `🗓️ Bought: ${radar.purchaseDate || TO_FILL_IN}`
+  ]);
 
   /*
-   * Three more facts from the call summary, shown ONLY when the VA wrote them.
-   *
-   * Dropping the notes dump entirely lost these, and they matter: how much time there is, whether a price
-   * has been named, and what is expected after the visit. They are single lines, and an absent one is
-   * omitted rather than shown blank — unlike the five above, nobody is expected to fill these in at the
-   * door, so an empty label would be clutter rather than a prompt.
+   * The blanks live in their own section with an instruction above them, so they read as a job to do rather
+   * than as missing information. Omitting them would say "there are no known issues", which is a different
+   * claim from "nobody has written them down yet".
    */
-  /*
-   * What the seller actually said, in the VA's words, first of the three.
-   *
-   * The five lines above are grades and labels; this is the story, and it is what tells the person walking
-   * up to the door why they are there. Cut to 450 characters with a marker — Juan reads this on a phone on
-   * the way to a property, and the full version is one tap away on the REI link above.
-   */
-  if (summary.summary) {
-    const story = summary.summary.length > 450
-      ? `${summary.summary.slice(0, 450).trimEnd()}… (full notes on the REI link)`
-      : summary.summary;
-    toFill.push('', `📞 The call: ${story}`);
+  section('━━ FILL IN AT THE VISIT ━━', [
+    `👥 Occupancy: ${radar.occupancy || TO_FILL_IN}`,
+    `🔧 Condition: ${condition || TO_FILL_IN}`,
+    `⚠️ Known issues: ${call.knownIssues || TO_FILL_IN}`,
+    `🛠️ Repairs needed: ${TO_FILL_IN}`,
+    `📸 Photos taken: ${TO_FILL_IN}`
+  ]);
+
+  section('━━ AFTER THE VISIT ━━', [
+    call.nextStep ? `➡️ ${call.nextStep}` : `➡️ ${v('nextAction') || TO_FILL_IN}`
+  ]);
+
+  if (includeSellerWarning) {
+    out.push('', '⚠️ THE SELLER IS IN THIS GROUP — do not post offer numbers, equity or motivation here.');
   }
-  if (summary.timeline) toFill.push(`⏳ Timeline: ${summary.timeline}`);
-  if (summary.priceExpectation) toFill.push(`💰 Price Expectation: ${summary.priceExpectation}`);
-  if (summary.nextStep) toFill.push(`➡️ Next Step: ${summary.nextStep}`);
 
-  /*
-   * No raw notes dump.
-   *
-   * Pasting REI's whole notes field in produced a message thousands of characters long — engagement
-   * counters, a nine-bullet call summary, a comp verdict — and the client's answer on seeing it was
-   * "this was only needed in there... no other long notes". Everything worth carrying is now a labelled
-   * line above, read out of those same notes. The REI link is in the message for anyone who wants the
-   * rest, and it is one tap away.
-   */
-  const tail = [];
+  return out.join('\n');
+}
 
-  const warning = includeSellerWarning
-    ? ['', '⚠️ THE SELLER IS IN THIS GROUP — do not post offer numbers, equity or motivation here.']
-    : [];
-
-  return [...facts, ...toFill, ...tail, ...warning].join('\n');
+/** Trim long free text and say so, rather than stopping mid-sentence as if that were the whole story. */
+function clipText(text, max) {
+  const value = String(text || '').trim();
+  return value.length <= max
+    ? value
+    : `${value.slice(0, max).trimEnd()}… (full notes on the REI link above)`;
 }
 
 /**
