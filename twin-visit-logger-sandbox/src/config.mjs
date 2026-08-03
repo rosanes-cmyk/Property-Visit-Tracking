@@ -68,7 +68,12 @@ const raw = {
   // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
   // US sellers read from REI. A number that already has a country code is used as-is, and one
   // starting with a 0 (a local trunk prefix) is refused rather than guessed at.
-  phoneDefaultCountry: (process.env.PHONE_DEFAULT_COUNTRY || '1').replace(/\D/g, '') || '1'
+  phoneDefaultCountry: (process.env.PHONE_DEFAULT_COUNTRY || '1').replace(/\D/g, '') || '1',
+  // Google Chat webhook the scheduled runs report to. Once this runs on a timer nobody opens a
+  // terminal, so silence has to mean "nothing was booked" rather than "it broke hours ago".
+  // Blank = no notifications, which is the old behaviour exactly. This is a credential: it lets
+  // anyone holding it post into the space, so it belongs in .env and never in source.
+  chatWebhookUrl: (process.env.CHAT_WEBHOOK_URL || '').trim()
 };
 
 const schema = z.object({
@@ -106,7 +111,10 @@ const schema = z.object({
   whatsappLookaheadDays: z.number().int().positive().max(365),
   reiCompleteTasks: z.boolean(),
   whatsappPostNote: z.boolean(),
-  phoneDefaultCountry: z.string().min(1)
+  phoneDefaultCountry: z.string().min(1),
+  // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
+  // to `raw` alone silently arrives as undefined.
+  chatWebhookUrl: z.string()
 });
 
 export const config = schema.parse({

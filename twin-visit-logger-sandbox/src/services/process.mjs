@@ -10,6 +10,7 @@ import { syncCalendarEvent } from '../google/calendar.mjs';
 import { parseAppointmentTitle } from '../parser/email.mjs';
 import { launchReiContext, ReiSessionExpiredError } from '../rei/browser.mjs';
 import { scrapeReiVisit } from '../rei/scraper.mjs';
+import { notifyChat } from '../utils/notify.mjs';
 
 // Pull the phone number out of the REI notification (from the task-title line if possible). REI
 // truncates long titles, so a short "Booked appointment | (707) 484-2558" title survives and the
@@ -176,6 +177,17 @@ export async function processInbox(auth, logger) {
           calendarTarget: config.calendarName || config.calendarId,
           dryRun: config.dryRun
         });
+
+        // Announce it. On a timer nobody reads the log, so this is the only place the team learns a
+        // booking landed without going to look for it.
+        if (!config.dryRun) {
+          await notifyChat(
+            `Visit logged — ${partialVisit.sellerName || '(no name)'} · ${partialVisit.propertyAddress}` +
+            `\nRow ${written?.rowNumber ?? '?'} in "${config.trackerSheet}" · calendar event ${calendarEventId ? 'set' : 'NOT created'}` +
+            (partialVisit.assignedOwner ? `\nAssigned: ${partialVisit.assignedOwner}` : '\nNo assigned owner on the REI contact'),
+            { kind: 'ok' }
+          );
+        }
       } catch (error) {
         if (error instanceof ReiSessionExpiredError || error.retryable) {
           logger.error('REI session expired. No Gmail error label was added so this email can retry.', error);
@@ -214,6 +226,15 @@ export async function processInbox(auth, logger) {
         }
 
         if (!config.dryRun) {
+          await notifyChat(
+            `A booking could not be logged: ${error.message}` +
+            (partialVisit?.propertyAddress ? `\nProperty: ${partialVisit.propertyAddress}` : '') +
+            (partialVisit?.sellerName ? `\nSeller: ${partialVisit.sellerName}` : '') +
+            (/data validation/i.test(String(error.message))
+              ? '\nThe workbook refused the row — a dropdown rule rejected a value. Run "Set up / repair sheet".'
+              : ''),
+            { kind: 'error' }
+          );
           if (partialVisit) {
             partialVisit.automationError = error.message;
             await upsertVisit(auth, partialVisit).catch((sheetError) => {

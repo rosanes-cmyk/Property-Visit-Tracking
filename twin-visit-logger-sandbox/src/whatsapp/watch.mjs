@@ -28,6 +28,7 @@ import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { acquireLock } from '../utils/lock.mjs';
+import { notifyChat } from '../utils/notify.mjs';
 import { fieldFromDescription, localDay } from './plan.mjs';
 
 /*
@@ -38,7 +39,7 @@ import { fieldFromDescription, localDay } from './plan.mjs';
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-9';
+const BUILD = '2026-08-03-note-10';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -353,10 +354,17 @@ async function main() {
         };
         await writeState(state);
         console.log('    recorded');
-        if (await maybePostNote(page, selectors, plan)) {
+        const noteWent = await maybePostNote(page, selectors, plan);
+        if (noteWent) {
           state.groups[plan.eventId].notePosted = true;
           await writeState(state);
         }
+        await notifyChat(
+          `WhatsApp group created — ${plan.name}` +
+          `\n${plan.startLocal} · ${report.added.length} member(s) added` +
+          (noteWent ? '\nInspection note posted.' : '\nThe note did NOT go out — it needs posting by hand.'),
+          { kind: noteWent ? 'ok' : 'warn' }
+        );
       }
     }
   } finally {
@@ -494,6 +502,12 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
       console.log(result.confirmed
         ? `    task marked complete (${result.clicked})`
         : `    clicked ${result.clicked || 'nothing'} but could not confirm — check REI by hand. Row now: ${result.rowText}`);
+      await notifyChat(
+        result.confirmed
+          ? `REI task marked complete — ${plan.name}\nThe visit is on the calendar and the group exists, so the task is closed.`
+          : `REI task may NOT be complete — ${plan.name}\nClicked ${result.clicked || 'nothing'} but could not confirm. Check REI by hand.`,
+        { kind: result.confirmed ? 'ok' : 'warn' }
+      );
     }
   } finally {
     await rei.close();
