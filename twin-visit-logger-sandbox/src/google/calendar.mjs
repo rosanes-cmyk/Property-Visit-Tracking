@@ -23,6 +23,16 @@ function buildDescription(visit) {
     `Phone: ${visit.phone || 'Not found'}`,
     `Email: ${visit.email || 'Not found'}`,
     `Property: ${visit.propertyAddress || 'Not found'}`,
+    /*
+     * The REI link goes HIGH, not last.
+     *
+     * It used to be the final line, after up to 6,500 characters of notes and activity. The whole
+     * description is capped, so it was the first thing truncation removed — and it is the one field other
+     * steps READ back out: add-visit-from-rei and the REI task closer both find the contact through it.
+     * Losing it turned a working command into "that event has no REI BlackBook link in its description".
+     * The machine-readable identifier must never sit downstream of unbounded free text.
+     */
+    `REI BlackBook: ${visit.reiLink || 'Not found'}`,
     `Assigned Owner: ${visit.assignedOwner || 'Not found'}`,
     `Current Stage: ${isCancelled(visit.taskStatus) ? 'Cancelled' : 'Visit Scheduled'}`,
     `Task Status: ${visit.taskStatus || 'Not found'}`,
@@ -43,8 +53,7 @@ function buildDescription(visit) {
     'Latest Activity:',
     clip(visit.latestActivity || 'No activity found.', 1500),
     '',
-    `Next Action: ${visit.nextAction || 'Not found'}`,
-    `REI BlackBook: ${visit.reiLink}`
+    `Next Action: ${visit.nextAction || 'Not found'}`
   ].join('\n').slice(0, 7800);
 }
 

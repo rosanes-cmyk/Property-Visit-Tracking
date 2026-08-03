@@ -29,7 +29,7 @@ import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { acquireLock } from '../utils/lock.mjs';
 import { notifyChat } from '../utils/notify.mjs';
-import { fieldFromDescription, blockFromDescription, localDay } from './plan.mjs';
+import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, localDay } from './plan.mjs';
 
 /*
  * Bump this on every change shipped as a zip.
@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, localDay } from './plan.mjs
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-18';
+const BUILD = '2026-08-03-note-19';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -431,7 +431,7 @@ async function maybePostNote(page, selectors, plan) {
     propertyAddress: plan.address,
     sellerName: from('Seller'),
     phone: from('Phone'),
-    reiLink: from('REI BlackBook'),
+    reiLink: reiLinkFromDescription(plan.rawDescription),
     leadSource: from('Lead Source'),
     contactStage: from('Contact Stage'),
     assignedOwner: from('Assigned Owner'),
@@ -516,7 +516,7 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
       const groupVerified = Boolean(state.groups[plan.eventId]);
 
       // 3. Find the task on the contact page.
-      const contactUrl = fieldFromDescription(plan.rawDescription, 'REI BlackBook');
+      const contactUrl = reiLinkFromDescription(plan.rawDescription);
       let task = null;
       const visit = {
         phone: plan.participants.find((p) => p.role === 'seller')?.number || plan.sellerPhone || '',

@@ -91,10 +91,20 @@ if (searchTerm) {
   }
 
   knownEventId = hits[0].id || '';
-  link = fieldFromDescription(hits[0].description || '', 'REI BlackBook');
+  const description = hits[0].description || '';
+  /*
+   * Two ways to find it, because the labelled line can be lost.
+   *
+   * The link used to be the LAST line of the description, after thousands of characters of notes, so
+   * truncation removed it — and an event written by the workbook's Apps Script may label it differently
+   * anyway. Any reiblackbook.com URL in the text identifies the contact just as well.
+   */
+  link = fieldFromDescription(description, 'REI BlackBook')
+    || (description.match(/https?:\/\/[^\s"'<>]*reiblackbook\.com\/[^\s"'<>]+/i) || [''])[0];
   if (!link) {
-    console.log('\nThat event has no REI BlackBook link in its description, so the contact cannot be');
-    console.log('found from it. Open the contact in REI and pass its URL instead.');
+    console.log('\nThat event has no REI link anywhere in its description, so the contact cannot be');
+    console.log('found from it. Open the contact in REI and pass its URL instead:');
+    console.log('  node scripts\\add-visit-from-rei.mjs "https://my.reiblackbook.com/contacts/12345678" --yes');
     process.exit(1);
   }
   console.log(`\nREI link from that event: ${link}`);

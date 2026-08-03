@@ -104,6 +104,22 @@ const SINGLE_LINE_LABELS = [
 const BLOCK_HEADINGS = ['Notes', 'Latest Activity'];
 
 /**
+ * The REI contact URL from an event description, however it was written.
+ *
+ * Three steps read the contact back out of the calendar event — the briefing, the note poster and the
+ * REI task closer — so all three broke together when the labelled line went missing. The line used to be
+ * LAST in the description, downstream of thousands of characters of notes, so truncation removed it.
+ * Any reiblackbook.com URL in the text identifies the contact just as well, so fall back to that rather
+ * than failing.
+ */
+export function reiLinkFromDescription(description) {
+  const labelled = fieldFromDescription(description, 'REI BlackBook');
+  if (labelled) return labelled;
+  const found = String(description || '').match(/https?:\/\/[^\s"'<>]*reiblackbook\.com\/[^\s"'<>]+/i);
+  return found ? found[0] : '';
+}
+
+/**
  * Read a multi-line BLOCK out of the event description — "Notes:" and "Latest Activity:" are written
  * as a heading with their content on the lines beneath, not as "Label: value".
  *

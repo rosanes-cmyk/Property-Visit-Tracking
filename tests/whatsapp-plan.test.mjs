@@ -12,7 +12,7 @@
  */
 import {
   toE164, fieldFromDescription, shortAddress, groupName, participants, planForEvent, planForEvents,
-  GROUP_NAME_MAX, suspiciousNumber, blockFromDescription
+  GROUP_NAME_MAX, suspiciousNumber, blockFromDescription, reiLinkFromDescription
 } from '../twin-visit-logger-sandbox/src/whatsapp/plan.mjs';
 
 let pass = 0, fail = 0;
@@ -233,6 +233,30 @@ check('an undefined description', blockFromDescription(undefined, 'Notes'), '');
 // The old reader must still fail on these, which is the whole reason blockFromDescription exists.
 check('fieldFromDescription cannot read a block heading', fieldFromDescription(BLOCK_DESC, 'Notes'), '');
 check('...but still reads a real single-line field', fieldFromDescription(BLOCK_DESC, 'Assigned Owner'), 'Juan');
+
+console.log('\n=== reiLinkFromDescription: three steps read the contact out of the event ===');
+/*
+ * The briefing, the note poster and the REI task closer all find the contact through this, so they all
+ * broke together when the labelled line went missing. It used to be the LAST line of the description,
+ * downstream of thousands of characters of notes, so truncation removed it — and a working command
+ * turned into "that event has no REI BlackBook link in its description".
+ */
+check('the labelled line, when it survives',
+  reiLinkFromDescription('Seller: X\nREI BlackBook: https://my.reiblackbook.com/contacts/20533149'),
+  'https://my.reiblackbook.com/contacts/20533149');
+check('a bare URL when the label is gone',
+  reiLinkFromDescription('Notes:\nSee https://my.reiblackbook.com/contacts/20533149 for the file'),
+  'https://my.reiblackbook.com/contacts/20533149');
+check('the labelled one wins over one mentioned in the notes',
+  reiLinkFromDescription('Notes: also https://my.reiblackbook.com/contacts/111\nREI BlackBook: https://my.reiblackbook.com/contacts/999'),
+  'https://my.reiblackbook.com/contacts/999');
+check('"Not found" is not a link',
+  reiLinkFromDescription('REI BlackBook: Not found'), '');
+check('an unrelated URL is not mistaken for one',
+  reiLinkFromDescription('Notes: comps at https://www.zillow.com/homedetails/1390-Estudillo'), '');
+check('nothing there', reiLinkFromDescription('Seller: X\nPhone: Y'), '');
+check('empty', reiLinkFromDescription(''), '');
+check('undefined does not throw', reiLinkFromDescription(undefined), '');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
