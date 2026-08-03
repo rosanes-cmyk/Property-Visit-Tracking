@@ -36,6 +36,7 @@ const VISIT = {
   notes: 'Equity Percentage: 22% | cancelled booked appointment'
 };
 const note = buildInspectionNote(VISIT, { appointmentText: 'Mon Jul 20, 2026, 2:00–3:00 PM' });
+const bare_ = buildInspectionNote({}, {});
 
 console.log('=== The facts REI holds are filled in ===');
 for (const [what, value] of [
@@ -50,6 +51,42 @@ for (const [what, value] of [
 ]) check(`${what} is present`, note.includes(value), true);
 check('beds/baths/sqft are combined on one line', note.includes('4 bd · 2.0 ba · 2,448 sqft'), true);
 check("REI's own notes are carried across", note.includes('Equity Percentage: 22%'), true);
+
+console.log('\n=== The full REI notes and activity, not a one-line stand-in ===');
+/*
+ * The team asked for "all of the REI notes" and were getting one line. REI's Notes and Activity are
+ * multi-line blocks; both belong in the briefing, with their line breaks, because the appointment
+ * history in there is a list and flattening it makes it unreadable.
+ */
+const FULL = buildInspectionNote({
+  propertyAddress: '1390 Estudillo Ave, San Leandro, CA 94577',
+  notes: 'Equity Percentage: 22%\nOwner wants to close before September.\nPrice: 450k discussed.',
+  latestActivity: 'Aug 1 - call, 4 min\nJul 28 - postcard responded',
+  nextAction: 'Juan to visit on August 4, 2026, at 11:00 AM'
+}, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
+
+check('the notes heading is there', FULL.includes('📝 REI Notes:'), true);
+check('every notes line survives',
+  ['Equity Percentage: 22%', 'Owner wants to close before September.', 'Price: 450k discussed.']
+    .every((l) => FULL.includes(l)), true);
+check('the activity heading is there', FULL.includes('🕑 REI Activity:'), true);
+check('every activity line survives',
+  ['Aug 1 - call, 4 min', 'Jul 28 - postcard responded'].every((l) => FULL.includes(l)), true);
+check('next action is its own line',
+  FULL.includes('➡️ Next Action: Juan to visit on August 4, 2026, at 11:00 AM'), true);
+check('line breaks are preserved, not flattened', FULL.includes('22%\nOwner wants'), true);
+
+console.log('\n--- and a long note says it was cut, rather than stopping mid-sentence ---');
+// A note that just stops reads as the whole story. Whoever is at the property needs to know there
+// is more of it in REI.
+const LONG = buildInspectionNote({ notes: 'x'.repeat(4000) }, {});
+check('it is truncated', LONG.includes('x'.repeat(4000)), false);
+check('...and says so', LONG.includes('truncated — the rest is on the REI contact'), true);
+
+console.log('\n--- absent blocks add no empty headings ---');
+check('no notes heading when REI had none', bare_.includes('📝 REI Notes:'), false);
+check('no activity heading when REI had none', bare_.includes('🕑 REI Activity:'), false);
+check('no next-action line when REI had none', bare_.includes('➡️ Next Action:'), false);
 
 console.log('\n=== Lines REI cannot fill appear as BLANKS, not omissions ===');
 // Dropping these would read as "there are no known issues", which is a different claim entirely.

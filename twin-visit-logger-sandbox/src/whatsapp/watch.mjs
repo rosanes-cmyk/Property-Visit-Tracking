@@ -29,7 +29,7 @@ import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { acquireLock } from '../utils/lock.mjs';
 import { notifyChat } from '../utils/notify.mjs';
-import { fieldFromDescription, localDay } from './plan.mjs';
+import { fieldFromDescription, blockFromDescription, localDay } from './plan.mjs';
 
 /*
  * Bump this on every change shipped as a zip.
@@ -39,7 +39,7 @@ import { fieldFromDescription, localDay } from './plan.mjs';
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-12';
+const BUILD = '2026-08-03-note-13';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -402,6 +402,7 @@ async function maybePostNote(page, selectors, plan) {
   }
 
   const from = (label) => fieldFromDescription(plan.rawDescription, label);
+  const block = (heading) => blockFromDescription(plan.rawDescription, heading);
   const note = buildInspectionNote({
     propertyAddress: plan.address,
     sellerName: from('Seller'),
@@ -410,7 +411,10 @@ async function maybePostNote(page, selectors, plan) {
     leadSource: from('Lead Source'),
     contactStage: from('Contact Stage'),
     assignedOwner: from('Assigned Owner'),
-    notes: from('Next Action')
+    // The FULL blocks, not the one-line Next Action that was standing in for them.
+    notes: block('Notes'),
+    latestActivity: block('Latest Activity'),
+    nextAction: from('Next Action')
   }, { appointmentText: plan.startLocal, includeSellerWarning: plan.sellerIncluded });
 
   /*

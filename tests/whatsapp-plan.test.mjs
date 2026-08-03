@@ -12,7 +12,7 @@
  */
 import {
   toE164, fieldFromDescription, shortAddress, groupName, participants, planForEvent, planForEvents,
-  GROUP_NAME_MAX, suspiciousNumber
+  GROUP_NAME_MAX, suspiciousNumber, blockFromDescription
 } from '../twin-visit-logger-sandbox/src/whatsapp/plan.mjs';
 
 let pass = 0, fail = 0;
@@ -178,6 +178,61 @@ check('the duplicate property/day is skipped once',
   result.skipped.filter((s) => s.reason.startsWith('duplicate of')).length, 1);
 check('the unrelated meeting is skipped',
   result.skipped.some((s) => s.reason === 'not a Property Visit event'), true);
+
+console.log('\n=== blockFromDescription: the REI notes the briefing was missing ===');
+/*
+ * "Notes:" and "Latest Activity:" are HEADINGS with their content on the lines beneath.
+ * fieldFromDescription looks for text after the colon, finds none, and returns empty — which is why the
+ * WhatsApp briefing carried a one-line Next Action and none of REI's actual notes. The notes were in
+ * the calendar event the whole time, unread.
+ */
+const BLOCK_DESC = [
+  'Seller: David Jackowitz',
+  'Phone: (510) 346-8546',
+  'Email: Not found',
+  'Property: 1390 Estudillo Ave, San Leandro, CA 94577',
+  'Assigned Owner: Juan',
+  'Current Stage: Visit Scheduled',
+  'Task Status: Open',
+  'Contact Stage: 3 Appointment Booked',
+  'Lead Source: Direct Mail (Postcard)',
+  '',
+  'Notes:',
+  'Equity Percentage: 22%',
+  'Owner wants to close before September.',
+  'Price: 450k discussed on the call.',
+  '',
+  'Latest Activity:',
+  'Aug 1 - call, 4 min',
+  'Jul 28 - postcard responded',
+  '',
+  'Next Action: Juan to visit the property on August 4, 2026, at 11:00 AM',
+  'REI BlackBook: https://my.reiblackbook.com/contacts/20533149'
+].join('\n');
+
+const notesBlock = blockFromDescription(BLOCK_DESC, 'Notes');
+check('the whole notes block comes across',
+  notesBlock, 'Equity Percentage: 22%\nOwner wants to close before September.\nPrice: 450k discussed on the call.');
+// "Price: 450k" inside the body looks like a Label: value line. Stopping there would silently drop
+// the rest of somebody's notes, which is why the stop list is explicit rather than a regex.
+check('a "Label: value" line INSIDE the notes does not end the block',
+  notesBlock.includes('Price: 450k discussed on the call.'), true);
+check('line breaks are kept — the history is a list', notesBlock.split('\n').length, 3);
+check('the activity block comes across',
+  blockFromDescription(BLOCK_DESC, 'Latest Activity'), 'Aug 1 - call, 4 min\nJul 28 - postcard responded');
+check('the next single-line label ends the block',
+  blockFromDescription(BLOCK_DESC, 'Latest Activity').includes('Next Action'), false);
+
+console.log('\n--- placeholders are not content ---');
+const EMPTY = 'Notes:\nNo notes found.\n\nLatest Activity:\nNo activity found.\n\nNext Action: Not found';
+check('"No notes found." reads as empty', blockFromDescription(EMPTY, 'Notes'), '');
+check('"No activity found." reads as empty', blockFromDescription(EMPTY, 'Latest Activity'), '');
+check('a heading that is not there', blockFromDescription(BLOCK_DESC, 'Nonexistent'), '');
+check('an empty description', blockFromDescription('', 'Notes'), '');
+check('an undefined description', blockFromDescription(undefined, 'Notes'), '');
+// The old reader must still fail on these, which is the whole reason blockFromDescription exists.
+check('fieldFromDescription cannot read a block heading', fieldFromDescription(BLOCK_DESC, 'Notes'), '');
+check('...but still reads a real single-line field', fieldFromDescription(BLOCK_DESC, 'Assigned Owner'), 'Juan');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

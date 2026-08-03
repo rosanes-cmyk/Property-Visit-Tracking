@@ -90,6 +90,45 @@ export function fieldFromDescription(description, label) {
   return '';
 }
 
+/**
+ * Field labels the calendar description writes as "Label: value" on a single line.
+ *
+ * Used to know where a multi-line block ENDS. Listed explicitly rather than guessed at from a regex,
+ * because a note body can itself contain a line like "Price: 450k" and swallowing the rest of the
+ * description at that point would be silent data loss.
+ */
+const SINGLE_LINE_LABELS = [
+  'Seller', 'Phone', 'Email', 'Property', 'Assigned Owner', 'Current Stage', 'Task Status',
+  'Contact Stage', 'Lead Source', 'Next Action', 'REI BlackBook'
+];
+const BLOCK_HEADINGS = ['Notes', 'Latest Activity'];
+
+/**
+ * Read a multi-line BLOCK out of the event description — "Notes:" and "Latest Activity:" are written
+ * as a heading with their content on the lines beneath, not as "Label: value".
+ *
+ * fieldFromDescription cannot read these: it looks for text after the colon, and there is none, so it
+ * returned empty every time. That is why the WhatsApp briefing carried a one-line Next Action and none
+ * of REI's actual notes — the notes were in the calendar event the whole time, unread.
+ */
+export function blockFromDescription(description, heading) {
+  const lines = String(description ?? '').split('\n');
+  const start = lines.findIndex((l) => l.trim().toLowerCase() === `${heading.toLowerCase()}:`);
+  if (start < 0) return '';
+
+  const stops = [...SINGLE_LINE_LABELS, ...BLOCK_HEADINGS].map((l) => `${l.toLowerCase()}:`);
+  const body = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (stops.some((stop) => trimmed.toLowerCase().startsWith(stop))) break;
+    body.push(lines[i]);
+  }
+
+  const text = body.join('\n').replace(/\s+$/, '').replace(/^\s*\n/, '');
+  // The calendar module writes these placeholders when REI had nothing. They are not content.
+  return /^(no notes found\.?|no activity found\.?|not found)$/i.test(text.trim()) ? '' : text;
+}
+
 /** "2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES" -> "2145 Capitol Ave" */
 export function shortAddress(address) {
   return String(address ?? '').split(',')[0].replace(/\s+/g, ' ').trim();

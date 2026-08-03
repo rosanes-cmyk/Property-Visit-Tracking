@@ -37,6 +37,18 @@ function line(icon, label, value) {
 }
 
 /**
+ * Trim to a length, and SAY SO when something was cut.
+ *
+ * A note that stops mid-sentence with no marker reads as the whole story. Whoever is standing at the
+ * property needs to know there is more of it in REI.
+ */
+function clip_(text, max) {
+  const value = String(text || '');
+  if (value.length <= max) return value;
+  return `${value.slice(0, max).trimEnd()}\n… (truncated — the rest is on the REI contact)`;
+}
+
+/**
  * `visit` is the scraped record; `appointmentText` is the already-formatted local date/time.
  * Anything missing becomes a visible blank rather than a silently dropped line.
  */
@@ -87,10 +99,26 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     line('⚠️', 'Known Issues', '')
   ];
 
-  // REI's free-text Notes often carries the equity percentage and the appointment history; worth
-  // carrying across verbatim rather than paraphrasing it.
-  const notes = v('notes');
-  const tail = notes ? ['', `📝 From REI: ${notes.slice(0, 600)}`] : [];
+  /*
+   * Everything REI actually wrote, carried across verbatim rather than paraphrased.
+   *
+   * These are the lines the team asked for and were not getting: REI's Notes and its Activity history
+   * live in the calendar event as multi-line BLOCKS, and only the one-line "Next Action" was being
+   * read. Multi-line values keep their line breaks — the appointment history in there is a list, and
+   * flattening it to one paragraph makes it unreadable.
+   */
+  const multiline = (key) => {
+    const raw = visit[key];
+    return raw === undefined || raw === null ? '' : String(raw).replace(/[ \t]+$/gm, '').trim();
+  };
+  const notes = multiline('notes');
+  const activity = multiline('latestActivity');
+  const nextAction = v('nextAction');
+
+  const tail = [];
+  if (notes) tail.push('', '📝 REI Notes:', clip_(notes, 2000));
+  if (activity) tail.push('', '🕑 REI Activity:', clip_(activity, 1200));
+  if (nextAction) tail.push('', `➡️ Next Action: ${nextAction}`);
 
   const warning = includeSellerWarning
     ? ['', '⚠️ THE SELLER IS IN THIS GROUP — do not post offer numbers, equity or motivation here.']
