@@ -149,9 +149,26 @@ export function labelledValue(text, label) {
   const found = re.exec(source);
   if (!found) return '';
   const value = found[1].replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '');
+
   // "Not specified" / "N/A" are the VA saying there is no answer. A blank says the same thing without
   // dressing it up as information.
-  return /^(not specified|n\/?a|none|unknown|tbd)$/i.test(value) ? '' : value;
+  if (/^(not specified|n\/?a|none|unknown|tbd)$/i.test(value)) return '';
+
+  /*
+   * Reject a value that has clearly swallowed a whole REI log.
+   *
+   * The account-update note contains its own "Next Step:" label and arrives as one unbroken line, so there
+   * was no newline to stop at and the match ran to the end — putting "Task: Created or confirmed...
+   * Workflow: None... Reason for Update... Updated by: Genesis Joy Mangohig...Show More" into a group chat
+   * as if it were the next step.
+   *
+   * Two signals, either is enough: it carries the log's own furniture, or it is far too long to be one
+   * labelled fact. A blank is the right answer — better than a paragraph of audit trail.
+   */
+  if (/updated by|reason for update|show more|workflow:\s*none/i.test(value)) return '';
+  if (value.length > 300) return '';
+
+  return value;
 }
 
 /**

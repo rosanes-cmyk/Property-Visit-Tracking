@@ -173,9 +173,15 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     `📸 Photos taken: ${TO_FILL_IN}`
   ]);
 
-  section('━━ AFTER THE VISIT ━━', [
-    call.nextStep ? `➡️ ${call.nextStep}` : `➡️ ${v('nextAction') || TO_FILL_IN}`
-  ]);
+  /*
+   * No "after the visit" section. The client asked for it gone, and it had earned that: it printed the whole
+   * REI ACCOUNT UPDATE log — "Task: Created or confirmed... Workflow: None... Reason for Update... Updated
+   * by: Genesis Joy Mangohig...Show More" — because a "Next Step:" label inside that log was matched and the
+   * log is one long unbroken line, so the value ran to the end of it.
+   *
+   * What happens after the visit is decided at the visit, by the person reading this. It did not need a line
+   * carrying somebody's audit trail into a group chat.
+   */
 
   if (includeSellerWarning) {
     out.push('', '⚠️ THE SELLER IS IN THIS GROUP — do not post offer numbers, equity or motivation here.');

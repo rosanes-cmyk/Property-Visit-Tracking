@@ -140,8 +140,9 @@ check('a named price IS shown',
 // because "what happens next" is always a question worth leaving open.
 check('optional summary lines are omitted when empty',
   ['⏳ Timeline', '💰 Price expectation'].some((l) => bare_.includes(l)), false);
-check('but the after-the-visit line stays as a blank to fill',
-  bare_.includes('━━ AFTER THE VISIT ━━'), true);
+// The section is gone: it printed the whole REI ACCOUNT UPDATE log, and what happens after a visit is
+// decided at the visit by whoever is reading this.
+check('there is no after-the-visit section', bare_.includes('AFTER THE VISIT'), false);
 check('the REI link is still there for anyone who wants the rest',
   note.includes('https://my.reiblackbook.com/contacts/20473369'), true);
 
@@ -219,7 +220,7 @@ const FULLNOTE = buildInspectionNote({
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
 
 for (const heading of ['━━ WHEN ━━', '━━ WHO ━━', '━━ WHAT THE SELLER SAID ━━',
-  '━━ THE NUMBERS ━━', '━━ FILL IN AT THE VISIT ━━', '━━ AFTER THE VISIT ━━']) {
+  '━━ THE NUMBERS ━━', '━━ FILL IN AT THE VISIT ━━']) {
   check(`${heading} is there`, FULLNOTE.includes(heading), true);
 }
 check('the heading still carries the marker, so a duplicate is recognised',
@@ -239,6 +240,22 @@ check('but the numbers section stays, as blanks to look up',
   NO_CALL.includes('━━ THE NUMBERS ━━'), true);
 check('and the fill-in section stays, as the job at the door',
   NO_CALL.includes('━━ FILL IN AT THE VISIT ━━'), true);
+
+console.log('\n=== A swallowed REI log never reaches the group ===');
+/*
+ * The account-update note carries its OWN "Next Step:" label and arrives as one unbroken line, so the match
+ * had no newline to stop at and ran to the end. The group got "Task: Created or confirmed... Workflow: None
+ * ... Reason for Update... Updated by: Genesis Joy Mangohig...Show More" presented as the next step.
+ */
+const LOG = 'REI ACCOUNT UPDATE – August 3, 2026Changes Made:Tags: Added Appointment Booked' +
+  'Next Step: Added Juan\u2019s property visit for August 4, 2026, at 11:00 AM, followed by comps review ' +
+  'and preliminary-offer preparation.Task: Created or confirmed the property-visit task assigned to Jonathan.' +
+  'Workflow: NoneReason for Update: David completed a live qualification call.Updated by: Genesis Joy Mangohig';
+const FROMLOG = buildInspectionNote({ propertyAddress: '1 A St, B, CA', notes: LOG }, {});
+check('no audit trail in the note', FROMLOG.includes('Updated by'), false);
+check('no "Show More" leakage', /Show More/.test(FROMLOG), false);
+check('no "Workflow: None"', FROMLOG.includes('Workflow'), false);
+check('and no section built from it', FROMLOG.includes('AFTER THE VISIT'), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
