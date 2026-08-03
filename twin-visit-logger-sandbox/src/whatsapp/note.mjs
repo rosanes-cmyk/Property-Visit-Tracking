@@ -19,7 +19,7 @@
  */
 
 import {
-  extractPropertyRadar, hasAnyPropertyRadar, extractCallSummary
+  extractPropertyRadar, hasAnyPropertyRadar, extractCallSummary, extractLogistics, mapsLink
 } from './propertyradar.mjs';
 
 /** Lines nobody can fill from REI. Confirmed absent — see _notAvailableInRei in the selector config. */
@@ -55,6 +55,17 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     return raw === undefined || raw === null ? '' : String(raw).replace(/\s+/g, ' ').trim();
   };
 
+  /*
+   * The travel plan, and a directions link. Computed before the lines are assembled because they sit
+   * directly under the appointment — when the visit is, when to leave, how long it takes, and one tap to
+   * navigate are all read in the same glance.
+   */
+  const given = (key) => v(key);
+  const logistics = extractLogistics(visit.notes || '');
+  const leaveOffice = given('leaveOffice') || logistics.leaveOffice;
+  const driveTime = given('driveTime') || logistics.driveTime;
+  const maps = given('mapsLink') || mapsLink(v('propertyAddress'));
+
   const facts = [
     NOTE_HEADING,
     line('📍', 'Property', v('propertyAddress')),
@@ -64,6 +75,9 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
     line('📅', 'Appointment', appointmentText && `${appointmentText} (In-Person Property Visit)`),
     line('📣', 'Lead Source', v('leadSource'))
   ];
+  if (leaveOffice) facts.push(`🚪 Leave Office: ${leaveOffice}`);
+  if (driveTime) facts.push(`🚗 Drive Time: ${driveTime}`);
+  if (maps) facts.push(`🗺️ Directions: ${maps}`);
 
   // Only shown when REI actually had them; a blank "4 Beds" line would be noise.
   const beds = v('beds'), baths = v('baths'), sqft = v('sqft');
@@ -88,9 +102,32 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * Where PropertyRadar is absent they stay blank, because a blank says "nobody has looked this up"
    * and an omitted line says nothing at all.
    */
-  // Parsed from the RAW notes: tidyReiNotes removes the PropertyRadar block once its numbers are
-  // showing as their own lines, so reading it after tidying would find nothing.
-  const radar = extractPropertyRadar(visit.notes || '');
+  /*
+   * Values may arrive ALREADY EXTRACTED, or as raw notes to parse.
+   *
+   * The calendar description now carries the summary as labelled lines rather than REI's notes verbatim,
+   * so there is nothing left there to parse — the work was done once, upstream. Anything passed in
+   * explicitly wins; parsing the raw notes is the fallback for callers that still hold them, which is how
+   * add-visit-from-rei works.
+   */
+  const radar = hasAnyPropertyRadar({
+    estimatedValue: given('estimatedValue'),
+    assessedValue: given('assessedValue'),
+    openLoansBalance: given('openLoansBalance'),
+    estimatedEquity: given('estimatedEquity'),
+    purchaseDate: given('purchaseDate'),
+    occupancy: given('occupancy')
+  })
+    ? {
+      estimatedValue: given('estimatedValue'),
+      assessedValue: given('assessedValue'),
+      openLoansBalance: given('openLoansBalance'),
+      estimatedEquity: given('estimatedEquity'),
+      purchaseDate: given('purchaseDate'),
+      occupancy: given('occupancy'),
+      vestedOwner: given('vestedOwner')
+    }
+    : extractPropertyRadar(visit.notes || '');
   const toFill = [
     '',
     hasAnyPropertyRadar(radar)
@@ -112,7 +149,18 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * reworded — each line is the VA's own text or a blank, because paraphrasing a motivation read puts
    * words in the mouth of whoever spoke to the seller.
    */
-  const summary = extractCallSummary(visit.notes || '');
+  const parsed = extractCallSummary(visit.notes || '');
+  const summary = {
+    motivationLevel: given('motivationLevel') || parsed.motivationLevel,
+    reasonForSelling: given('reasonForSelling') || parsed.reasonForSelling,
+    propertyCondition: given('propertyCondition') || parsed.propertyCondition,
+    knownIssues: given('knownIssues') || parsed.knownIssues,
+    timeline: given('timeline') || parsed.timeline,
+    priceExpectation: given('priceExpectation') || parsed.priceExpectation,
+    nextStep: given('nextStep') || parsed.nextStep,
+    summary: given('callSummary') || parsed.summary
+  };
+
 
   /*
    * "Property Details" in the call summary usually opens with the address, which is already the first

@@ -201,3 +201,32 @@ export function extractCallSummary(notesText) {
     contactResult: labelledValue(t, 'Contact Result')
   };
 }
+
+/**
+ * The travel plan, when someone has written one into the notes.
+ *
+ * "Leave Office: 8:15 AM" and "Drive Time: ~1 hr 45 mins (via US-101 N; confirm morning-of)" are the two
+ * facts that decide whether a visitor is late, and they were being read by nobody. They belong on the
+ * calendar event above all — that is what pops up on a phone before the drive.
+ */
+export function extractLogistics(notesText) {
+  const t = String(notesText || '');
+  return {
+    leaveOffice: labelledValue(t, 'Leave Office') || labelledValue(t, 'Leave by')
+      || labelledValue(t, 'Depart'),
+    driveTime: labelledValue(t, 'Drive Time') || labelledValue(t, 'Travel Time')
+      || labelledValue(t, 'ETA')
+  };
+}
+
+/**
+ * A Google Maps DIRECTIONS link for an address.
+ *
+ * Directions, not a pin: nobody standing in an office needs to be shown where a house is on a map, they
+ * need the route. The link opens the native app on a phone.
+ */
+export function mapsLink(address) {
+  const text = String(address || '').trim();
+  if (!text) return '';
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(text)}`;
+}

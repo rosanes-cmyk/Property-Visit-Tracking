@@ -83,6 +83,42 @@ check('no raw REI notes block', CALL.includes('📝 REI Notes:'), false);
 check('no activity block', CALL.includes('🕑 REI Activity:'), false);
 check('no call-summary bullets pasted in', CALL.includes('CALL SUMMARY'), false);
 
+console.log('\n=== The drive plan and directions sit under the appointment ===');
+const TRIP_NOTE = buildInspectionNote({
+  propertyAddress: '1390 Estudillo Ave, San Leandro, CA 94577',
+  notes: 'Leave Office: 8:15 AM\nDrive Time: ~1 hr 45 mins (via US-101 N)'
+}, { appointmentText: 'Mon, Jul 13, 2026, 10:00 AM' });
+check('leave time', TRIP_NOTE.includes('🚪 Leave Office: 8:15 AM'), true);
+check('drive time', TRIP_NOTE.includes('🚗 Drive Time: ~1 hr 45 mins (via US-101 N)'), true);
+check('a directions link is always there when an address is',
+  TRIP_NOTE.includes('🗺️ Directions: https://www.google.com/maps/dir/?api=1&destination='), true);
+check('no drive lines when nobody wrote them',
+  ['🚪 Leave Office', '🚗 Drive Time'].some((l) => bare_.includes(l)), false);
+check('no directions line without an address', bare_.includes('🗺️ Directions'), false);
+
+console.log('\n=== Values already extracted upstream are used as-is ===');
+/*
+ * The calendar description is now a summary written once by the calendar module, so the note reads its
+ * labelled lines instead of re-parsing REI's notes. Doing it twice from the same text was the old shape.
+ */
+const PRE = buildInspectionNote({
+  propertyAddress: '1 A St, B, CA',
+  estimatedValue: '$900,000',
+  estimatedEquity: '$400,000 (44%)',
+  occupancy: 'Vacant',
+  motivationLevel: 'Hot — needs to close fast',
+  callSummary: 'Seller inherited the house and wants it gone',
+  leaveOffice: '7:30 AM'
+}, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
+check('the figure is used', PRE.includes('💵 Estimated Value - $900,000'), true);
+check('equity is used', PRE.includes('📈 Estimated Equity - $400,000 (44%)'), true);
+check('occupancy is used', PRE.includes('👥 Occupancy: Vacant'), true);
+check('motivation is used', PRE.includes('🌡️ Motivation Level: Hot — needs to close fast'), true);
+check('the call story is used', PRE.includes('📞 The call: Seller inherited the house'), true);
+check('leave time is used', PRE.includes('🚪 Leave Office: 7:30 AM'), true);
+check('and it still says Lead Summary, not "no PropertyRadar note"',
+  PRE.includes('📊 Lead Summary:  (no'), false);
+
 console.log('\n--- the three summary lines appear only when the VA wrote them ---');
 // Dropping the dump lost these, and they matter: how much time there is, whether a price has been named,
 // and what is expected after the visit. Nobody fills these in at the door, so an absent one is omitted

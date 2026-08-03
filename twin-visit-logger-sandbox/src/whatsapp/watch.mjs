@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-03-note-24';
+const BUILD = '2026-08-03-note-25';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -430,6 +430,14 @@ async function maybePostNote(page, selectors, plan) {
 
   const from = (label) => fieldFromDescription(plan.rawDescription, label);
   const block = (heading) => blockFromDescription(plan.rawDescription, heading);
+  /*
+   * Everything is read from the calendar description's LABELLED LINES.
+   *
+   * The description is now a summary written by the calendar module — the same parsers, run once, upstream
+   * — rather than REI's notes pasted in. So there is nothing to re-parse here, and the work is no longer
+   * done twice from the same text. block('Notes') is kept only as a fallback for events written before
+   * this change.
+   */
   const note = buildInspectionNote({
     propertyAddress: plan.address,
     sellerName: from('Seller'),
@@ -438,9 +446,30 @@ async function maybePostNote(page, selectors, plan) {
     leadSource: from('Lead Source'),
     contactStage: from('Contact Stage'),
     assignedOwner: from('Assigned Owner'),
-    // The FULL blocks, not the one-line Next Action that was standing in for them.
+
+    leaveOffice: from('Leave Office'),
+    driveTime: from('Drive Time'),
+    mapsLink: from('Maps'),
+
+    estimatedValue: from('Estimated Value'),
+    assessedValue: from('Assessed Value'),
+    openLoansBalance: from('Estimated Open Loans Balance'),
+    estimatedEquity: from('Estimated Equity'),
+    purchaseDate: from('Purchase Date'),
+    occupancy: from('Occupancy'),
+    vestedOwner: from('Vested Owner'),
+
+    motivationLevel: from('Motivation Level'),
+    reasonForSelling: from('Reason for Selling'),
+    propertyCondition: from('Property Condition'),
+    knownIssues: from('Known Issues'),
+    timeline: from('Timeline'),
+    priceExpectation: from('Price Expectation'),
+    callSummary: from('Call Summary'),
+    nextStep: from('Next Step'),
+
+    // Events written before the description became a summary still carry the raw blocks.
     notes: block('Notes'),
-    latestActivity: block('Latest Activity'),
     nextAction: from('Next Action')
   }, { appointmentText: plan.startLocal, includeSellerWarning: plan.sellerIncluded });
 

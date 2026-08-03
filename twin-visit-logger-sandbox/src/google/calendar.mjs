@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
+import {
+  extractPropertyRadar, extractCallSummary, extractLogistics, mapsLink
+} from '../whatsapp/propertyradar.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const clip = (value, maxLength) => {
@@ -17,45 +20,68 @@ function isCancelled(status) {
   return normalize(status).toLowerCase().includes('cancel');
 }
 
+/**
+ * The event description: a SUMMARY of the REI contact, as labelled single lines.
+ *
+ * It used to paste REI's Notes and Activity fields in verbatim — thousands of characters of engagement
+ * counters, nine-bullet call summaries, account-update logs and comp verdicts. Nobody reads that on a
+ * phone before a drive, and the client's answer on seeing it was to summarise.
+ *
+ * Every line is "Label: value" on ONE line, which serves both readers: a person opening the event, and the
+ * WhatsApp step, which reads these labels back out. That is why the summarising happens HERE and once —
+ * the note used to re-parse the raw notes downstream, so the same work was done twice from the same text.
+ */
 function buildDescription(visit) {
+  const radar = extractPropertyRadar(visit.notes || '');
+  const call = extractCallSummary(visit.notes || '');
+  const trip = extractLogistics(visit.notes || '');
+
+  // Only lines with a value, except the identifying fields, which say "Not found" so their absence is
+  // visible rather than silent.
+  const some = (label, value) => (String(value || '').trim() ? `${label}: ${String(value).trim()}` : '');
+
   return [
     `Seller: ${visit.sellerName || 'Not found'}`,
     `Phone: ${visit.phone || 'Not found'}`,
     `Email: ${visit.email || 'Not found'}`,
     `Property: ${visit.propertyAddress || 'Not found'}`,
-    /*
-     * The REI link goes HIGH, not last.
-     *
-     * It used to be the final line, after up to 6,500 characters of notes and activity. The whole
-     * description is capped, so it was the first thing truncation removed — and it is the one field other
-     * steps READ back out: add-visit-from-rei and the REI task closer both find the contact through it.
-     * Losing it turned a working command into "that event has no REI BlackBook link in its description".
-     * The machine-readable identifier must never sit downstream of unbounded free text.
-     */
+    // High, and never last: other steps read this back, and it must survive any truncation.
     `REI BlackBook: ${visit.reiLink || 'Not found'}`,
+    some('Maps', mapsLink(visit.propertyAddress)),
     `Assigned Owner: ${visit.assignedOwner || 'Not found'}`,
     `Current Stage: ${isCancelled(visit.taskStatus) ? 'Cancelled' : 'Visit Scheduled'}`,
     `Task Status: ${visit.taskStatus || 'Not found'}`,
     `Contact Stage: ${visit.contactStage || 'Not found'}`,
     `Lead Source: ${visit.leadSource || 'Not found'}`,
     '',
-    /*
-     * 5000, not 2500. The notes on a worked contact run long — a call summary, a comp run, and the VA's
-     * PropertyRadar Verification note with the valuation and equity figures in it. At 2500 the
-     * PropertyRadar note fell off the end, and since the WhatsApp briefing reads its figures out of
-     * THIS text, they arrived at the property as blanks while sitting in REI all along.
-     *
-     * The whole description is capped at 7800 below, so activity comes down to 1500 to make room.
-     */
-    'Notes:',
-    clip(visit.notes || 'No notes found.', 5000),
+    // The two facts that decide whether the visitor is late.
+    some('Leave Office', trip.leaveOffice),
+    some('Drive Time', trip.driveTime),
     '',
-    'Latest Activity:',
-    clip(visit.latestActivity || 'No activity found.', 1500),
+    some('Estimated Value', radar.estimatedValue),
+    some('Assessed Value', radar.assessedValue),
+    some('Estimated Open Loans Balance', radar.openLoansBalance),
+    some('Estimated Equity', radar.estimatedEquity),
+    some('Purchase Date', radar.purchaseDate),
+    some('Occupancy', radar.occupancy),
+    some('Vested Owner', radar.vestedOwner),
+    '',
+    some('Motivation Level', call.motivationLevel),
+    some('Reason for Selling', call.reasonForSelling),
+    some('Property Condition', call.propertyCondition),
+    some('Known Issues', call.knownIssues),
+    some('Timeline', call.timeline),
+    some('Price Expectation', call.priceExpectation),
+    some('Call Summary', clip(call.summary, 700)),
+    some('Next Step', call.nextStep),
     '',
     `Next Action: ${visit.nextAction || 'Not found'}`
-  ].join('\n').slice(0, 7800);
+  ].filter((entry) => entry !== '' || true)
+    // Collapse the runs of blank lines left by omitted values, so an empty section does not leave a gap.
+    .join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '')
+    .slice(0, 7800);
 }
+
 
 /**
  * Resolve the target calendar.

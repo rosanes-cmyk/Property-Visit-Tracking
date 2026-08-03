@@ -10,7 +10,10 @@
  *
  * The note below is copied verbatim from the live contact for 1390 Estudillo Ave.
  */
-import { extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes, labelledValue, extractCallSummary } from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
+import {
+  extractPropertyRadar, hasAnyPropertyRadar, tidyReiNotes, labelledValue, extractCallSummary,
+  extractLogistics, mapsLink
+} from '../twin-visit-logger-sandbox/src/whatsapp/propertyradar.mjs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -161,6 +164,31 @@ check('an empty value is blank', labelledValue('Timeline:', 'Timeline'), '');
 check('"N/A" is blank', labelledValue('Timeline: N/A', 'Timeline'), '');
 check('nothing at all', extractCallSummary('').motivationLevel, '');
 check('undefined does not throw', extractCallSummary(undefined).knownIssues, '');
+
+console.log('\n=== extractLogistics: the two facts that decide whether the visitor is late ===');
+/*
+ * "Leave Office: 8:15 AM" and "Drive Time: ~1 hr 45 mins (via US-101 N; confirm morning-of)" were being
+ * read by nobody, in notes that already had them.
+ */
+const TRIP = 'Appointment: Monday, July 13, 2026 | 10:00 AM\nLeave Office: 8:15 AM\n' +
+  'Drive Time: ~1 hr 45 mins (via US-101 N; confirm morning-of)';
+check('leave time', extractLogistics(TRIP).leaveOffice, '8:15 AM');
+check('drive time keeps the route note',
+  extractLogistics(TRIP).driveTime, '~1 hr 45 mins (via US-101 N; confirm morning-of)');
+check('"Leave by" is accepted too', extractLogistics('Leave by: 7:00 AM').leaveOffice, '7:00 AM');
+check('"Travel Time" is accepted too', extractLogistics('Travel Time: 45 mins').driveTime, '45 mins');
+check('nothing written means nothing claimed',
+  [extractLogistics('Spoke to the seller').leaveOffice, extractLogistics('').driveTime], ['', '']);
+
+console.log('\n=== mapsLink: directions, not a pin ===');
+// Nobody in an office needs to be shown where a house is. They need the route.
+check('it is a directions link',
+  mapsLink('1390 Estudillo Ave, San Leandro, CA 94577'),
+  'https://www.google.com/maps/dir/?api=1&destination=1390%20Estudillo%20Ave%2C%20San%20Leandro%2C%20CA%2094577');
+check('commas and spaces are encoded', mapsLink('1 A St, B, CA').includes('%2C'), true);
+check('no address means no link', mapsLink(''), '');
+check('whitespace only means no link', mapsLink('   '), '');
+check('undefined does not throw', mapsLink(undefined), '');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
