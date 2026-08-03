@@ -125,12 +125,20 @@ export async function processInbox(auth, logger) {
             await addLabel(auth, email.id, errorLabelId);
           }
           errors += 1;
+          // The contact URL matters more than anything else here: the fix is almost always a blank
+          // field on that REI record, and without the link the reader has to go hunting for it.
           logger.warn('REI record needs review; calendar was not changed.', {
             gmailMessageId: email.id,
             errors: validationErrors,
             // Include the scraper's detail (which date pieces were found) so the gap is visible.
-            details: partialVisit.warnings || [],
-            appointmentSource: partialVisit.appointmentSource || '(none)'
+            details: [...new Set(partialVisit.warnings || [])],
+            appointmentSource: partialVisit.appointmentSource || '(none)',
+            reiContact: partialVisit.reiLink || '(no REI contact URL resolved)',
+            seller: partialVisit.sellerName || '(no name read)',
+            fixOnTheReiContact: validationErrors.some((e) => /address/i.test(e))
+              ? 'Fill in "Property Address" on that REI contact, then re-run. No calendar event is ' +
+                'created without a real address.'
+              : 'Fill in the field(s) named above on that REI contact, then re-run.'
           });
           continue;
         }
