@@ -156,7 +156,16 @@ function formulaFor_(header, r) {
     case 'Days Overdue':
       return '=IF(' + A('Property Address') + '="","",IF(' + A('Next Action Due Date') + '="","",IF(TODAY()>' + A('Next Action Due Date') + ',TODAY()-' + A('Next Action Due Date') + ',0)))';
     case 'Stalled Status':
-      return '=IF(' + A('Property Address') + '="","",IF(OR(' + A('Current Stage') + '="Lost / Closed Out",' + A('Current Stage') + '="Long-Term Nurture",' + A('Current Stage') + '="Contract Signed"),"No",IF(MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')=0,"No",IF(NETWORKDAYS(MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + '),TODAY())-1>=' + CFG.STALLED_BUSINESS_DAYS + ',"Yes","No"))))';
+      // "Stalled" means a LIVE deal losing momentum, so it is a WINDOW, not just a minimum age:
+      // at least STALLED_BUSINESS_DAYS of silence, but no more than DORMANT_DAYS. Without the upper
+      // bound every one of the 379 imported records reads as stalled forever — a lead last touched
+      // in 2024 is not stalled, it is dormant, and burying today's slipping deals under it makes the
+      // signal useless.
+      var LAST = 'MAX(' + A('Last Contact Date') + ',' + A('Last Updated Date') + ',' + A('Visit Date') + ')';
+      return '=IF(' + A('Property Address') + '="","",IF(OR(' + A('Current Stage') + '="Lost / Closed Out",' +
+        A('Current Stage') + '="Long-Term Nurture",' + A('Current Stage') + '="Contract Signed"),"No",' +
+        'IF(' + LAST + '=0,"No",IF(AND(NETWORKDAYS(' + LAST + ',TODAY())-1>=' + CFG.STALLED_BUSINESS_DAYS +
+        ',TODAY()-' + LAST + '<=' + CFG.DORMANT_DAYS + '),"Yes","No"))))';
     case 'Missing Required Fields':
       // Finished records are exempt, same as Exception Reason. The REI link is only required of
       // records the automation created: the imported history has no REI contact and never will, so

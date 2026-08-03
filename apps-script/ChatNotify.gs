@@ -413,23 +413,36 @@ function sendAttentionDigestToChat() {
     var label = (rec['Seller Name'] || '(no name)') + ' — ' + rec['Property Address'];
     var owner = rec['Assigned Owner'] || rec['Assigned Visitor'] || 'UNASSIGNED';
 
-    var od = Number(rec['Days Overdue']) || 0;
-    if (od > 0) overdue.push(od + 'd · ' + label + ' · 👤 ' + owner + ' · ' + (rec['Next Action'] || 'no next action'));
-    if (rec['Stalled Status'] === 'Yes') stalled.push(label + ' · 👤 ' + owner);
+    // ONE lead, ONE line. A record could previously appear in all four sections, so the headline
+    // count was inflated and the same seller was read three times before anyone noticed it was the
+    // same seller. Each record now lands in its most urgent bucket only, and `claimed` enforces it.
+    var claimed = false;
+    var claim = function (arr, text) { if (claimed) return; claimed = true; arr.push(text); };
 
-    // A visit whose date has passed while still marked Scheduled was never closed out.
-    if (String(rec['Visit Status']) === 'Scheduled') {
-      var raw = rec['Visit Date'], d = null;
-      if (raw instanceof Date) d = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
-      else if (typeof raw === 'number' && raw > 1000) {
-        var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
-        d = new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
-      }
-      if (d && d < today) missedVisit.push(fmt_(d) + ' · ' + label + ' · 👤 ' + owner);
+    // A visit whose date has passed while still marked Scheduled is the most urgent thing here:
+    // either it happened and nobody logged it, or it was missed outright.
+    var raw = rec['Visit Date'], d = null;
+    if (raw instanceof Date) d = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+    else if (typeof raw === 'number' && raw > 1000) {
+      var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
+      d = new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
     }
+    if (String(rec['Visit Status']) === 'Scheduled' && d && d < today) {
+      claim(missedVisit, fmt_(d) + ' · ' + label + ' · 👤 ' + owner);
+    }
+
+    // Overdue only counts when somebody actually WROTE a next action. A due date with no action text
+    // is an automation artifact (the stage cascade stamps a date), not a commitment anyone made — so
+    // it belongs in "needs review" below, where the missing field is the point.
+    var od = Number(rec['Days Overdue']) || 0;
+    if (od > 0 && rec['Next Action']) {
+      claim(overdue, od + 'd · ' + label + ' · 👤 ' + owner + ' · ' + rec['Next Action']);
+    }
+
     if (rec['Data Quality Status'] === 'Exception' || rec['Data Quality Status'] === 'Incomplete') {
-      review.push(label + ' · ' + (rec['Exception Reason'] || rec['Missing Required Fields'] || 'needs review'));
+      claim(review, label + ' · ' + (rec['Exception Reason'] || rec['Missing Required Fields'] || 'needs review'));
     }
+    if (rec['Stalled Status'] === 'Yes') claim(stalled, label + ' · 👤 ' + owner);
   });
 
   var total = overdue.length + stalled.length + missedVisit.length + review.length;
@@ -454,7 +467,10 @@ function sendAttentionDigestToChat() {
   if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard to update', onClick: { openLink: { url: url } } }] } });
 
   var err = chatPost_({ cardsV2: [{ cardId: 'attention', card: {
-    header: { title: 'Needs attention — ' + total + ' item(s)', subtitle: fmt_(today_()) },
+    header: {
+      title: 'Needs attention — ' + total + ' lead(s)',
+      subtitle: fmt_(today_()) + ' · each lead listed once, most urgent reason first'
+    },
     sections: [{ widgets: widgets }]
   } }] });
   logAuto_('CHAT', '', err ? ('Attention digest FAILED: ' + err) : ('Attention digest posted · ' + total + ' item(s).'));
