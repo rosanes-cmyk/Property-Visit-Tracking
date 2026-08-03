@@ -83,17 +83,46 @@ export async function completeTask(page, selectors, task) {
   const candidates = (selectors?.tasks?.completeControl || []).map(assertCompletionSelector);
   const row = page.locator(task.selector).nth(task.index);
 
+  /*
+   * HOVER FIRST. REI reveals the tick on hover — the button is in the DOM but hidden until the pointer is
+   * over the row. Six candidate selectors were checked with isVisible() and every one of them was
+   * correctly reported as not visible, so the run concluded there was no completion control at all. The
+   * control was there the whole time; nothing had put the mouse on the row.
+   */
+  await row.scrollIntoViewIfNeeded().catch(() => {});
+  await row.hover().catch(() => {});
+  await page.waitForTimeout(600);
+
   for (const candidate of candidates) {
     const control = row.locator(candidate).first();
-    if (!(await control.isVisible().catch(() => false))) continue;
-    await control.click();
-    await page.waitForTimeout(1500);
+    // count(), not isVisible(): presence is what tells us the selector is right. Whether it has finished
+    // fading in is a timing question, and one the hover above has already answered.
+    if (!(await control.count().catch(() => 0))) continue;
 
-    const after = ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+    // Hover the control itself so its own reveal transition completes, then click it for real. A forced
+    // click is the fallback for the case where the fade has not finished.
+    await control.hover().catch(() => {});
+    await page.waitForTimeout(300);
+    await control.click({ timeout: 5000 }).catch(async () => {
+      await control.click({ force: true, timeout: 5000 }).catch(() => {});
+    });
+    await page.waitForTimeout(2000);
+
+    /*
+     * Confirming is harder than it looks: REI may move a completed task out of "Upcoming Tasks"
+     * altogether, in which case the row text is gone rather than changed. Treat a row that has
+     * DISAPPEARED as success too — but only after having clicked, never as a default.
+     */
+    const stillThere = await row.count().catch(() => 0);
+    const after = stillThere
+      ? ((await row.innerText().catch(() => '')) || '').replace(/\s+/g, ' ')
+      : '';
+    const completed = !stillThere || /\bcompleted?\b/i.test(after) || !/booked appointment/i.test(after);
+
     return {
       clicked: candidate,
-      confirmed: /\bcompleted?\b/i.test(after),
-      rowText: after.slice(0, 160)
+      confirmed: completed,
+      rowText: stillThere ? after.slice(0, 160) : 'the task row is no longer in Upcoming Tasks'
     };
   }
   return { clicked: '', confirmed: false, rowText: 'no completion control found inside the task row' };

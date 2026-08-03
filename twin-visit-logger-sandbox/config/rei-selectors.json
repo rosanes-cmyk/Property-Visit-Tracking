@@ -221,21 +221,20 @@
     ]
   },
   "tasks": {
-    "_comment": "UNCONFIRMED CANDIDATES for the ONE write this project makes to REI: marking a booked-appointment task complete. Run `npm run rei:task-doctor -- \"<contact url>\"` to see which resolve. src/rei/task-gate.mjs refuses any selector matching delete/remove/trash/archive/cancel/discard at runtime, so a stale guess cannot destroy a task instead of completing it.",
+    "_comment": "CONFIRMED on 2026-08-03 from real markup via `node scripts/rei-task-doctor.mjs \"<contact url>\"`. The completion control is a Chakra button: aria-label='mark-as-complete', id='check-task-complete', carrying a checkmark SVG. It is HIDDEN until the task row is hovered - which is why six visibility-checked guesses all missed it and the run reported 'no completion control found inside the task row'. completeTask hovers the row first. src/rei/task-gate.mjs still refuses any selector matching delete/remove/trash/archive/cancel/discard at runtime.",
     "taskRows": [
-      "[data-testid='task-item']",
+      "[data-testid='accordion-panel'] [data-testid='list-item']:has-text('Booked appointment')",
+      "[data-testid='list'] [data-testid='list-item']:has-text('Booked appointment')",
       "[data-testid='list-item']:has-text('Booked appointment')",
-      "[class*='task-row']",
-      "li:has-text('Booked appointment')",
-      "tr:has-text('Booked appointment')"
+      "[data-testid='task-item']",
+      "li:has-text('Booked appointment')"
     ],
     "completeControl": [
-      "[data-testid='task-complete']",
-      "input[type='checkbox']",
-      "[role='checkbox']",
-      "[aria-label*='complete' i]",
-      "button:has-text('Complete')",
-      "button:has-text('Done')"
+      "[aria-label='mark-as-complete']",
+      "#check-task-complete",
+      "button[id='check-task-complete']",
+      "button.chakra-button[aria-label*='complete' i]",
+      "[data-testid='task-complete']"
     ]
   },
   "propertyFacts": {
