@@ -33,6 +33,39 @@ for (const file of ['apps-script/ChatNotify.gs', 'apps-script/Code.combined.gs']
   check('getUrl() is still there as a last resort', /getUrl/.test(body), true);
 }
 
+console.log('\n=== The URL SHAPE is repaired ===');
+// Two forms of a Workspace web-app link exist and only one still works. Note where "macros" sits.
+const CHATSRC = read('apps-script/ChatNotify.gs');
+const nFrom = CHATSRC.indexOf('function normalizeExecUrl_');
+const normalizeExecUrl_ = new Function(
+  `${CHATSRC.slice(nFrom, CHATSRC.indexOf('\n}', nFrom) + 2)}\nreturn normalizeExecUrl_;`
+)();
+
+const LEGACY = 'https://script.google.com/a/twinhomebuyer.com/macros/s/AKfycbyYPg4z/exec';
+const GOOD   = 'https://script.google.com/a/macros/twinhomebuyer.com/s/AKfycbyYPg4z/exec';
+check('the legacy shape getUrl() returns is rewritten', normalizeExecUrl_(LEGACY), GOOD);
+check('an already-correct link is left alone', normalizeExecUrl_(GOOD), GOOD);
+check('rewriting is idempotent', normalizeExecUrl_(normalizeExecUrl_(LEGACY)), GOOD);
+check('a non-domain (public) link is untouched',
+  normalizeExecUrl_('https://script.google.com/macros/s/AKfycbPUBLIC/exec'),
+  'https://script.google.com/macros/s/AKfycbPUBLIC/exec');
+check('empty stays empty', normalizeExecUrl_(''), '');
+check('a non-Apps-Script URL is untouched',
+  normalizeExecUrl_('https://example.com/a/x/macros/s/y/exec'),
+  'https://example.com/a/x/macros/s/y/exec');
+check('the deployment id survives the rewrite intact',
+  normalizeExecUrl_(LEGACY).includes('AKfycbyYPg4z'), true);
+check('the domain survives the rewrite intact',
+  normalizeExecUrl_(LEGACY).includes('twinhomebuyer.com'), true);
+
+console.log('\n=== Every source of the link goes through the repair ===');
+const dashFrom = CHATSRC.indexOf('function dashboardUrl_()');
+const dashBody = CHATSRC.slice(dashFrom, CHATSRC.indexOf('\n}', dashFrom));
+check('the stored property is normalized', /normalizeExecUrl_\(stored\)/.test(dashBody), true);
+check('CFG is normalized', /normalizeExecUrl_\(CFG\.DASHBOARD_URL\)/.test(dashBody), true);
+check('getUrl() is normalized — this is the one that was broken',
+  /normalizeExecUrl_\(ScriptApp/.test(dashBody), true);
+
 console.log('\n=== The configured default is a usable /exec link ===');
 const CONFIG = read('apps-script/Config.gs');
 const url = (CONFIG.match(/DASHBOARD_URL:\s*'([^']+)'/) || [])[1] || '';

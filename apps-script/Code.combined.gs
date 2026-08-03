@@ -2667,9 +2667,29 @@ var DASHBOARD_URL_PROP = 'DASHBOARD_URL';
 function dashboardUrl_() {
   var stored = '';
   try { stored = PropertiesService.getScriptProperties().getProperty(DASHBOARD_URL_PROP) || ''; } catch (e) {}
-  if (stored) return stored;
-  if (CFG.DASHBOARD_URL) return CFG.DASHBOARD_URL;
-  try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; }
+  if (stored) return normalizeExecUrl_(stored);
+  if (CFG.DASHBOARD_URL) return normalizeExecUrl_(CFG.DASHBOARD_URL);
+  try { return normalizeExecUrl_(ScriptApp.getService().getUrl() || ''); } catch (e) { return ''; }
+}
+
+/**
+ * Repair the URL SHAPE. There are two forms of a Workspace web-app link and only one still works:
+ *
+ *   works:  https://script.google.com/a/macros/DOMAIN/s/ID/exec
+ *   fails:  https://script.google.com/a/DOMAIN/macros/s/ID/exec     <- note where "macros" sits
+ *
+ * ScriptApp.getService().getUrl() hands back the second (legacy) form, and Google now answers it with
+ * a Google Drive "unable to open the file" page. That is what the team saw when they tapped a card.
+ * Rather than trusting whoever set the link to spot the difference, the shape is corrected here so
+ * every path through dashboardUrl_ produces a link that opens.
+ */
+function normalizeExecUrl_(url) {
+  var text = String(url || '').trim();
+  if (!text) return '';
+  return text.replace(
+    /^(https:\/\/script\.google\.com)\/a\/(?!macros\/)([^\/]+)\/macros\/s\//,
+    '$1/a/macros/$2/s/'
+  );
 }
 
 /** Menu: paste the /exec link once. Refuses a /dev link, which is the whole bug this fixes. */
