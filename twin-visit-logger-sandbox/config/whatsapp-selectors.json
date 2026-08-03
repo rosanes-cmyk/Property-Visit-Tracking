@@ -1,5 +1,5 @@
 {
-  "_comment": "CONFIRMED against a live WhatsApp Web session on 2026-08-03 via `node scripts/whatsapp-doctor.mjs`: chatList, searchBox, newChatButton, newGroupButton and participantResults. participantSearch targets the CONTAINER [data-testid='inputarea'] on purpose - the editable element inside it has no testid/aria-label/title, so nothing selects it reliably; the client clicks the container and types through the keyboard instead. nextButton, groupSubjectInput and createGroupButton remain candidates: they only render after a participant is picked. Nothing here may match a send/delete/leave control - client.mjs refuses those.",
+  "_comment": "CONFIRMED against a live WhatsApp Web session on 2026-08-03 via `node scripts/whatsapp-doctor.mjs`: chatList, searchBox, newChatButton, newGroupButton, participantSearch and participantResults all resolved. participantSearch is a real <input type='text'> that carries data-testid='inputarea' ITSELF and has no child input - which is why earlier guesses at '[data-testid=inputarea] input' and contenteditable variants all missed. The client still clicks and types via the keyboard, so a changed inner structure cannot break it. nextButton, groupSubjectInput and createGroupButton remain candidates: they only render after a participant is picked. Nothing here may match a send/delete/leave control - client.mjs refuses those.",
   "chatList": [
     "[data-testid='chat-list']",
     "[aria-label='Chat list']",
@@ -27,11 +27,11 @@
     "li:has-text('New group')"
   ],
   "participantSearch": [
+    "input[data-testid='inputarea'][placeholder*='Search name' i]",
+    "[data-testid='new-group-drawer-participants'] input[data-testid='inputarea']",
     "[data-testid='new-group-drawer-participants'] [data-testid='inputarea']",
-    "[data-testid='new-group-drawer-participants'] [contenteditable='true']",
-    "[data-testid='new-group-drawer-participants'] [role='textbox']",
-    "[data-testid='inputarea']",
-    "[aria-label='Search name or number']"
+    "input[placeholder*='Search name' i]",
+    "[data-testid='inputarea']"
   ],
   "participantResults": [
     "[data-testid='new-group-drawer-participants'] [data-testid='cell-frame-container']",
