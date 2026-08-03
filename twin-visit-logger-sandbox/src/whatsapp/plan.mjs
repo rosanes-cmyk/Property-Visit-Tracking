@@ -10,18 +10,38 @@
 
 const OUR_EVENT = /^Property Visit\b/i;
 
-/** Digits only, then to E.164. A US number without a country code gets +1. */
+/**
+ * Digits only, then to E.164.
+ *
+ * The cases, in order of how much they can be trusted:
+ *   +anything          -> taken as given; the writer said what country it is
+ *   11-15 digits       -> already carries a country code, so just add the "+".
+ *                         This is what makes a Philippine number written 639054537035 work; it used
+ *                         to be REFUSED, which silently dropped the seller from the group.
+ *   exactly 10 digits  -> no country code at all. Prefixed with defaultCountry ("1" for the US
+ *                         sellers this reads from REI; set PHONE_DEFAULT_COUNTRY to change it).
+ *   11 digits from 1   -> US with its country code.
+ *   anything else      -> refused. An extension, a partial, a typo. A wrong number here means
+ *                         adding a stranger to a chat about someone's house.
+ */
 export function toE164(value, defaultCountry = '1') {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
+  // An extension has to be caught on the TEXT, before the digits are stripped. "(650) 771-7814 x22"
+  // is twelve digits — the same length as a Philippine mobile — so once the "x22" is gone the two are
+  // indistinguishable and the extension digits get dialled as part of the number.
+  if (/(?:^|[\s\-.,)])(?:x|ext|extn|extension)\.?\s*\d+/i.test(raw)) return '';
+
   const explicit = raw.startsWith('+');
   const digits = raw.replace(/\D/g, '');
   if (!digits) return '';
   if (explicit) return digits.length >= 8 ? `+${digits}` : '';
+  // A leading 0 is a national trunk prefix (09054537035 is how a Philippine mobile is written
+  // locally). It is NOT a country code, and no country code starts with 0 — so which country this
+  // belongs to is unknowable from the digits alone. Refused rather than guessed.
+  if (digits.startsWith('0')) return '';
   if (digits.length === 10) return `+${defaultCountry}${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  // Anything else is ambiguous — an extension, a partial, a typo. Refuse rather than guess, because
-  // a wrong number here means adding a stranger to a chat about someone's house.
+  if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
   return '';
 }
 
@@ -38,9 +58,18 @@ export function suspiciousNumber(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
   const e164 = toE164(raw);
-  if (!e164) return 'could not be read as a phone number';
+  if (!e164) {
+    if (/(?:^|[\s\-.,)])(?:x|ext|extn|extension)\.?\s*\d+/i.test(raw)) {
+      return 'has an extension on the end — remove it, the extension digits are not part of the number';
+    }
+    return /^\D*0/.test(raw)
+      ? 'starts with a 0 (a local trunk prefix, not a country code) — write it with the country ' +
+        'code instead, e.g. 09054537035 becomes +639054537035'
+      : 'could not be read as a phone number';
+  }
   const digits = e164.slice(1);
   if (digits.startsWith('1') && digits.length === 11) return '';          // US/Canada, correct
+  if (digits.startsWith('63') && digits.length === 12) return '';         // Philippines, correct
   if (digits.length < 11) {
     return `only ${digits.length} digits after the "+" — a country code looks missing ` +
            `(a Philippine mobile is +63 then 10 digits, e.g. +639171234567)`;
@@ -108,13 +137,13 @@ export function groupName(address, start, timezone, template = 'Visit {address} 
  * parses cleanly. Duplicates and the account's own number are removed — WhatsApp rejects a group
  * that tries to add its own owner as a participant.
  */
-export function participants({ teamNumbers = [], sellerPhone = '', includeSeller = false, ownNumber = '' }) {
-  const own = toE164(ownNumber);
+export function participants({ teamNumbers = [], sellerPhone = '', includeSeller = false, ownNumber = '', defaultCountry = '1' }) {
+  const own = toE164(ownNumber, defaultCountry);
   const seen = new Set();
   const out = [];
 
   const add = (value, role) => {
-    const e164 = toE164(value);
+    const e164 = toE164(value, defaultCountry);
     if (!e164 || (own && e164 === own) || seen.has(e164)) return;
     seen.add(e164);
     out.push({ number: e164, role });
@@ -135,6 +164,7 @@ export function planForEvent(event, options) {
     teamNumbers = [],
     includeSeller = false,
     ownNumber = '',
+    defaultCountry = '1',
     template = 'Visit {address} {date}',
     now = new Date(),
     alreadyDone = new Set()
@@ -165,7 +195,7 @@ export function planForEvent(event, options) {
   if (alreadyDone.has(event.id)) return skip(`group already created (${name})`);
 
   const sellerPhone = fieldFromDescription(event.description, 'Phone');
-  const people = participants({ teamNumbers, sellerPhone, includeSeller, ownNumber });
+  const people = participants({ teamNumbers, sellerPhone, includeSeller, ownNumber, defaultCountry });
   if (!people.length) return skip('no valid participant numbers — nobody to add');
 
   return {

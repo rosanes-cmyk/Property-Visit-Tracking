@@ -41,9 +41,27 @@ check('empty', toE164(''), '');
 check('null', toE164(null), '');
 check('"Not found"', toE164('Not found'), '');
 
+console.log('\n=== Numbers that already carry a country code ===');
+// The test lead is Philippine: +63 905 453 7035. A 12-digit number with no "+" used to be REFUSED,
+// which silently dropped the seller from the group.
+check('PH with +', toE164('+63 905 453 7035'), '+639054537035');
+check('PH without the + (used to be refused)', toE164('63 905 453 7035'), '+639054537035');
+check('PH as bare digits', toE164('639054537035'), '+639054537035');
+check('a US seller from REI still gets +1', toE164('(650) 771-7814'), '+16507717814');
+
+console.log('\n--- a local trunk prefix is refused, not guessed at ---');
+// 09054537035 is how a PH mobile is written locally. The 0 is a trunk prefix, not a country code,
+// and no country code starts with 0 — so the country is unknowable from the digits.
+check('leading 0 is refused', toE164('09054537035'), '');
+check('...and explained', suspiciousNumber('09054537035').includes('trunk prefix'), true);
+check('another local form refused', toE164('0917 123 4567'), '');
+check('the 10-digit default country can be changed', toE164('9054537035', '63'), '+639054537035');
+check('...and still defaults to US for REI sellers', toE164('9054537035'), '+19054537035');
+
 console.log('\n=== Mistyped numbers are caught before a run ===');
 // The real case: a Philippine mobile entered as +9928379192 instead of +639928379192. Valid E.164
 // on its face, reads as +992 (Tajikistan), matches nobody, and fails silently.
+check('a correct PH number is not flagged', suspiciousNumber('+639054537035'), '');
 check('a PH mobile missing its 63 is flagged',
   suspiciousNumber('+9928379192').includes('country code looks missing'), true);
 check('the same number written correctly passes', suspiciousNumber('+639928379192'), '');

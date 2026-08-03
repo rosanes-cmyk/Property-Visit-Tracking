@@ -115,6 +115,7 @@ async function main() {
     teamNumbers: config.whatsappTeamNumbers,
     includeSeller: config.whatsappIncludeSeller,
     ownNumber: config.whatsappOwnNumber,
+    defaultCountry: config.phoneDefaultCountry,
     template: config.whatsappGroupTemplate,
     now,
     alreadyDone: new Set(Object.keys(state.groups))

@@ -58,7 +58,11 @@ const raw = {
   // The ONE write this project makes to REI: marking a booked-appointment task complete once the
   // visit is confirmed on the calendar and in a WhatsApp group. Off unless explicitly enabled.
   // Everything else about REI stays read-only.
-  reiCompleteTasks: bool(process.env.REI_COMPLETE_TASKS, false)
+  reiCompleteTasks: bool(process.env.REI_COMPLETE_TASKS, false),
+  // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
+  // US sellers read from REI. A number that already has a country code is used as-is, and one
+  // starting with a 0 (a local trunk prefix) is refused rather than guessed at.
+  phoneDefaultCountry: (process.env.PHONE_DEFAULT_COUNTRY || '1').replace(/\D/g, '') || '1'
 };
 
 const schema = z.object({
@@ -94,7 +98,8 @@ const schema = z.object({
   whatsappIncludeSeller: z.boolean(),
   whatsappGroupTemplate: z.string().min(1),
   whatsappLookaheadDays: z.number().int().positive().max(365),
-  reiCompleteTasks: z.boolean()
+  reiCompleteTasks: z.boolean(),
+  phoneDefaultCountry: z.string().min(1)
 });
 
 export const config = schema.parse({
