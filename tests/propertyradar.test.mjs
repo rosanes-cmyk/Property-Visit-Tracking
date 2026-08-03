@@ -118,6 +118,7 @@ console.log('\n=== extractCallSummary: the judgement lines the VA already wrote 
  * answers sat a few lines down the same notes, as labelled facts in the VA's call summary.
  */
 const SUMMARY = 'CALL SUMMARY – August 3, 2026++ Contact Result: Answered++ ' +
+  'Summary: David confirmed he is the owner and is exploring options++ ' +
   'Seller Motivation: Not urgent, exploring options due to repair needs++ ' +
   'Timeline: No pressure; visit tomorrow++ Price Expectation: Not specified.++ ' +
   'Property Details: 4bd/4ba, needs repairs++ ' +
@@ -137,6 +138,19 @@ check('timeline', cs.timeline, 'No pressure; visit tomorrow');
 check('"Not specified" reads as blank', cs.priceExpectation, '');
 check('no Reason for Selling label means blank', cs.reasonForSelling, '');
 check('next step is what happens after the visit', cs.nextStep, 'Juan to visit; Cherry to run comps');
+check('the narrative is captured', cs.summary, 'David confirmed he is the owner and is exploring options');
+check('contact result too', cs.contactResult, 'Answered');
+
+console.log('\n--- and "Summary" is not confused with its neighbours ---');
+/*
+ * "CALL SUMMARY –" is the heading and "Lead Summary:" is a heading in OUR OWN message. This is the one
+ * paragraph that gives the visitor the story rather than a grade, so the wrong text here is worse than none.
+ */
+check('the "CALL SUMMARY" heading is not the narrative',
+  extractCallSummary('CALL SUMMARY – August 3, 2026++ Contact Result: Answered').summary, '');
+check('"Lead Summary:" is not the narrative',
+  extractCallSummary('Lead Summary: figures below++ Contact Result: Answered').summary, '');
+check('no Summary field means blank', extractCallSummary('Timeline: tomorrow').summary, '');
 
 console.log('\n--- labelledValue stops at the next field ---');
 check('stops at "++"', labelledValue('Timeline: tomorrow++ Price: 400k', 'Timeline'), 'tomorrow');

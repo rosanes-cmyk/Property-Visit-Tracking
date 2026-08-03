@@ -145,6 +145,19 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * omitted rather than shown blank — unlike the five above, nobody is expected to fill these in at the
    * door, so an empty label would be clutter rather than a prompt.
    */
+  /*
+   * What the seller actually said, in the VA's words, first of the three.
+   *
+   * The five lines above are grades and labels; this is the story, and it is what tells the person walking
+   * up to the door why they are there. Cut to 450 characters with a marker — Juan reads this on a phone on
+   * the way to a property, and the full version is one tap away on the REI link above.
+   */
+  if (summary.summary) {
+    const story = summary.summary.length > 450
+      ? `${summary.summary.slice(0, 450).trimEnd()}… (full notes on the REI link)`
+      : summary.summary;
+    toFill.push('', `📞 The call: ${story}`);
+  }
   if (summary.timeline) toFill.push(`⏳ Timeline: ${summary.timeline}`);
   if (summary.priceExpectation) toFill.push(`💰 Price Expectation: ${summary.priceExpectation}`);
   if (summary.nextStep) toFill.push(`➡️ Next Step: ${summary.nextStep}`);

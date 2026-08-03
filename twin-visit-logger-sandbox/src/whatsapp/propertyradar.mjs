@@ -165,6 +165,16 @@ export function extractCallSummary(notesText) {
   const temperature = labelledValue(t, 'Lead Temperature');
   const motivation = labelledValue(t, 'Seller Motivation');
 
+  /*
+   * The narrative: what the seller actually said.
+   *
+   * Anchored to the start of a field ("++", a bullet, or a line start) rather than matched loosely, so
+   * "Lead Summary:" and the "CALL SUMMARY –" heading cannot be mistaken for it. This is the one paragraph
+   * that gives the visitor the story instead of a grade, so getting the wrong text here would be worse
+   * than having none.
+   */
+  const narrative = (/(?:^|[+•\n])\s*Summary\s*:\s*([^\n•]*?)(?=\+\+|\n|•|$)/i.exec(t) || [])[1] || '';
+
   return {
     /*
      * "Warm — Not urgent, exploring options": the GRADE, then why.
@@ -186,6 +196,8 @@ export function extractCallSummary(notesText) {
     priceExpectation: labelledValue(t, 'Price Expectation'),
     // What happens after the visit. The VA writes it, and it is the one line that tells the visitor what
     // is expected of them rather than about the property.
-    nextStep: labelledValue(t, 'Next Step')
+    nextStep: labelledValue(t, 'Next Step'),
+    summary: narrative.replace(/\s+/g, ' ').trim(),
+    contactResult: labelledValue(t, 'Contact Result')
   };
 }

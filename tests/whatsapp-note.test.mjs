@@ -88,6 +88,14 @@ console.log('\n--- the three summary lines appear only when the VA wrote them --
 // and what is expected after the visit. Nobody fills these in at the door, so an absent one is omitted
 // rather than shown as a blank to complete.
 check('timeline is shown', CALL.includes('⏳ Timeline: No pressure'), true);
+// The story, not a grade. It is what tells the person walking up to the door why they are there.
+check('the call narrative is shown',
+  buildInspectionNote({ notes: 'Summary: David is exploring options and wants a visit first' }, {})
+    .includes('📞 The call: David is exploring options and wants a visit first'), true);
+// Juan reads this on a phone on the way to a property. The full version is one tap away.
+const LONG_CALL = buildInspectionNote({ notes: `Summary: ${'word '.repeat(200)}` }, {});
+check('a long narrative is cut', LONG_CALL.length < 1600, true);
+check('...and says where the rest is', LONG_CALL.includes('(full notes on the REI link)'), true);
 check('price expectation is omitted when "Not specified"',
   CALL.includes('💰 Price Expectation'), false);
 check('a named price IS shown',
