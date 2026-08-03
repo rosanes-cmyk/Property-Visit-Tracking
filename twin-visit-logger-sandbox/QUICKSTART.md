@@ -115,3 +115,31 @@ Read this before running it with `--yes`:
   with a number the business can afford to lose, not Juan's main line.
 - Past visits are ignored, cancelled events are ignored, and a group that already exists is recorded
   rather than created twice — so re-running is safe.
+
+## Clearing the REI task automatically
+
+Once the visit is on Juan's calendar **and** the WhatsApp group exists, the booked-appointment task
+in REI is marked **complete** so the task list stays clean.
+
+Turn it on in `.env`:
+
+```
+REI_COMPLETE_TASKS=true
+```
+
+Check the selectors first — read-only, clicks nothing:
+
+```powershell
+node scripts\rei-task-doctor.mjs "https://my.reiblackbook.com/contacts/20528181"
+```
+
+What it will and will not do:
+
+- **Complete, never delete.** The task and its history stay on the contact. Nothing in REI is
+  removed, and a selector matching delete/remove/trash/archive/cancel is refused at runtime.
+- **Both checks must pass first.** It re-reads Juan's calendar to confirm the event is really there
+  and requires the group to have been recorded. If either fails the task is left OPEN on purpose —
+  an open task is the only thing that will make anyone notice a booking went missing.
+- **The right task only.** Phone *and* date must both match. A seller with two properties has two
+  tasks, and completing the wrong one would hide a visit that is still coming.
+- **Nothing happens without `--yes`.** The dry run reports what it would complete and why.

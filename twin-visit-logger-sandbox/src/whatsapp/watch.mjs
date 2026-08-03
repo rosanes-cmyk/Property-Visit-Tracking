@@ -17,6 +17,10 @@ import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
 import { planForEvents } from './plan.mjs';
 import { launchWhatsApp, assertLoggedIn, createGroup, groupExists } from './client.mjs';
+import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
+import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
+import { shouldCompleteTask } from '../rei/task-gate.mjs';
+import { fieldFromDescription, localDay } from './plan.mjs';
 
 const APPLY = process.argv.includes('--yes');
 const STATE_FILE = path.resolve('./data/whatsapp-groups.json');
@@ -144,9 +148,90 @@ async function main() {
     await context.close();
   }
 
+  await clearReiTasks(create, state, calendar, calendarId);
+
   console.log(APPLY
     ? '\nDone.'
-    : '\nDRY RUN — nothing was created. Re-run with --yes once the numbers above look right.');
+    : '\nDRY RUN — nothing was created or completed. Re-run with --yes once the above looks right.');
+}
+
+/**
+ * Mark the REI task complete — the only write this project makes to REI.
+ *
+ * The interlock: re-read Juan's calendar to confirm the event is really there, and require that this
+ * run recorded the WhatsApp group. Neither is taken on trust from earlier in the run, because the
+ * whole point of leaving a task open is that it is the thing that makes a failure visible.
+ */
+async function clearReiTasks(plans, state, calendar, calendarId) {
+  if (!config.reiCompleteTasks) {
+    console.log('\nREI task completion is off (set REI_COMPLETE_TASKS=true in .env to enable).');
+    return;
+  }
+  const done = plans.filter((p) => state.groups[p.eventId]);
+  if (!done.length) return;
+
+  console.log(`\n=== Clearing ${done.length} REI task(s) ===`);
+  const selectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
+  const rei = await launchReiContext({ headless: false });
+  try {
+    const page = rei.pages()[0] || (await rei.newPage());
+
+    for (const plan of done) {
+      console.log(`\n--- ${plan.name}`);
+
+      // 1. Is the event really on Juan's calendar, right now?
+      let calendarVerified = false;
+      try {
+        const event = await calendar.events.get({ calendarId, eventId: plan.eventId });
+        calendarVerified = event.data.status !== 'cancelled';
+      } catch (error) {
+        console.log(`    calendar check failed: ${error.message}`);
+      }
+
+      // 2. Did the group actually get recorded?
+      const groupVerified = Boolean(state.groups[plan.eventId]);
+
+      // 3. Find the task on the contact page.
+      const contactUrl = fieldFromDescription(plan.rawDescription, 'REI BlackBook');
+      let task = null;
+      const visit = {
+        phone: plan.participants.find((p) => p.role === 'seller')?.number || plan.sellerPhone || '',
+        date: localDay(new Date(plan.startIso), config.calendarTimezone)
+      };
+
+      if (!contactUrl) {
+        console.log('    no REI link on the calendar event — cannot find the task');
+      } else {
+        await page.goto(contactUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+        await assertAuthenticated(page, selectors.login || {});
+        await page.waitForTimeout(2500);
+        const tasks = await readTasks(page, selectors, { timezone: config.calendarTimezone });
+        task = pickTaskForVisit(tasks, visit);
+        console.log(`    ${tasks.length} booked-appointment task(s) on the contact`);
+      }
+
+      const gate = shouldCompleteTask({
+        enabled: config.reiCompleteTasks,
+        apply: APPLY,
+        task,
+        visit,
+        groupVerified,
+        calendarVerified,
+        alreadyComplete: Boolean(task?.complete)
+      });
+
+      console.log(`    calendar verified: ${calendarVerified} · group verified: ${groupVerified}`);
+      if (!gate.complete) { console.log(`    NOT completing — ${gate.reason}`); continue; }
+
+      const result = await completeTask(page, selectors, task);
+      console.log(result.confirmed
+        ? `    task marked complete (${result.clicked})`
+        : `    clicked ${result.clicked || 'nothing'} but could not confirm — check REI by hand. Row now: ${result.rowText}`);
+    }
+  } finally {
+    await rei.close();
+  }
 }
 
 main().catch((error) => {

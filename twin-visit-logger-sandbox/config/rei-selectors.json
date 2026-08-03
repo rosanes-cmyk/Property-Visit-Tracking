@@ -1,22 +1,56 @@
 {
   "login": {
-    "urlFragments": ["login", "signin", "auth"],
-    "passwordSelectors": ["input[type='password']"]
+    "urlFragments": [
+      "login",
+      "signin",
+      "auth"
+    ],
+    "passwordSelectors": [
+      "input[type='password']"
+    ]
   },
   "listItemLabels": {
     "_comment": "Primary strategy. REI renders each field as a leaf [data-testid='list-item'] whose text is Label+Value glued together; the scraper matches these label prefixes and returns the remainder. Verified against a real REI contact page.",
-    "sellerName": ["Name"],
-    "phone": ["Phone (Mobile)", "Phone (Home)", "Phone"],
-    "email": ["Email"],
-    "propertyAddress": ["Property Address"],
-    "appointmentTime": ["Appointment Time"],
-    "appointmentDate": ["Appointment Date"],
-    "assignedOwner": ["Appointment Assigned To", "Sales Agent"],
-    "leadSource": ["Source"],
-    "contactStage": ["Lead Stage", "Category"],
-    "nextAction": ["Next Step"],
-    "callDisposition": ["Call Disposition"],
-    "amountOffer": ["Amount Offer"]
+    "sellerName": [
+      "Name"
+    ],
+    "phone": [
+      "Phone (Mobile)",
+      "Phone (Home)",
+      "Phone"
+    ],
+    "email": [
+      "Email"
+    ],
+    "propertyAddress": [
+      "Property Address"
+    ],
+    "appointmentTime": [
+      "Appointment Time"
+    ],
+    "appointmentDate": [
+      "Appointment Date"
+    ],
+    "assignedOwner": [
+      "Appointment Assigned To",
+      "Sales Agent"
+    ],
+    "leadSource": [
+      "Source"
+    ],
+    "contactStage": [
+      "Lead Stage",
+      "Category"
+    ],
+    "nextAction": [
+      "Next Step"
+    ],
+    "callDisposition": [
+      "Call Disposition"
+    ],
+    "amountOffer": [
+      "Amount Offer"
+    ]
   },
   "fields": {
     "sellerName": [
@@ -79,23 +113,77 @@
     ]
   },
   "labels": {
-    "sellerName": ["Contact Name", "Seller Name", "Name"],
-    "phone": ["Phone", "Mobile", "Primary Phone"],
-    "email": ["Email", "Primary Email"],
-    "propertyAddress": ["Property Address", "Address"],
-    "appointmentDateTime": ["Appointment", "Appointment Date", "Due Date", "Visit Date", "Start"],
-    "assignedOwner": ["Assigned To", "Owner", "Sales Agent"],
-    "taskTitle": ["Task", "Task Title", "Title"],
-    "taskStatus": ["Task Status", "Status"],
-    "contactStage": ["Lead Stage", "Contact Stage", "Stage"],
-    "leadSource": ["Lead Source", "Source"],
-    "nextAction": ["Next Action", "Next Step"]
+    "sellerName": [
+      "Contact Name",
+      "Seller Name",
+      "Name"
+    ],
+    "phone": [
+      "Phone",
+      "Mobile",
+      "Primary Phone"
+    ],
+    "email": [
+      "Email",
+      "Primary Email"
+    ],
+    "propertyAddress": [
+      "Property Address",
+      "Address"
+    ],
+    "appointmentDateTime": [
+      "Appointment",
+      "Appointment Date",
+      "Due Date",
+      "Visit Date",
+      "Start"
+    ],
+    "assignedOwner": [
+      "Assigned To",
+      "Owner",
+      "Sales Agent"
+    ],
+    "taskTitle": [
+      "Task",
+      "Task Title",
+      "Title"
+    ],
+    "taskStatus": [
+      "Task Status",
+      "Status"
+    ],
+    "contactStage": [
+      "Lead Stage",
+      "Contact Stage",
+      "Stage"
+    ],
+    "leadSource": [
+      "Lead Source",
+      "Source"
+    ],
+    "nextAction": [
+      "Next Action",
+      "Next Step"
+    ]
   },
   "tabs": {
-    "notes": ["Notes", "Contact Notes"],
-    "tasks": ["Tasks", "Appointments"],
-    "activity": ["Activity", "Timeline", "History"],
-    "property": ["Property", "Properties"]
+    "notes": [
+      "Notes",
+      "Contact Notes"
+    ],
+    "tasks": [
+      "Tasks",
+      "Appointments"
+    ],
+    "activity": [
+      "Activity",
+      "Timeline",
+      "History"
+    ],
+    "property": [
+      "Property",
+      "Properties"
+    ]
   },
   "collectionSelectors": {
     "notes": [
@@ -114,6 +202,24 @@
       "[data-testid='property-details']",
       "[data-test='property-details']",
       "[class*='property-detail']"
+    ]
+  },
+  "tasks": {
+    "_comment": "UNCONFIRMED CANDIDATES for the ONE write this project makes to REI: marking a booked-appointment task complete. Run `npm run rei:task-doctor -- \"<contact url>\"` to see which resolve. src/rei/task-gate.mjs refuses any selector matching delete/remove/trash/archive/cancel/discard at runtime, so a stale guess cannot destroy a task instead of completing it.",
+    "taskRows": [
+      "[data-testid='task-item']",
+      "[data-testid='list-item']:has-text('Booked appointment')",
+      "[class*='task-row']",
+      "li:has-text('Booked appointment')",
+      "tr:has-text('Booked appointment')"
+    ],
+    "completeControl": [
+      "[data-testid='task-complete']",
+      "input[type='checkbox']",
+      "[role='checkbox']",
+      "[aria-label*='complete' i]",
+      "button:has-text('Complete')",
+      "button:has-text('Done')"
     ]
   }
 }

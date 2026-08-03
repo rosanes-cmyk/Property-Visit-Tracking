@@ -141,12 +141,8 @@ export function planForEvent(event, options) {
   const name = groupName(address, start, timezone, template);
   if (alreadyDone.has(event.id)) return skip(`group already created (${name})`);
 
-  const people = participants({
-    teamNumbers,
-    sellerPhone: fieldFromDescription(event.description, 'Phone'),
-    includeSeller,
-    ownNumber
-  });
+  const sellerPhone = fieldFromDescription(event.description, 'Phone');
+  const people = participants({ teamNumbers, sellerPhone, includeSeller, ownNumber });
   if (!people.length) return skip('no valid participant numbers — nobody to add');
 
   return {
@@ -155,6 +151,9 @@ export function planForEvent(event, options) {
     name,
     address,
     startIso,
+    sellerPhone,
+    // Kept so the REI task step can find the contact link without re-fetching the event.
+    rawDescription: String(event.description ?? ''),
     startLocal: formatIn(start, timezone, {
       weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
       hour: 'numeric', minute: '2-digit'

@@ -54,7 +54,11 @@ const raw = {
   whatsappOwnNumber: process.env.WHATSAPP_OWN_NUMBER || '',
   whatsappIncludeSeller: bool(process.env.WHATSAPP_INCLUDE_SELLER, false),
   whatsappGroupTemplate: process.env.WHATSAPP_GROUP_TEMPLATE || 'Visit {address} {date}',
-  whatsappLookaheadDays: int(process.env.WHATSAPP_LOOKAHEAD_DAYS, 30)
+  whatsappLookaheadDays: int(process.env.WHATSAPP_LOOKAHEAD_DAYS, 30),
+  // The ONE write this project makes to REI: marking a booked-appointment task complete once the
+  // visit is confirmed on the calendar and in a WhatsApp group. Off unless explicitly enabled.
+  // Everything else about REI stays read-only.
+  reiCompleteTasks: bool(process.env.REI_COMPLETE_TASKS, false)
 };
 
 const schema = z.object({
@@ -89,7 +93,8 @@ const schema = z.object({
   whatsappOwnNumber: z.string(),
   whatsappIncludeSeller: z.boolean(),
   whatsappGroupTemplate: z.string().min(1),
-  whatsappLookaheadDays: z.number().int().positive().max(365)
+  whatsappLookaheadDays: z.number().int().positive().max(365),
+  reiCompleteTasks: z.boolean()
 });
 
 export const config = schema.parse({

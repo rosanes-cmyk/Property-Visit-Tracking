@@ -18,7 +18,12 @@ Do not replace this with Claude browser control, an autonomous Claude loop, Goog
 ## Safety
 
 1. Work only against the configured DEV/sandbox sheet and calendar until acceptance tests pass.
-2. Treat REI as read-only. Never edit a contact, complete a task, change a stage, send a text/email, or click destructive controls.
+2. Treat REI as read-only, with ONE narrow exception agreed with the client: marking a
+   **booked-appointment task complete**, and only after the visit is verified both on Juan's calendar
+   and as a WhatsApp group. It is off unless `REI_COMPLETE_TASKS=true`, it is gated by
+   `src/rei/task-gate.mjs`, and a selector matching delete/remove/trash/archive/cancel/discard is
+   refused at runtime. Everything else remains forbidden: never edit a contact, change a stage,
+   delete anything, send a text/email, or click destructive controls.
 3. Never store a REI password in source code or `.env`. Login is manual through `npm run login:rei` and persists in `browser-data/rei-sandbox`.
 4. Never commit `.env`, Google credentials/token, browser-data, debug screenshots/HTML, or seller data.
 5. Do not write directly to dashboard cells. Only upsert the tracker; dashboard formulas/charts must remain intact.
@@ -143,4 +148,10 @@ Use one real sandbox appointment and prove all of these:
 
 ## Scope control
 
-Do not work on WhatsApp, direct REI API integration, auto-sending seller communication, PDF reports, advanced dashboard redesign, or unrelated historical data migration. Finish the Gmail -> REI browser -> tracker -> dashboard -> calendar path first.
+The core Gmail -> REI browser -> tracker -> dashboard -> calendar path is finished, so the original
+"no WhatsApp" and "no historical migration" exclusions have been lifted by the client and both are
+now built (`src/whatsapp/`, `build/migrate_legacy_data.py`).
+
+Still out of scope: direct REI API integration, auto-sending seller communication (creating a group
+is permitted; sending a message is not, and no send function exists), PDF reports, and advanced
+dashboard redesign.
