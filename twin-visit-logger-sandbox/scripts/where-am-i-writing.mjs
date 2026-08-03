@@ -59,19 +59,46 @@ try {
       console.log('  WARNING: that access role cannot create events. It needs owner or writer');
       console.log('  ("Make changes to events"). A view-only share silently accepts nothing.');
     }
-    // Show the visit events actually on it, so "not in the calendar" is checkable.
+    /*
+     * Show the visit events actually on it, so "not in the calendar" is checkable.
+     *
+     * UPCOMING events are listed in full and FIRST. maxResults was 20, which sounded harmless and was
+     * not: sorted by start time from 30 days ago, the first twenty were all in the past, so a visit
+     * booked for tomorrow was missing from the very listing whose job is to prove it is there. It read
+     * as "the event was never created" when the event existed the whole time.
+     */
     const res = await calendar.events.list({
       calendarId: hit.id, q: 'Property Visit', singleEvents: true, orderBy: 'startTime',
-      timeMin: new Date(Date.now() - 30 * 86400000).toISOString(), maxResults: 20
+      timeMin: new Date(Date.now() - 30 * 86400000).toISOString(), maxResults: 250
     });
     const visits = (res.data.items || []).filter((e) => /^Property Visit\b/i.test(e.summary || ''));
-    console.log(`\nProperty Visit events on it (last 30 days onward): ${visits.length}`);
-    for (const e of visits) {
+    const now = Date.now();
+    const startOf = (e) => new Date(e.start?.dateTime || e.start?.date || 0).getTime();
+    const upcoming = visits.filter((e) => startOf(e) >= now);
+    const past = visits.filter((e) => startOf(e) < now);
+
+    console.log(`\nUPCOMING property visits on it: ${upcoming.length}` +
+      '   <- these are the ones the WhatsApp watcher acts on');
+    for (const e of upcoming) {
       console.log(`  ${e.start?.dateTime || e.start?.date}  ${e.summary}`);
       console.log(`      ${e.htmlLink}`);
     }
+    if (!upcoming.length) {
+      console.log('  None. No group will be created until a visit is booked in the future.');
+    }
+
+    console.log(`\nPast property visits in the last 30 days: ${past.length}` +
+      (past.length ? '  (most recent last)' : ''));
+    for (const e of past.slice(-5)) {
+      console.log(`  ${e.start?.dateTime || e.start?.date}  ${e.summary}`);
+    }
+    if (past.length > 5) console.log(`  ...and ${past.length - 5} earlier`);
+
     if (!visits.length) {
-      console.log('  None. If a run reported "Visit synchronized", it wrote to a different calendar.');
+      console.log('\n  Nothing at all. If a run reported "Visit synchronized", it wrote to a different calendar.');
+    }
+    if (res.data.nextPageToken) {
+      console.log('\n  NOTE: there are more events than one page — this listing is not complete.');
     }
   } else {
     console.log('Writing to     = NOT FOUND in this account\'s calendar list.');
