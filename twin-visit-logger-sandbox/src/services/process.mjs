@@ -147,6 +147,13 @@ export async function processInbox(auth, logger) {
         let written = null;
         if (!config.dryRun) {
           calendarEventId = await syncCalendarEvent(auth, partialVisit, calendarEventId);
+          /*
+           * Carry the event ID on the record itself from here on. The calendar event is created before
+           * the row is written, so a failed write used to leave the event with nothing pointing at it:
+           * the error path re-tried the upsert with a copy that had no calendarEventId, and the link
+           * between the row and the event was simply lost.
+           */
+          partialVisit.calendarEventId = calendarEventId;
           written = await upsertVisit(auth, { ...partialVisit, calendarEventId }, match);
           await addLabel(auth, email.id, processedLabelId);
         }
@@ -180,6 +187,31 @@ export async function processInbox(auth, logger) {
           gmailMessageId: messageRef.id,
           error: { name: error.name, message: error.message, stack: error.stack }
         });
+
+        /*
+         * Name this one in plain language, because it is the single most likely reason a visit is on
+         * the calendar but missing from the tracker — and the message Google returns ("cell L43
+         * violates the data validation rules") does not say what to do about it.
+         *
+         * The cause is always the same shape: REI supplied a value the workbook's dropdown for that
+         * column does not list. The row is refused outright; the calendar event, created a moment
+         * earlier, stays. That asymmetry is exactly what "the lead did not show in the sheet" looks
+         * like from the outside.
+         */
+        if (/data validation/i.test(String(error.message))) {
+          logger.error('THE WORKBOOK REFUSED THIS ROW — a dropdown rule rejected one of the values.', {
+            whatThisMeans: 'REI supplied a value that is not in that column\'s allowed list, so Google ' +
+              'refused the whole row. The calendar event was already created, which is why the visit ' +
+              'shows on the calendar but not in the tracker.',
+            cellGoogleNamed: (String(error.message).match(/cell\s+([A-Z]+\d+)/i) || [])[1] || '(not named)',
+            howToFix: 'Open the tracker, run "Property Visit Tracker → Set up / repair sheet" to ' +
+              'refresh the dropdown lists, then re-run. Or add the missing value to that column\'s list.',
+            workbook: `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit`,
+            tab: config.trackerSheet,
+            seller: partialVisit?.sellerName || '',
+            address: partialVisit?.propertyAddress || ''
+          });
+        }
 
         if (!config.dryRun) {
           if (partialVisit) {
