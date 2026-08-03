@@ -31,6 +31,27 @@ await Promise.race([
   context.waitForEvent('close').catch(() => {})
 ]);
 
+// Check what was actually saved. Reporting "Saved." after the user pressed Enter on a QR screen is
+// worse than reporting nothing: the next script then fails with a message about selectors, and the
+// real cause — an empty session — is nowhere in sight.
+let loggedIn = false;
+try {
+  loggedIn = await page.evaluate(() => {
+    const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const qr = [...document.querySelectorAll('canvas')].filter(visible).length > 0;
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    return !qr && !/link(ing)? (a )?device|scan the QR|Steps to log in/i.test(text);
+  });
+} catch { /* window already closed — fall through to the warning */ }
+
 await context.close().catch(() => {});
-console.log('Saved. Next: node src/whatsapp/watch.mjs   (dry run — creates nothing)');
-process.exit(0);
+
+if (loggedIn) {
+  console.log('\nLogged in and saved.');
+  console.log('Next: node scripts\\whatsapp-doctor.mjs   (checks the page selectors, clicks nothing)');
+} else {
+  console.log('\nWARNING: the QR screen was still showing, so nothing useful was saved.');
+  console.log('Run this again, scan the code, and WAIT until your real chats appear in the window');
+  console.log('before pressing Enter.');
+}
+process.exit(loggedIn ? 0 : 1);
