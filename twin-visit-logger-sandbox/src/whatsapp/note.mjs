@@ -116,7 +116,7 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   const nextAction = v('nextAction');
 
   const tail = [];
-  if (notes) tail.push('', '📝 REI Notes:', clip_(notes, 2000));
+  if (notes) tail.push('', '📝 REI Notes:', clip_(notes, 3500));
   if (activity) tail.push('', '🕑 REI Activity:', clip_(activity, 1200));
   if (nextAction) tail.push('', `➡️ Next Action: ${nextAction}`);
 
@@ -136,9 +136,22 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
 export function containsSellerSensitive(text) {
   const t = String(text || '');
   const hits = [];
-  if (/estimated equity|open loans? balance|assessed value|estimated value/i.test(t)) hits.push('valuation / equity figures');
-  if (/motivation level/i.test(t)) hits.push('motivation assessment');
-  if (/\bwe(?:'| a)?re passing|dead lead|lost deal/i.test(t)) hits.push('internal disposition');
-  if (/seller floor|our max|approved offer/i.test(t)) hits.push('offer limits');
+  if (/estimated equity|open loans? balance|assessed value|estimated value|\bARV\b|after repair value/i.test(t)) {
+    hits.push('valuation / equity figures');
+  }
+  /*
+   * "motivation level" alone was written against the blank template. Real REI notes say "Seller
+   * Motivation:", "Lead Temperature: WARM", "Objections/Concerns" — a full internal read of the person
+   * being negotiated with, and none of it matched. The note grew from a skeleton to 3,500 characters of
+   * call summaries and comps; a detector aimed only at the skeleton is a detector that passes anything.
+   */
+  if (/motivation level|seller motivation|lead temperature|objections?\s*\/?\s*concerns/i.test(t)) {
+    hits.push('motivation assessment');
+  }
+  if (/\bwe(?:'| a)?re passing|dead lead|lost deal|walk away/i.test(t)) hits.push('internal disposition');
+  if (/seller floor|our max|approved offer|offer within the ran|preliminary offer|comp run|\bcomps?\b/i.test(t)) {
+    hits.push('offer limits / comps');
+  }
+  if (/price expectation|target price|asking price wasn'?t given/i.test(t)) hits.push('price strategy');
   return hits;
 }

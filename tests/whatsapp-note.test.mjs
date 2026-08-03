@@ -119,8 +119,33 @@ check('an internal disposition is caught',
   containsSellerSensitive("Reason: we're passing on this one").includes('internal disposition'), true);
 check('"Dead Lead" is caught', containsSellerSensitive('Tags: Dead Lead, Lost Deal').length > 0, true);
 check('offer limits are caught',
-  containsSellerSensitive('Seller Floor 300k / Our Max 340k').includes('offer limits'), true);
+  containsSellerSensitive('Seller Floor 300k / Our Max 340k').includes('offer limits / comps'), true);
 check('an assessed value is caught', containsSellerSensitive('Assessed Value - $568,697').length > 0, true);
+
+console.log('\n--- and against the REAL REI notes now carried, not just the blank template ---');
+/*
+ * These lines are verbatim from a live REI contact. The note grew from a skeleton to 3,500 characters
+ * of call summaries and comps, and the old patterns — aimed only at the skeleton's headings — matched
+ * none of them. A detector that only recognises the template is a detector that passes anything.
+ */
+check('"Seller Motivation:" is caught',
+  containsSellerSensitive('Seller Motivation: Not urgent — exploring options').includes('motivation assessment'), true);
+check('"Lead Temperature: WARM" is caught',
+  containsSellerSensitive('Lead Temperature: WARM — engaged seller').includes('motivation assessment'), true);
+check('"Objections/Concerns" is caught',
+  containsSellerSensitive('Objections/Concerns: cautious, exploring only').includes('motivation assessment'), true);
+check('an ARV figure is caught',
+  containsSellerSensitive('ARV strongly supported at approx $1.65M').includes('valuation / equity figures'), true);
+check('a comp run is caught',
+  containsSellerSensitive('comp run Aug 3, 2026, by Cherry').includes('offer limits / comps'), true);
+check('an offer range is caught',
+  containsSellerSensitive('offer within the range once he gives a number').includes('offer limits / comps'), true);
+check('a preliminary offer is caught',
+  containsSellerSensitive('Cherry to run comps and follow up with a preliminary offer').length > 0, true);
+check('a price expectation is caught',
+  containsSellerSensitive('Price Expectation: Not specified').includes('price strategy'), true);
+check('"walk away" is caught',
+  containsSellerSensitive('if he holds at that number we walk away').includes('internal disposition'), true);
 
 console.log('\n--- and it does not cry wolf ---');
 check('a plain address and time is fine',
