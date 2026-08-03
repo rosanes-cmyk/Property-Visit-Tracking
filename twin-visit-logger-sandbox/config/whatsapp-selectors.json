@@ -56,5 +56,18 @@
     "[data-testid='checkmark-medium']",
     "span[data-icon='checkmark-medium']",
     "[data-testid='drawer-left'] [role='button'][aria-label='Create group']"
-  ]
+  ],
+  "conversationTitle": [
+    "[data-testid='conversation-info-header'] [data-testid='cell-frame-title']",
+    "header [data-testid='cell-frame-title']",
+    "header span[title]",
+    "[data-testid='conversation-header'] span[title]"
+  ],
+  "messageBox": [
+    "footer div[contenteditable='true']",
+    "[data-testid='conversation-compose-box-input']",
+    "div[contenteditable='true'][data-tab='10']",
+    "footer [role='textbox']"
+  ],
+  "_postingComment": "conversationTitle and messageBox are UNCONFIRMED - the message box was never on screen during a doctor run. This is acceptable ONLY because postGroupNote verifies the open conversation's title matches the group name before typing: a wrong messageBox selector then finds nothing and posts nothing, instead of posting into whatever chat happens to be open."
 }

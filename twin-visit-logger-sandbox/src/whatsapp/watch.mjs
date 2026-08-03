@@ -16,7 +16,8 @@ import { google } from 'googleapis';
 import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
 import { planForEvents, suspiciousNumber } from './plan.mjs';
-import { launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers } from './client.mjs';
+import { launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers, postGroupNote } from './client.mjs';
+import { buildInspectionNote, containsSellerSensitive } from './note.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
@@ -210,6 +211,7 @@ async function main() {
         };
         await writeState(state);
         console.log('    recorded');
+        await maybePostNote(page, selectors, plan);
       }
     }
   } finally {
@@ -221,6 +223,53 @@ async function main() {
   console.log(APPLY
     ? '\nDone.'
     : '\nDRY RUN — nothing was created or completed. Re-run with --yes once the above looks right.');
+}
+
+/**
+ * Post the inspection note into the group just created.
+ *
+ * Off unless WHATSAPP_POST_NOTE=true. The note carries the facts REI holds and leaves the rest as
+ * visible blanks, because REI has no fields for motivation, occupancy, condition, known issues or any
+ * of the PropertyRadar figures.
+ */
+async function maybePostNote(page, selectors, plan) {
+  if (!config.whatsappPostNote) {
+    console.log('    note not posted (set WHATSAPP_POST_NOTE=true to enable)');
+    return;
+  }
+
+  const from = (label) => fieldFromDescription(plan.rawDescription, label);
+  const note = buildInspectionNote({
+    propertyAddress: plan.address,
+    sellerName: from('Seller'),
+    phone: from('Phone'),
+    reiLink: from('REI BlackBook'),
+    leadSource: from('Lead Source'),
+    contactStage: from('Contact Stage'),
+    assignedOwner: from('Assigned Owner'),
+    notes: from('Next Action')
+  }, { appointmentText: plan.startLocal, includeSellerWarning: plan.sellerIncluded });
+
+  /*
+   * Hard stop. The note names "Estimated Equity", "Motivation Level" and so on even when the values
+   * are blank, and a seller reading those headings learns what is being assessed about them. If a
+   * seller is in the group, it does not go out — regardless of the config flag.
+   */
+  if (plan.sellerIncluded) {
+    const sensitive = containsSellerSensitive(note);
+    if (sensitive.length) {
+      console.log(`    NOTE NOT POSTED — the seller is in this group and the note covers: ${sensitive.join(', ')}`);
+      console.log('    Either set WHATSAPP_INCLUDE_SELLER=false, or post a shortened note by hand.');
+      return;
+    }
+  }
+
+  const posted = await postGroupNote(page, selectors, {
+    groupName: plan.name,
+    text: note,
+    apply: APPLY
+  });
+  console.log(`    note: ${posted.reason}`);
 }
 
 /**

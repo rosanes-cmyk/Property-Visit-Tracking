@@ -59,6 +59,10 @@ const raw = {
   // visit is confirmed on the calendar and in a WhatsApp group. Off unless explicitly enabled.
   // Everything else about REI stays read-only.
   reiCompleteTasks: bool(process.env.REI_COMPLETE_TASKS, false),
+  // Post the PROPERTY INSPECTION note into the group after creating it. OFF by default: this is the
+  // only thing in the project that sends a message to real people. It refuses outright if the note
+  // carries anything a seller must not read and a seller is in the group.
+  whatsappPostNote: bool(process.env.WHATSAPP_POST_NOTE, false),
   // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
   // US sellers read from REI. A number that already has a country code is used as-is, and one
   // starting with a 0 (a local trunk prefix) is refused rather than guessed at.
@@ -99,6 +103,7 @@ const schema = z.object({
   whatsappGroupTemplate: z.string().min(1),
   whatsappLookaheadDays: z.number().int().positive().max(365),
   reiCompleteTasks: z.boolean(),
+  whatsappPostNote: z.boolean(),
   phoneDefaultCountry: z.string().min(1)
 });
 

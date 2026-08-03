@@ -315,6 +315,73 @@ export async function createGroup(page, selectors, { name, participants, apply =
   return report;
 }
 
+/**
+ * Post ONE message into the group that was just created.
+ *
+ * This is the only place in the project that sends anything, and it is deliberately hard to misuse:
+ *
+ *   1. It verifies the OPEN CONVERSATION's header matches the group name it was given. If the header
+ *      says anything else — a seller's 1:1 chat left open by the warm-up, another group, nothing at
+ *      all — it refuses. Typing into whatever happens to be focused and pressing Enter is how
+ *      automation messages the wrong person.
+ *   2. It refuses if the text carries anything a seller must not read, when a seller is in the group.
+ *   3. It sends once. There is no retry, because a retry that misfires sends twice.
+ *
+ * The composer selectors are UNCONFIRMED — WhatsApp's message box was never on screen during the
+ * doctor run. The header check is what makes that acceptable: a wrong composer selector fails to
+ * find anything and posts nothing, rather than posting somewhere unintended.
+ */
+export async function postGroupNote(page, selectors, { groupName, text, apply = false }) {
+  const report = { posted: false, reason: '' };
+
+  // --- 1. Is the right conversation actually open? ---
+  const headerCandidates = selectors.conversationTitle || [];
+  let header = '';
+  for (const candidate of headerCandidates) {
+    const el = page.locator(candidate).first();
+    if (!(await el.isVisible().catch(() => false))) continue;
+    header = ((await el.getAttribute('title').catch(() => '')) ||
+              (await el.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    if (header) break;
+  }
+  if (!header) {
+    report.reason = 'could not read the open conversation title — refusing to type anywhere';
+    return report;
+  }
+  if (header !== String(groupName).trim()) {
+    report.reason = `the open conversation is "${header}", not "${groupName}" — refusing to post`;
+    return report;
+  }
+
+  // --- 2. Find the composer ---
+  const composer = await firstVisible(page, selectors.messageBox || [], { perCandidateMs: 6000 });
+  if (!composer.locator) {
+    report.reason = 'could not find the message box (selectors unconfirmed) — nothing was posted';
+    return report;
+  }
+
+  if (!apply) {
+    report.reason = 'dry run — would have posted the note';
+    return report;
+  }
+
+  // --- 3. Type and send, once ---
+  await composer.locator.click();
+  // Shift+Enter for the line breaks, so a multi-line note does not send itself line by line.
+  const lines = String(text).split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (i > 0) await page.keyboard.press('Shift+Enter');
+    if (lines[i]) await page.keyboard.type(lines[i], { delay: 4 });
+  }
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(2000);
+
+  report.posted = true;
+  report.reason = 'posted';
+  return report;
+}
+
 /** Do these two strings contain the same phone number? Last 10 digits, so formatting cannot lie. */
 export function sameDigits(haystack, number) {
   const want = String(number).replace(/\D/g, '').slice(-10);
