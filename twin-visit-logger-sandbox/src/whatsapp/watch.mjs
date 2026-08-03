@@ -16,7 +16,7 @@ import { google } from 'googleapis';
 import { authorizeGoogle } from '../google/auth.mjs';
 import { config } from '../config.mjs';
 import { planForEvents, suspiciousNumber } from './plan.mjs';
-import { launchWhatsApp, assertLoggedIn, createGroup, groupExists } from './client.mjs';
+import { launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers } from './client.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
@@ -163,6 +163,22 @@ async function main() {
     const page = context.pages()[0] || (await context.newPage());
     const selectors = JSON.parse(await fs.readFile(config.whatsappSelectorConfig, 'utf8'));
     await assertLoggedIn(page, selectors);
+
+    /*
+     * WhatsApp's group picker only searches saved contacts and numbers you already have a chat with.
+     * A perfectly valid team number that is neither returns no results, and the group silently comes
+     * out short. Resolving each number first through wa.me puts a chat in the list so the picker can
+     * find it — and tells us definitively which numbers have no WhatsApp account at all.
+     */
+    const everyNumber = [...new Set(create.flatMap((p) => p.participants.map((x) => x.number)))];
+    console.log(`\nMaking ${everyNumber.length} number(s) findable in the group picker...`);
+    const reach = await warmUpNumbers(page, everyNumber);
+    if (reach.onWhatsApp.length) console.log(`  on WhatsApp: ${reach.onWhatsApp.join(', ')}`);
+    if (reach.notOnWhatsApp.length) {
+      console.log(`  NO WhatsApp account: ${reach.notOnWhatsApp.join(', ')}`);
+      console.log('  Those cannot be added by anyone, automation or not. Check the digits, or the');
+      console.log('  person genuinely does not use WhatsApp on that number.');
+    }
 
     for (const plan of create) {
       console.log(`\n--- ${plan.name}`);

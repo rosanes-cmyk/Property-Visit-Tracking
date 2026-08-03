@@ -132,6 +132,54 @@ async function clearSearch(page, box) {
 }
 
 /**
+ * Make a number findable in the group picker, without saving it as a contact.
+ *
+ * WhatsApp's "New group" participant search only looks at SAVED CONTACTS and numbers you already
+ * have a chat with. A correct, active number that is neither returns no results — which is why three
+ * real team numbers came back as "NOT ON WHATSAPP" when they were nothing of the sort.
+ *
+ * Opening wa.me/<number> makes WhatsApp resolve the number and put a chat in the list, after which
+ * the picker finds it. No message is sent: the URL carries no text parameter, the composer is never
+ * typed into, and there is no send function in this module.
+ *
+ * Returns { onWhatsApp: [...], notOnWhatsApp: [...] } — this is also a reliable way to tell the two
+ * apart, because WhatsApp says so explicitly for a number that has no account.
+ */
+export async function warmUpNumbers(page, numbers) {
+  const onWhatsApp = [];
+  const notOnWhatsApp = [];
+
+  for (const number of numbers) {
+    const digits = String(number).replace(/\D/g, '');
+    if (!digits) continue;
+
+    await page.goto(`${WHATSAPP_URL}send?phone=${digits}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForTimeout(3500);
+
+    // WhatsApp is explicit when a number has no account: a modal saying the number is invalid or
+    // not on WhatsApp. Anything else means it resolved and a chat now exists.
+    const rejected = await page.evaluate(() => {
+      const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+      return /phone number shared via url is invalid|isn'?t on WhatsApp|is not on WhatsApp|invalid (phone )?number/i.test(text);
+    }).catch(() => false);
+
+    if (rejected) {
+      notOnWhatsApp.push(number);
+      // Dismiss the modal so the next iteration starts from a clean page.
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(400);
+    } else {
+      onWhatsApp.push(number);
+    }
+  }
+
+  // Back to the chat list so the group flow starts where it expects to.
+  await page.goto(WHATSAPP_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForTimeout(2500);
+  return { onWhatsApp, notOnWhatsApp };
+}
+
+/**
  * Create one group.
  *
  * With apply=false (the default) it walks as far as the participant picker, reports which of the
