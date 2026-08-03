@@ -103,10 +103,10 @@ export function assertSafe(selector) {
 export async function groupExists(page, selectors, name) {
   // A generous per-candidate wait on purpose: this is the first thing touched after a navigation, and
   // the default 1.5s is shorter than WhatsApp takes to repaint its header.
-  const search = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 8000 });
+  const search = await openSearch(page, selectors);
   if (!search.locator) {
     throw new Error(
-      'Could not find the search box after waiting.\n' +
+      'Could not find the search box, even after a reload.\n' +
       'Run: node scripts/whatsapp-doctor.mjs   — it reports the page state and which selectors resolve.'
     );
   }
@@ -134,10 +134,37 @@ export async function groupExists(page, selectors, name) {
   return false;
 }
 
+/*
+ * Empty the search box and leave it usable.
+ *
+ * This used to press Escape, which collapses WhatsApp's search UI entirely — the box stops being
+ * visible. groupExists ran, found the group, tidied up with Escape, and the very next step failed with
+ * "could not find the search box" on a page where it had just worked. Clearing the value is enough.
+ */
 async function clearSearch(page, box) {
   await box.fill('').catch(() => {});
-  await page.keyboard.press('Escape').catch(() => {});
   await page.waitForTimeout(300);
+}
+
+/**
+ * The search box, reopening it if something collapsed it.
+ *
+ * Three attempts, escalating, because failing this fails the whole run: as it is, then after an Escape
+ * to dismiss whatever drawer is covering the pane, then after a reload. A reload costs a few seconds and
+ * is certain, which beats reporting a missing search box on a logged-in session that has one.
+ */
+async function openSearch(page, selectors) {
+  let hit = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 6000 });
+  if (hit.locator) return hit;
+
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(800);
+  hit = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 6000 });
+  if (hit.locator) return hit;
+
+  await page.goto(WHATSAPP_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await waitForChatList(page, selectors);
+  return await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 8000 });
 }
 
 /**
@@ -366,8 +393,10 @@ export async function waitForConversation(page, selectors, name, timeoutMs = 200
  * note without anyone deleting and rebuilding it.
  */
 export async function openGroupByName(page, selectors, name) {
-  const search = await firstVisible(page, selectors.searchBox || [], { perCandidateMs: 8000 });
-  if (!search.locator) return { opened: false, reason: 'could not find the search box' };
+  const search = await openSearch(page, selectors);
+  if (!search.locator) {
+    return { opened: false, reason: 'could not find the search box, even after a reload' };
+  }
 
   await search.locator.click();
   await search.locator.fill(name).catch(async () => { await page.keyboard.type(name); });
