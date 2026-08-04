@@ -307,5 +307,23 @@ check('it is numbered so priority is visible', /\(i \+ 1\)/.test(post), true);
 // Read-only: raising an alert must never write a date or an action back to the sheet.
 check('the digest never writes to the sheet', /setValue|setValues/.test(post), false);
 
+console.log('\n=== The preview script cannot disagree with what ships ===');
+/*
+ * scripts/preview-3pm-digest.mjs prints the notification from the live sheet so Cherry can approve the
+ * design before the rules are finalised. It carries a copy of the bucket logic because it runs in the
+ * Node sandbox, which has no access to the .gs files — so the copy has to be provably identical, or the
+ * thing she approves is not the thing that ships.
+ */
+const PREVIEW = read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs');
+const lifted = [
+  slice('var ATTENTION_BUCKETS = [', '/** A sheet date cell'),
+  slice('function dateCell_(', 'function attentionBucket_('),
+  slice('function attentionBucket_(', '/**\n * Post the 3pm work queue')
+].join('\n').trim();
+check('the preview carries the rules verbatim', PREVIEW.includes(lifted), true);
+check('it is marked as a copy, not a second implementation', /VERBATIM FROM apps-script\/ChatNotify\.gs/.test(PREVIEW), true);
+check('it posts nothing to Chat', /chatPost_|fetch\(|UrlFetchApp/.test(PREVIEW), false);
+check('it writes nothing to the sheet', /values\.update|values\.append|batchUpdate/.test(PREVIEW), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
