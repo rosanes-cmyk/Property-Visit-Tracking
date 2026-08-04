@@ -390,90 +390,217 @@ function removeChatNewBookingTrigger() {
   SpreadsheetApp.getActive().toast('New-booking alerts OFF (' + n + ' trigger removed).', 'Google Chat', 6);
 }
 
-/* ==================== forgotten work / follow-ups needing attention ==================== */
+/* ==================== the 3pm work queue ==================== */
 
 /**
- * Post what is slipping: overdue next actions, stalled deals, visits whose date has passed but were
- * never completed, and records flagged for review. This is the "nothing gets forgotten" message.
- * Silent when everything is clean.
+ * The 3pm digest, as a WORK QUEUE rather than a data-quality report.
+ *
+ * Cherry's revision, in her words: "Every category must represent one business action, not merely one
+ * database condition", and she must know within ten seconds what the team works on first. The previous
+ * version had four buckets and swept every incomplete field into one "Needs review / missing data"
+ * pile, so a lead missing Seller Motivation sat next to a lead missing an owner — accurate, and no help
+ * in deciding what to do.
+ *
+ * The seven buckets below are hers, in her priority order, each with exactly one action attached. A
+ * lead appears ONCE, in the most urgent bucket that applies. Nothing here writes to the sheet: no due
+ * date and no next action is ever invented in order to raise an alert.
+ *
+ * Two places where her structure needed a decision, both flagged for approval in
+ * docs/3pm-Digest-Revision.md rather than settled quietly here:
+ *   - Long-Term Nurture is exempt from "Missing Next Action", or bucket 3 would swallow every nurture
+ *     lead before bucket 6 could ever see one.
+ *   - A final bucket 8 catches records flagged Exception/Incomplete that match none of the seven. Her
+ *     rule "if a record is ambiguous, flag it for review instead of guessing" needs somewhere to put
+ *     them, and it is a residue rather than the old catch-all — if it grows, that is a finding.
+ */
+var ATTENTION_BUCKETS = [
+  { key: 'visitOverdue', icon: '🚩', title: 'Visit Overdue', action: 'Confirm whether the visit happened — mark it Completed or Canceled.' },
+  { key: 'offerIncomplete', icon: '💵', title: 'Offer Needs Completion', action: 'Enter the offer amount and sent date, or correct the status.' },
+  { key: 'missingNextAction', icon: '📋', title: 'Missing Next Action', action: 'Assign the next action and its due date.' },
+  { key: 'missingMotivation', icon: '🗣', title: 'Missing Seller Motivation', action: 'Write up the post-visit seller motivation notes.' },
+  { key: 'missingOwner', icon: '👤', title: 'Missing Assigned Owner', action: 'Assign the person responsible for the lead.' },
+  { key: 'nurtureNoFollowUp', icon: '🌱', title: 'Long-Term Nurture Missing Follow-Up', action: 'Add a future follow-up date.' },
+  { key: 'stalled', icon: '🐢', title: 'Stalled', action: 'Decide the next step, move to nurture, or close it out.' },
+  { key: 'flagged', icon: '⚠️', title: 'Flagged — ambiguous, needs a person', action: 'Read the record and decide; it fits none of the buckets above.' }
+];
+
+/** A sheet date cell (real Date or Sheets serial) as a local midnight Date, or null. */
+function dateCell_(raw) {
+  if (raw instanceof Date) return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+  if (typeof raw === 'number' && raw > 1000) {
+    var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
+    return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+  }
+  return null;
+}
+
+/**
+ * Which ONE bucket this record belongs in, and the exact reason it is there. null = it does not appear.
+ *
+ * Ordered by Cherry's priority list, and the first match wins — that is what makes "one lead, one
+ * bucket" true by construction rather than by a flag that has to be maintained.
+ *
+ * `today` is passed in so the decision is testable and does not depend on when the tests run.
+ */
+function attentionBucket_(rec, today) {
+  var stage = String(rec['Current Stage'] || '').trim();
+
+  // Never appears: no address to act on, a test row, or a lead that is finished either way.
+  if (!rec['Property Address']) return null;
+  if (String(rec['Source']).trim() === 'TEST') return null;
+  if (stage === 'Lost / Closed Out' || stage === 'Contract Signed') return null;
+
+  // 1. A visit whose date has passed while still marked Scheduled. Either it happened and nobody
+  //    logged it, or it was missed — and only a person knows which.
+  var visitOn = dateCell_(rec['Visit Date']);
+  if (String(rec['Visit Status']).trim() === 'Scheduled' && visitOn && visitOn < today) {
+    return { key: 'visitOverdue', reason: 'visit was ' + fmt_(visitOn) + ', still marked Scheduled' };
+  }
+
+  // 2. The status says an offer is out, the numbers say otherwise.
+  if (stage === 'Offer Sent') {
+    var noAmount = !rec['Approved Offer Amount'] && Number(rec['Approved Offer Amount']) !== 0;
+    var noSent = !dateCell_(rec['Offer Sent Date']);
+    if (noAmount || noSent) {
+      return {
+        key: 'offerIncomplete',
+        reason: 'stage is Offer Sent but ' +
+          (noAmount && noSent ? 'neither the amount nor the sent date is filled in'
+            : noAmount ? 'the offer amount is blank' : 'the sent date is blank')
+      };
+    }
+  }
+
+  /*
+   * 3. Nobody has said what happens next.
+   *
+   * Long-Term Nurture is deliberately exempt: a nurture lead's "next action" IS its future follow-up
+   * date, and bucket 6 exists to ask for exactly that. Without this exemption bucket 3 would claim
+   * every nurture lead first and bucket 6 would always read zero.
+   */
+  if (stage !== 'Long-Term Nurture') {
+    var action = String(rec['Next Action'] || '').trim();
+    var due = dateCell_(rec['Next Action Due Date']);
+    if (!action || !due) {
+      return {
+        key: 'missingNextAction',
+        reason: !action && !due ? 'no next action and no due date'
+          : !action ? 'a due date with no action written against it'
+            : 'next action "' + action + '" has no due date'
+      };
+    }
+  }
+
+  // 4. The visit is done but what the seller actually wants was never written up. This is the field
+  //    the whole visit exists to capture, so it gets its own bucket rather than a "missing data" line.
+  var visited = String(rec['Visit Status']).trim() === 'Completed' || stage === 'Visit Completed — Needs Review';
+  if (visited && !String(rec['Seller Motivation'] || '').trim()) {
+    return {
+      key: 'missingMotivation',
+      reason: 'visit' + (visitOn ? ' on ' + fmt_(visitOn) : '') + ' completed, seller motivation still blank'
+    };
+  }
+
+  // 5. Work with no owner is work nobody does.
+  if (!String(rec['Assigned Owner'] || '').trim()) {
+    return { key: 'missingOwner', reason: 'no assigned owner' };
+  }
+
+  // 6. In nurture with nothing in the diary, which is the same as forgotten.
+  if (stage === 'Long-Term Nurture') {
+    var nurtureDue = dateCell_(rec['Next Action Due Date']);
+    if (!nurtureDue || nurtureDue <= today) {
+      return {
+        key: 'nurtureNoFollowUp',
+        reason: nurtureDue ? 'follow-up date ' + fmt_(nurtureDue) + ' is not in the future' : 'no follow-up date set'
+      };
+    }
+  }
+
+  // 7. Silent for days with everything above in order.
+  if (String(rec['Stalled Status']).trim() === 'Yes') {
+    var quiet = Number(rec['Days Since Last Activity']);
+    return {
+      key: 'stalled',
+      reason: isFinite(quiet) && quiet > 0 ? 'no activity for ' + quiet + ' day(s)' : 'no recent activity'
+    };
+  }
+
+  // 8. Flagged by validation but matching none of the seven — a person has to look.
+  var dq = String(rec['Data Quality Status'] || '').trim();
+  if (dq === 'Exception' || dq === 'Incomplete') {
+    return {
+      key: 'flagged',
+      reason: String(rec['Exception Reason'] || rec['Missing Required Fields'] || 'flagged ' + dq).trim()
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Post the 3pm work queue to Chat. Silent when there is nothing to do.
+ *
+ * Every line carries the four things a manager needs to act without opening anything: who the seller
+ * is, which property, who owns it, and the exact reason it is on the list.
  */
 function sendAttentionDigestToChat() {
   if (!chatWebhookUrl_()) return { posted: false, count: 0 };
   var sh = dataSheet_();
   var last = sh.getLastRow();
   if (last < CFG.FIRST_DATA_ROW) return { posted: false, count: 0 };
-  var vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+  var idx = headerIndex_();
+  var width = Math.max(sh.getLastColumn(), HEADERS.length);
+  var vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, width).getValues();
   var today = today_();
 
-  var overdue = [], stalled = [], missedVisit = [], review = [];
+  var found = {};
+  ATTENTION_BUCKETS.forEach(function (b) { found[b.key] = []; });
+
   vals.forEach(function (v) {
-    var rec = {}; HEADERS.forEach(function (h, i) { rec[h] = v[i]; });
-    if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return;
-    if (rec['Current Stage'] === 'Lost / Closed Out') return;
-    var label = (rec['Seller Name'] || '(no name)') + ' — ' + rec['Property Address'];
-    var owner = rec['Assigned Owner'] || rec['Assigned Visitor'] || 'UNASSIGNED';
-
-    // ONE lead, ONE line. A record could previously appear in all four sections, so the headline
-    // count was inflated and the same seller was read three times before anyone noticed it was the
-    // same seller. Each record now lands in its most urgent bucket only, and `claimed` enforces it.
-    var claimed = false;
-    var claim = function (arr, text) { if (claimed) return; claimed = true; arr.push(text); };
-
-    // A visit whose date has passed while still marked Scheduled is the most urgent thing here:
-    // either it happened and nobody logged it, or it was missed outright.
-    var raw = rec['Visit Date'], d = null;
-    if (raw instanceof Date) d = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
-    else if (typeof raw === 'number' && raw > 1000) {
-      var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
-      d = new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
-    }
-    if (String(rec['Visit Status']) === 'Scheduled' && d && d < today) {
-      claim(missedVisit, fmt_(d) + ' · ' + label + ' · 👤 ' + owner);
-    }
-
-    // Overdue only counts when somebody actually WROTE a next action. A due date with no action text
-    // is an automation artifact (the stage cascade stamps a date), not a commitment anyone made — so
-    // it belongs in "needs review" below, where the missing field is the point.
-    var od = Number(rec['Days Overdue']) || 0;
-    if (od > 0 && rec['Next Action']) {
-      claim(overdue, od + 'd · ' + label + ' · 👤 ' + owner + ' · ' + rec['Next Action']);
-    }
-
-    if (rec['Data Quality Status'] === 'Exception' || rec['Data Quality Status'] === 'Incomplete') {
-      claim(review, label + ' · ' + (rec['Exception Reason'] || rec['Missing Required Fields'] || 'needs review'));
-    }
-    if (rec['Stalled Status'] === 'Yes') claim(stalled, label + ' · 👤 ' + owner);
+    var rec = {};
+    HEADERS.forEach(function (h) { var c = idx[h]; rec[h] = c ? v[c - 1] : ''; });
+    var hit = attentionBucket_(rec, today);
+    if (!hit) return;
+    var owner = String(rec['Assigned Owner'] || '').trim();
+    found[hit.key].push(
+      '<b>' + (rec['Seller Name'] || '(no name)') + '</b> · ' + rec['Property Address'] +
+      ' · ' + (owner ? '👤 ' + owner : '👤 <b>UNASSIGNED</b>') +
+      ' · <i>' + hit.reason + '</i>'
+    );
   });
 
-  var total = overdue.length + stalled.length + missedVisit.length + review.length;
+  var total = ATTENTION_BUCKETS.reduce(function (n, b) { return n + found[b.key].length; }, 0);
   if (!total) {
-    logAuto_('CHAT', '', 'Attention digest skipped — nothing overdue, stalled, missed or flagged.');
+    logAuto_('CHAT', '', 'Attention digest skipped — nothing needs attention.');
     return { posted: false, count: 0 };
   }
 
   var widgets = [];
-  var block = function (icon, title, arr) {
+  ATTENTION_BUCKETS.forEach(function (b, i) {
+    var arr = found[b.key];
     if (!arr.length) return;
-    widgets.push({ textParagraph: { text: icon + ' <b>' + title + ' (' + arr.length + ')</b><br>' +
-      arr.slice(0, 8).join('<br>') + (arr.length > 8 ? ('<br>…and ' + (arr.length - 8) + ' more') : '') } });
+    widgets.push({ textParagraph: { text:
+      b.icon + ' <b>' + (i + 1) + '. ' + b.title + ' (' + arr.length + ')</b><br>' +
+      '<i>' + b.action + '</i><br>' +
+      arr.slice(0, 8).join('<br>') +
+      (arr.length > 8 ? ('<br>…and ' + (arr.length - 8) + ' more') : '')
+    } });
     widgets.push({ divider: {} });
-  };
-  block('⏰', 'Overdue next actions', overdue);
-  block('🚩', 'Visit date passed, never completed', missedVisit);
-  block('🐢', 'Stalled (no activity 3+ business days)', stalled);
-  block('⚠️', 'Needs review / missing data', review);
+  });
 
   var url = dashboardUrl_();
   if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard to update', onClick: { openLink: { url: url } } }] } });
 
+  var top = ATTENTION_BUCKETS.filter(function (b) { return found[b.key].length; })[0];
   var err = chatPost_({ cardsV2: [{ cardId: 'attention', card: {
     header: {
-      title: 'Needs attention — ' + total + ' lead(s)',
-      subtitle: fmt_(today_()) + ' · each lead listed once, most urgent reason first'
+      title: 'Work queue — ' + total + ' lead(s)',
+      subtitle: fmt_(today_()) + ' · start with ' + top.title + ' (' + found[top.key].length + ')'
     },
     sections: [{ widgets: widgets }]
   } }] });
-  logAuto_('CHAT', '', err ? ('Attention digest FAILED: ' + err) : ('Attention digest posted · ' + total + ' item(s).'));
+  logAuto_('CHAT', '', err ? ('Attention digest FAILED: ' + err) : ('Attention digest posted · ' + total + ' lead(s).'));
   return { posted: !err, count: total, error: err };
 }
 

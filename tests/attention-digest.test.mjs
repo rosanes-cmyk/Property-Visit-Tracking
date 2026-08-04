@@ -1,19 +1,20 @@
 /**
- * The 3pm "Needs attention" Chat digest.
+ * The 3pm digest — Cherry's revision: a work queue, not a data-quality report.
  *
  *   node tests/attention-digest.test.mjs
  *
- * Cherry asked where the 282 came from and pointed out that visits already done were being listed.
- * Three things were wrong, and this pins all three:
+ * Her acceptance criteria, from "3:00 PM LEAD NOTIFICATION REVISION":
+ *   - every category represents ONE business action, not one database condition
+ *   - each lead appears once, in the most urgent applicable bucket
+ *   - each bucket shows its count; each line shows name, address, owner and the exact reason
+ *   - unassigned leads say UNASSIGNED
+ *   - Lost / Closed Out and Contract Signed never appear
+ *   - no due date or action is invented in order to raise an alert
+ *   - an ambiguous record is flagged, not guessed at
  *
- *   1. One lead could appear in FOUR sections, so the headline number counted the same seller
- *      repeatedly. Each record now lands in its most urgent bucket only.
- *   2. "Overdue next action" fired on records with NO next action text — a due date the stage
- *      cascade had stamped, not a commitment anyone made.
- *   3. "Stalled" had no upper bound, so all 379 imported records qualified forever.
- *
- * The bucket logic is re-implemented here from the shipped source's own rules and run over records
- * shaped like the real ones.
+ * This runs the SHIPPED attentionBucket_ out of ChatNotify.gs rather than a copy of its rules. The
+ * previous version of this file re-implemented the bucket logic, which meant the tests could agree
+ * with themselves while disagreeing with the code that actually posts to Chat.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,89 +30,206 @@ function check(name, got, want) {
 }
 
 const CHAT = read('apps-script/ChatNotify.gs');
-const digest = CHAT.slice(CHAT.indexOf('function sendAttentionDigestToChat'), CHAT.indexOf('\n}', CHAT.indexOf('function sendAttentionDigestToChat')));
-
-console.log('=== The shipped digest enforces one lead, one line ===');
-check('a claim helper exists', /var claim = function/.test(digest), true);
-check('every bucket goes through it',
-  (digest.match(/claim\((overdue|stalled|missedVisit|review)/g) || []).length, 4);
-check('nothing pushes straight into a bucket any more',
-  /\b(overdue|stalled|missedVisit|review)\.push\(/.test(digest), false);
-check('overdue requires a Next Action', /od > 0 && rec\['Next Action'\]/.test(digest), true);
-check('the header says lead(s), not item(s)', /lead\(s\)/.test(digest), true);
-
-console.log('\n=== Stalled Status is a window, not a minimum age ===');
-const SETUP = read('apps-script/Setup.gs');
-const CONFIG = read('apps-script/Config.gs');
-const DORMANT = Number((CONFIG.match(/DORMANT_DAYS:\s*(\d+)/) || [])[1]);
-const from = SETUP.indexOf('function formulaFor_(header, r) {');
-const formulaFor_ = new Function('colL', 'CFG',
-  `${SETUP.slice(from, SETUP.indexOf('\nconst COMPUTED_HEADERS'))}\nreturn formulaFor_;`
-)(() => 'B', { STALLED_BUSINESS_DAYS: 3, RECENT_VISIT_DAYS: 30, DORMANT_DAYS: DORMANT });
-const stalled = formulaFor_('Stalled Status', 2);
-check('it has a lower bound (business days of silence)', /NETWORKDAYS/.test(stalled), true);
-check(`it now has an upper bound of ${DORMANT} days`, stalled.includes(`<=${DORMANT}`), true);
-check('parentheses balanced', [...stalled].reduce((d, c) => d + (c === '(') - (c === ')'), 0), 0);
 
 /* ------------------------------------------------------------------
- * The bucket decision, mirroring the shipped rules.
+ * Lift the real functions out of the .gs and run them here.
  * ---------------------------------------------------------------- */
-const TODAY = '2026-08-03';
-function bucketFor(rec) {
-  if (!rec['Property Address']) return null;
-  if (rec['Source'] === 'TEST') return null;
-  if (rec['Current Stage'] === 'Lost / Closed Out') return null;
+const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
+const source = [
+  slice('var ATTENTION_BUCKETS = [', '/** A sheet date cell'),
+  slice('function dateCell_(', 'function attentionBucket_('),
+  slice('function attentionBucket_(', '/**\n * Post the 3pm work queue')
+].join('\n');
 
-  if (rec['Visit Status'] === 'Scheduled' && rec['Visit Date'] && rec['Visit Date'] < TODAY) return 'missedVisit';
-  if ((Number(rec['Days Overdue']) || 0) > 0 && rec['Next Action']) return 'overdue';
-  if (rec['Data Quality Status'] === 'Exception' || rec['Data Quality Status'] === 'Incomplete') return 'review';
-  if (rec['Stalled Status'] === 'Yes') return 'stalled';
-  return null;
-}
+const { attentionBucket_, ATTENTION_BUCKETS } = new Function(
+  'fmt_',
+  `${source}\nreturn { attentionBucket_: attentionBucket_, ATTENTION_BUCKETS: ATTENTION_BUCKETS };`
+)((d) => new Date(d).toISOString().slice(0, 10));
 
-console.log('\n=== Each record gets exactly one bucket ===');
-// Jose Anguiano, the record that previously appeared three times over.
+const TODAY = new Date(2026, 7, 4);            // Aug 4 2026, local midnight
+const day = (y, m, d) => new Date(y, m - 1, d);
+const bucket = (rec) => { const h = attentionBucket_(rec, TODAY); return h ? h.key : null; };
+const reason = (rec) => { const h = attentionBucket_(rec, TODAY); return h ? h.reason : ''; };
+
+/** A record with nothing wrong with it, to vary one field at a time. */
+const OK = {
+  'Property Address': '1390 Estudillo Ave, San Leandro, CA 94577',
+  'Seller Name': 'David Jackowitz',
+  'Current Stage': 'Visit Scheduled',
+  'Visit Status': 'Scheduled',
+  'Visit Date': day(2026, 8, 20),
+  'Next Action': 'Conduct scheduled visit & log outcome',
+  'Next Action Due Date': day(2026, 8, 20),
+  'Assigned Owner': 'Juan',
+  'Stalled Status': 'No',
+  'Data Quality Status': 'OK'
+};
+
+console.log('=== Cherry\'s seven buckets exist, in her priority order ===');
+check('eight buckets: her seven plus the ambiguity residue', ATTENTION_BUCKETS.length, 8);
+check('in her order', ATTENTION_BUCKETS.map((b) => b.title), [
+  'Visit Overdue',
+  'Offer Needs Completion',
+  'Missing Next Action',
+  'Missing Seller Motivation',
+  'Missing Assigned Owner',
+  'Long-Term Nurture Missing Follow-Up',
+  'Stalled',
+  'Flagged — ambiguous, needs a person'
+]);
+check('every bucket names one action', ATTENTION_BUCKETS.every((b) => /\.$/.test(b.action)), true);
+check('every bucket has an icon', ATTENTION_BUCKETS.every((b) => !!b.icon), true);
+
+console.log('\n=== A healthy record does not appear at all ===');
+check('nothing wrong, nothing posted', bucket(OK), null);
+
+console.log('\n=== 1. Visit Overdue ===');
+const missed = { ...OK, 'Visit Date': day(2026, 8, 1) };
+check('a passed visit still marked Scheduled', bucket(missed), 'visitOverdue');
+check('the reason names the date', reason(missed), 'visit was 2026-08-01, still marked Scheduled');
+check("today's visit is not overdue", bucket({ ...OK, 'Visit Date': TODAY }), null);
+check('a completed visit is not overdue',
+  bucket({ ...missed, 'Visit Status': 'Completed', 'Seller Motivation': 'Relocating' }), null);
+check('a cancelled visit is not overdue', bucket({ ...missed, 'Visit Status': 'Canceled' }), null);
+// The sheet stores dates as serials when written by the API; both shapes must behave the same.
+check('a Sheets date serial works too', bucket({ ...OK, 'Visit Date': 46235 }), 'visitOverdue');
+
+console.log('\n=== 2. Offer Needs Completion ===');
+const offer = { ...OK, 'Current Stage': 'Offer Sent', 'Visit Status': 'Completed', 'Seller Motivation': 'Divorce' };
+check('Offer Sent with no amount and no date', bucket(offer), 'offerIncomplete');
+check('...and says so', reason(offer), 'stage is Offer Sent but neither the amount nor the sent date is filled in');
+check('amount only', reason({ ...offer, 'Approved Offer Amount': 450000 }),
+  'stage is Offer Sent but the sent date is blank');
+check('date only', reason({ ...offer, 'Offer Sent Date': day(2026, 8, 1) }),
+  'stage is Offer Sent but the offer amount is blank');
+check('both filled in disappears from the queue',
+  bucket({ ...offer, 'Approved Offer Amount': 450000, 'Offer Sent Date': day(2026, 8, 1) }), null);
+// A £0 offer is a real number, not a blank.
+check('a zero offer amount counts as filled in',
+  bucket({ ...offer, 'Approved Offer Amount': 0, 'Offer Sent Date': day(2026, 8, 1) }), null);
+check('an earlier stage with no offer figures is not this bucket',
+  bucket({ ...OK, 'Current Stage': 'Offer Preparation' }), null);
+
+console.log('\n=== 3. Missing Next Action ===');
+check('no action, no due date', bucket({ ...OK, 'Next Action': '', 'Next Action Due Date': '' }), 'missingNextAction');
+check('...and the reason says both', reason({ ...OK, 'Next Action': '', 'Next Action Due Date': '' }),
+  'no next action and no due date');
+/*
+ * This is the artifact Cherry queried: the stage cascade stamps a due date, nobody writes an action,
+ * and the old digest reported it as "overdue". The work is to write the action — so it belongs here.
+ */
+check('a due date the cascade stamped, with no action written',
+  reason({ ...OK, 'Next Action': '' }), 'a due date with no action written against it');
+check('an action with no due date',
+  reason({ ...OK, 'Next Action Due Date': '' }), 'next action "Conduct scheduled visit & log outcome" has no due date');
+check('whitespace is not an action', bucket({ ...OK, 'Next Action': '   ' }), 'missingNextAction');
+
+console.log('\n=== 4. Missing Seller Motivation ===');
+const visited = { ...OK, 'Visit Status': 'Completed', 'Visit Date': day(2026, 8, 1) };
+check('visit completed, motivation blank', bucket(visited), 'missingMotivation');
+check('the reason names the visit date', reason(visited), 'visit on 2026-08-01 completed, seller motivation still blank');
+check('filled in, gone', bucket({ ...visited, 'Seller Motivation': 'Inherited, wants a quick close' }), null);
+check('the review stage counts as visited',
+  bucket({ ...OK, 'Visit Status': '', 'Current Stage': 'Visit Completed — Needs Review' }), 'missingMotivation');
+// Motivation is a POST-visit field: an upcoming visit must not be nagged for it.
+check('an upcoming visit is not asked for motivation yet', bucket(OK), null);
+
+console.log('\n=== 5. Missing Assigned Owner ===');
+const noOwner = { ...OK, 'Assigned Owner': '' };
+check('no owner', bucket(noOwner), 'missingOwner');
+check('the reason is plain', reason(noOwner), 'no assigned owner');
+check('whitespace is not an owner', bucket({ ...OK, 'Assigned Owner': '  ' }), 'missingOwner');
+/*
+ * Her priority list puts Missing Next Action at 3 and Missing Assigned Owner at 5, so a lead missing
+ * both reports as Missing Next Action. Raised as question C in docs/3pm-Digest-Revision.md — a manager
+ * arguably needs the ownerless leads first — but implemented as specified, not quietly reordered.
+ */
+check('missing next action outranks missing owner, per her order',
+  bucket({ ...OK, 'Assigned Owner': '', 'Next Action': '' }), 'missingNextAction');
+
+console.log('\n=== 6. Long-Term Nurture Missing Follow-Up ===');
+const nurture = { ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action Due Date': '' };
+check('in nurture with no follow-up date', bucket(nurture), 'nurtureNoFollowUp');
+check('the reason says so', reason(nurture), 'no follow-up date set');
+check('a past follow-up date is not a follow-up',
+  reason({ ...nurture, 'Next Action Due Date': day(2026, 7, 1) }), 'follow-up date 2026-07-01 is not in the future');
+check('a future date clears it', bucket({ ...nurture, 'Next Action Due Date': day(2026, 12, 1) }), null);
+/*
+ * The exemption that makes bucket 6 reachable at all: a nurture lead with no due date satisfies bucket
+ * 3 as well, and bucket 3 comes first. Without exempting nurture from bucket 3, bucket 6 reads zero
+ * forever. Flagged for approval rather than decided silently.
+ */
+check('nurture is exempt from bucket 3, or bucket 6 could never fire',
+  bucket({ ...nurture, 'Next Action': '' }), 'nurtureNoFollowUp');
+
+console.log('\n=== 7. Stalled ===');
+const stalled = { ...OK, 'Stalled Status': 'Yes', 'Days Since Last Activity': 6 };
+check('stalled with everything else in order', bucket(stalled), 'stalled');
+check('the reason counts the silence', reason(stalled), 'no activity for 6 day(s)');
+check('...and copes without the number', reason({ ...OK, 'Stalled Status': 'Yes' }), 'no recent activity');
+
+console.log('\n=== 8. Flagged — the ambiguity residue, not the old catch-all ===');
+check('flagged but matching none of the seven',
+  bucket({ ...OK, 'Data Quality Status': 'Exception', 'Exception Reason': 'Two sellers on one address' }), 'flagged');
+check('it carries the exception reason',
+  reason({ ...OK, 'Data Quality Status': 'Exception', 'Exception Reason': 'Two sellers on one address' }),
+  'Two sellers on one address');
+check('or the missing-fields list',
+  reason({ ...OK, 'Data Quality Status': 'Incomplete', 'Missing Required Fields': 'Phone' }), 'Phone');
+/*
+ * The whole point of the revision: an incomplete record now reports the ACTION, not the flag. This
+ * record is both Incomplete and missing its next action, and it must land in bucket 3.
+ */
+check('a real missing field beats the generic flag',
+  bucket({ ...OK, 'Next Action': '', 'Data Quality Status': 'Incomplete' }), 'missingNextAction');
+
+console.log('\n=== Records that must never appear ===');
+check('Lost / Closed Out', bucket({ ...missed, 'Current Stage': 'Lost / Closed Out' }), null);
+check('Contract Signed', bucket({ ...missed, 'Current Stage': 'Contract Signed' }), null);
+check('a TEST row', bucket({ ...missed, Source: 'TEST' }), null);
+check('no property address', bucket({ ...missed, 'Property Address': '' }), null);
+check('an entirely blank row', bucket({}), null);
+
+console.log('\n=== One lead, one bucket ===');
+/*
+ * Jose Anguiano is the record that appeared three times in the old digest, inflating the headline
+ * count. Every condition below is true of him at once; he must produce exactly one line.
+ */
 const jose = {
   'Property Address': '2145 Capitol Ave, East Palo Alto, CA',
-  'Visit Status': 'Scheduled', 'Visit Date': '2026-08-01',
-  'Days Overdue': 2, 'Next Action': 'Conduct scheduled visit & log outcome',
-  'Data Quality Status': 'Incomplete', 'Stalled Status': 'Yes'
+  'Seller Name': 'Jose Anguiano',
+  'Current Stage': 'Visit Scheduled',
+  'Visit Status': 'Scheduled', 'Visit Date': day(2026, 8, 1),
+  'Next Action': '', 'Next Action Due Date': '',
+  'Assigned Owner': '',
+  'Seller Motivation': '',
+  'Stalled Status': 'Yes',
+  'Data Quality Status': 'Incomplete'
 };
-check('a passed visit outranks everything else', bucketFor(jose), 'missedVisit');
-check('...and it is ONE bucket, not three',
-  ['missedVisit', 'overdue', 'review', 'stalled'].filter((b) => bucketFor(jose) === b).length, 1);
+check('five conditions, one bucket', bucket(jose), 'visitOverdue');
+check('...and it is the most urgent one', ATTENTION_BUCKETS[0].key, 'visitOverdue');
+const hits = ATTENTION_BUCKETS.filter((b) => bucket(jose) === b.key);
+check('exactly one bucket claims him', hits.length, 1);
 
-console.log('\n=== The artifact that produced "48 overdue · no next action" ===');
-const stamped = {
-  'Property Address': '550 El Capitan Dr, Danville, CA',
-  'Days Overdue': 2, 'Next Action': '',            // due date stamped by the cascade, no action written
-  'Data Quality Status': 'Incomplete', 'Stalled Status': 'Yes'
-};
-check('a due date with no action is NOT called overdue', bucketFor(stamped) === 'overdue', false);
-check('...it goes to needs-review, where the missing field is the point', bucketFor(stamped), 'review');
+console.log('\n=== The count is the number of leads ===');
+const many = [OK, missed, jose, noOwner, stalled, { ...visited }, { ...nurture },
+  { ...missed, 'Current Stage': 'Contract Signed' }];
+const lines = many.map(bucket).filter(Boolean);
+check('8 records in, 6 lines out (one healthy, one excluded)', lines.length, 6);
+check('no record produces two lines', lines.length, new Set(many.map((_, i) => i)).size - 2);
 
-const real = { ...stamped, 'Next Action': 'Call seller to confirm price' };
-check('a real overdue commitment still reports as overdue', bucketFor(real), 'overdue');
-
-console.log('\n=== Records that should not appear at all ===');
-check('closed out', bucketFor({ ...jose, 'Current Stage': 'Lost / Closed Out' }), null);
-check('a TEST row', bucketFor({ ...jose, Source: 'TEST' }), null);
-check('a blank row', bucketFor({}), null);
-check('a healthy record', bucketFor({
-  'Property Address': '1 Main St', 'Visit Status': 'Scheduled', 'Visit Date': '2026-09-01',
-  'Days Overdue': 0, 'Data Quality Status': 'OK', 'Stalled Status': 'No'
-}), null);
-
-console.log('\n=== The headline count no longer double-counts ===');
-const many = [jose, stamped, real,
-  { 'Property Address': '2 Oak St', 'Stalled Status': 'Yes', 'Data Quality Status': 'OK' },
-  { 'Property Address': '3 Elm St', 'Data Quality Status': 'Exception', 'Stalled Status': 'Yes' }
-];
-const buckets = many.map(bucketFor).filter(Boolean);
-check('5 records produce 5 lines, not 12', buckets.length, 5);
-check('every record is in exactly one bucket', new Set(many.map((r, i) => i)).size, buckets.length);
-check('the stalled-only record is counted as stalled', bucketFor(many[3]), 'stalled');
-check('review outranks stalled when both apply', bucketFor(many[4]), 'review');
+console.log('\n=== The posted card meets her display rules ===');
+const post = CHAT.slice(CHAT.indexOf('function sendAttentionDigestToChat'));
+check('unassigned is spelled out', /UNASSIGNED/.test(post), true);
+check('each line carries the seller name', /rec\['Seller Name'\]/.test(post), true);
+check('each line carries the address', /rec\['Property Address'\]/.test(post), true);
+check('each line carries the reason', /hit\.reason/.test(post), true);
+check('each bucket shows its count', /\(' \+ arr\.length \+ '\)/.test(post), true);
+check('each bucket shows its action', /b\.action/.test(post), true);
+check('the header points at the first bucket with work in it', /start with/.test(post), true);
+check('it is numbered so priority is visible', /\(i \+ 1\)/.test(post), true);
+// Read-only: raising an alert must never write a date or an action back to the sheet.
+check('the digest never writes to the sheet', /setValue|setValues/.test(post), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
