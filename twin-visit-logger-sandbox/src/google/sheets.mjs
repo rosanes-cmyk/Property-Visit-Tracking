@@ -13,6 +13,7 @@ export const CANONICAL_HEADERS = [
   'Visit Status',
   'Current Stage',
   'Assigned Owner',
+  'Assigned Visitor',
   'REI BlackBook Link',
   'Lead Source',
   'Next Action',
@@ -42,7 +43,16 @@ const HEADER_ALIASES = {
   'Visit Time': ['Visit Time'],
   'Visit Status': ['Visit Status'],
   'Current Stage': ['Current Stage'],
-  'Assigned Owner': ['Assigned Visitor'],
+  /*
+   * These are two different columns in the tracker and they were collapsed into one.
+   *
+   * "Assigned Owner" aliased to "Assigned Visitor", so Juan was written into the visitor column at index 11
+   * and the OWNER column at 33 stayed empty — and the workbook's rules check the owner. The dashboard card
+   * read "Unassigned · Missing: Assigned Owner" for a visit REI had explicitly assigned to Juan. An alias is
+   * for a column with two NAMES, not for two columns with different meanings.
+   */
+  'Assigned Owner': ['Assigned Owner'],
+  'Assigned Visitor': ['Assigned Visitor'],
   'REI BlackBook Link': ['REI BlackBook Link'],
   'Lead Source': ['Lead Source'],
   'Next Action': ['Next Action'],
@@ -282,7 +292,14 @@ function visitToRecord(visit) {
     'Visit Time': hasValidStart ? start.toFormat('h:mm a') : '',
     'Visit Status': status,
     'Current Stage': stage,
+    /*
+     * REI has ONE "Appointment Assigned To" field, and it means the person doing the visit. It fills both
+     * columns: the visitor because that is what it says, and the owner because a lead nobody owns is flagged
+     * as an exception, and "the person REI assigned" is a truer answer than blank. A human can reassign
+     * either afterwards, and this never overwrites a human's choice — see HUMAN_ADVANCED_STAGES.
+     */
     'Assigned Owner': visit.assignedOwner || '',
+    'Assigned Visitor': visit.assignedOwner || '',
     'REI BlackBook Link': visit.reiLink || '',
     'Lead Source': visit.leadSource || '',
     'Next Action': cancelled ? '' : 'Conduct scheduled visit & log outcome',
