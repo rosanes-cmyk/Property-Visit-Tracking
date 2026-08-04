@@ -90,12 +90,36 @@ check('a passed visit stays visible, flagged OVERDUE',
   reason({ ...BASE, 'Visit Date': day(2026, 8, 1) }),
   'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled');
 check('...and is marked so it can be sorted to the top',
-  attentionBucket_({ ...BASE, 'Visit Date': day(2026, 8, 1) }, TODAY).overdue, true);
-check('a future visit is not flagged overdue', !!attentionBucket_(BASE, TODAY).overdue, false);
+  attentionBucket_({ ...BASE, 'Visit Date': day(2026, 8, 1) }, TODAY).attention, true);
+check('a future visit needs no attention flag', !!attentionBucket_(BASE, TODAY).attention, false);
 check('no visit date at all is still surfaced',
   reason({ ...BASE, 'Visit Date': '' }), 'no visit date set — nothing to confirm against');
 // A Sheets serial must behave exactly like a real Date — the API writes serials.
 check('a date serial works too', reason({ ...BASE, 'Visit Date': 46235 }).startsWith('OVERDUE'), true);
+
+console.log('\n--- a cancelled visit is LISTED here, and says so ---');
+/*
+ * Cancelling does not move Current Stage (realignStage_ leaves it for a human to close out), so the
+ * lead stays at Visit Scheduled and lands in this section. Reading it back is what found the bug: it
+ * said "visit Aug 12, 2026" under "Confirm the visit is going ahead", and a cancelled visit whose date
+ * had passed said "OVERDUE ... still marked Canceled". Removing it would be worse — a cancellation is
+ * exactly what somebody has to act on.
+ */
+const canceled = { ...BASE, 'Visit Status': 'Canceled' };
+check('it stays in Upcoming Visit', bucket(canceled), 'upcomingVisit');
+check('and reads as cancelled, not as a visit going ahead',
+  reason(canceled), 'CANCELED — was booked for Aug 12, 2026 — rebook it or close the lead out');
+check('a past cancelled visit is NOT called overdue',
+  reason({ ...canceled, 'Visit Date': day(2026, 8, 1) }).startsWith('CANCELED'), true);
+check('it sorts to the top of the section', attentionBucket_(canceled, TODAY).attention, true);
+check('Reschedule Needed gets its own wording',
+  reason({ ...BASE, 'Visit Status': 'Reschedule Needed' }),
+  'RESCHEDULE NEEDED — was booked for Aug 12, 2026 — agree a new date with the seller');
+check('a cancelled visit with no date still surfaces',
+  reason({ ...canceled, 'Visit Date': '' }), 'CANCELED — rebook it or close the lead out');
+// Once the lead is actually closed out it leaves the notification entirely — that is the exit.
+check('closing the lead out removes it',
+  bucket({ ...canceled, 'Current Stage': 'Lost / Closed Out' }), null);
 
 console.log('\n=== 2. Completed Visit — Needs Next Course of Action ===');
 const visited = { ...BASE, 'Current Stage': 'Visit Completed — Needs Review',
@@ -212,7 +236,7 @@ check('the seller name is on the line', /rec\['Seller Name'\]/.test(post), true)
 check('the address is on the line', /rec\['Property Address'\]/.test(post), true);
 check('each bucket shows its count', /\(' \+ arr\.length \+ '\)/.test(post), true);
 check('each bucket shows its action', /b\.action/.test(post), true);
-check('overdue visits are pushed to the top of their bucket', /hit\.overdue.*unshift/.test(post), true);
+check('lines needing a decision are pushed to the top', /hit\.attention.*unshift/.test(post), true);
 check('gifts are counted separately from leads', /var leads = ATTENTION_BUCKETS\.reduce/.test(post), true);
 check('the header reports leads and gifts apart', /' lead\(s\)' \+ \(gifts \?/.test(post), true);
 check('the digest still writes nothing to the sheet', /setValue|setValues/.test(post), false);

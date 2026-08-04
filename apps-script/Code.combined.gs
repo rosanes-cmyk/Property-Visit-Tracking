@@ -3303,9 +3303,32 @@ function attentionBucket_(rec, today) {
     if (b.key === 'upcomingVisit') {
       var on = dateCell_(rec['Visit Date']);
       var status = String(rec['Visit Status'] || '').trim();
-      if (!on) return { key: b.key, reason: 'no visit date set — nothing to confirm against' };
+      var was = on ? ' — was booked for ' + fmt_(on) : '';
+
+      /*
+       * A CANCELLED visit is still listed here, and says so.
+       *
+       * Cancelling does not move Current Stage — realignStage_ leaves it alone for a human to close
+       * out — so the lead stays at Visit Scheduled and lands in this section. Reading it back showed
+       * the bug: a cancelled visit appeared under "Confirm the visit is going ahead" as "visit Aug 12,
+       * 2026", and a cancelled visit whose date had passed read "OVERDUE ... still marked Canceled",
+       * which is nonsense.
+       *
+       * Removing it from the section would be worse: a cancellation is exactly the thing someone has
+       * to act on, by rebooking or closing the lead out. So it stays, labelled, and sorts to the top.
+       */
+      if (status === 'Canceled') {
+        return { key: b.key, attention: true,
+          reason: 'CANCELED' + was + ' — rebook it or close the lead out' };
+      }
+      if (status === 'Reschedule Needed') {
+        return { key: b.key, attention: true,
+          reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
+      }
+
+      if (!on) return { key: b.key, attention: true, reason: 'no visit date set — nothing to confirm against' };
       if (on < today) {
-        return { key: b.key, overdue: true,
+        return { key: b.key, attention: true,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled') };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
@@ -3418,7 +3441,9 @@ function sendAttentionDigestToChat() {
     if (hit) {
       // An overdue visit goes to the TOP of its bucket. It is the one line in the message that means
       // something may already have gone wrong with a seller rather than merely being unfinished.
-      if (hit.overdue) found[hit.key].unshift(line(hit.reason));
+      // Anything needing a decision — overdue, cancelled, reschedule, no date — sorts above the
+      // visits that are simply coming up, so the top of the section is always the part to act on.
+      if (hit.attention) found[hit.key].unshift(line(hit.reason));
       else found[hit.key].push(line(hit.reason));
     }
 
