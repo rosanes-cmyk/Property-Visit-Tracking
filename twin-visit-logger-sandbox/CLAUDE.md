@@ -156,6 +156,19 @@ Still out of scope: direct REI API integration, auto-sending seller communicatio
 is permitted; sending a message is not, and no send function exists), PDF reports, and advanced
 dashboard redesign.
 
+**WhatsApp automation is OFF (`WHATSAPP_ENABLED=false`). The number used for it was banned.**
+
+Automating WhatsApp Web breaches Meta's terms of service and they detect it — this was a stated risk from the
+start of the project and it happened. No technique removes that risk, and the official WhatsApp Business Cloud
+API has no group management at all, so there is no compliant way to automate the group. Do not re-enable it or
+propose a "safer" scraping approach; the honest answer is that one does not exist.
+
+The briefing now goes to Google Chat (`CHAT_WEBHOOK_URL`), which is the client's own Workspace and permitted to
+automate. That was always the valuable part — the visitor having the property, the drive plan, the numbers and
+the call in front of them before setting off. The group itself is created by hand, as the team did before.
+
+The rest of the WhatsApp code is left in place and switchable, for a number the business can afford to lose.
+
 The visit WhatsApp groups are TEAM ONLY (`WHATSAPP_INCLUDE_SELLER=false`), decided by the client
 after seeing that their own hand-built groups contain no sellers. Adding one would expose whatever
 the team posts — offer numbers, motivation reads, equity estimates — to the person being negotiated

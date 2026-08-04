@@ -73,7 +73,15 @@ const raw = {
   // terminal, so silence has to mean "nothing was booked" rather than "it broke hours ago".
   // Blank = no notifications, which is the old behaviour exactly. This is a credential: it lets
   // anyone holding it post into the space, so it belongs in .env and never in source.
-  chatWebhookUrl: (process.env.CHAT_WEBHOOK_URL || '').trim()
+  chatWebhookUrl: (process.env.CHAT_WEBHOOK_URL || '').trim(),
+  /*
+   * WHATSAPP_ENABLED=false stops the WhatsApp step dead, wherever it is called from.
+   *
+   * The number used for this was banned: automating WhatsApp Web breaches Meta's terms and they detect it. A
+   * disabled scheduled task is not enough of an off switch — someone runs the command by hand and the account
+   * is at risk again. This is the switch, and it defaults to ON only because existing setups rely on it.
+   */
+  whatsappEnabled: bool(process.env.WHATSAPP_ENABLED, true)
 };
 
 const schema = z.object({
@@ -114,7 +122,8 @@ const schema = z.object({
   phoneDefaultCountry: z.string().min(1),
   // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
   // to `raw` alone silently arrives as undefined.
-  chatWebhookUrl: z.string()
+  chatWebhookUrl: z.string(),
+  whatsappEnabled: z.boolean()
 });
 
 export const config = schema.parse({

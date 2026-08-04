@@ -131,6 +131,12 @@ async function main() {
   console.log(`Note posting: ${config.whatsappPostNote ? 'ON' : 'OFF (WHATSAPP_POST_NOTE=false)'}` +
     `${FORCE ? ' · --force: ignoring the state file' : ''}\n`);
 
+  if (!config.whatsappEnabled) {
+    console.log('WHATSAPP_ENABLED=false — the WhatsApp step is switched off. Nothing was opened or created.');
+    console.log('The visit briefing still goes to Google Chat, which is where it belongs now.');
+    return;
+  }
+
   if (!config.whatsappTeamNumbers.length && !config.whatsappIncludeSeller) {
     throw new Error('Nobody to add. Set WHATSAPP_TEAM_NUMBERS in .env (comma-separated).');
   }

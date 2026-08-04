@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
 import {
   addLabel,
@@ -11,6 +12,7 @@ import { parseAppointmentTitle } from '../parser/email.mjs';
 import { launchReiContext, ReiSessionExpiredError } from '../rei/browser.mjs';
 import { scrapeReiVisit } from '../rei/scraper.mjs';
 import { notifyChat } from '../utils/notify.mjs';
+import { buildInspectionNote } from '../whatsapp/note.mjs';
 
 // Pull the phone number out of the REI notification (from the task-title line if possible). REI
 // truncates long titles, so a short "Booked appointment | (707) 484-2558" title survives and the
@@ -178,13 +180,38 @@ export async function processInbox(auth, logger) {
           dryRun: config.dryRun
         });
 
-        // Announce it. On a timer nobody reads the log, so this is the only place the team learns a
-        // booking landed without going to look for it.
+        /*
+         * The FULL briefing goes to Google Chat, not just "a visit was logged".
+         *
+         * The WhatsApp number used for this got banned — automating WhatsApp Web breaches their terms and Meta
+         * detects it, which was a stated risk from the start and has now happened. But the valuable thing was
+         * never the group: it is the visitor having the property, the drive plan, the numbers and the call in
+         * front of them before they set off. Chat is the client's own Workspace and automating it is permitted,
+         * so the briefing goes there and survives WhatsApp being switched off entirely.
+         *
+         * Seller phone and email are stripped by notifyChat regardless of what is assembled here.
+         */
         if (!config.dryRun) {
+          const briefing = buildInspectionNote({
+            propertyAddress: partialVisit.propertyAddress,
+            sellerName: partialVisit.sellerName,
+            phone: partialVisit.phone,
+            email: partialVisit.email,
+            reiLink: partialVisit.reiLink,
+            leadSource: partialVisit.leadSource,
+            contactStage: partialVisit.contactStage,
+            assignedOwner: partialVisit.assignedOwner,
+            notes: partialVisit.notes
+          }, {
+            appointmentText: partialVisit.appointmentStartIso
+              ? DateTime.fromISO(partialVisit.appointmentStartIso)
+                .setZone(config.calendarTimezone).toFormat('ccc, LLL d, yyyy, h:mm a')
+              : ''
+          });
+
           await notifyChat(
-            `Visit logged — ${partialVisit.sellerName || '(no name)'} · ${partialVisit.propertyAddress}` +
-            `\nRow ${written?.rowNumber ?? '?'} in "${config.trackerSheet}" · calendar event ${calendarEventId ? 'set' : 'NOT created'}` +
-            (partialVisit.assignedOwner ? `\nAssigned: ${partialVisit.assignedOwner}` : '\nNo assigned owner on the REI contact'),
+            `${briefing}\n\n— row ${written?.rowNumber ?? '?'} in "${config.trackerSheet}"` +
+            ` · calendar event ${calendarEventId ? 'set' : 'NOT created'}`,
             { kind: 'ok' }
           );
         }
