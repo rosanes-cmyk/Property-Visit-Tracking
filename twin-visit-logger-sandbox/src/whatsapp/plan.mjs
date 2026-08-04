@@ -77,6 +77,27 @@ export function suspiciousNumber(value) {
   return '';
 }
 
+
+/**
+ * Is this a test lead rather than a real visit?
+ *
+ * "Test, Test, Test, CA" sat on the calendar and every run picked it up — opening WhatsApp, checking its
+ * group, working on it, indefinitely. The workbook already excludes Source=TEST from the Board, so the same
+ * exclusion belongs here.
+ *
+ * The rule is strict on purpose: TWO OR MORE comma-separated parts of the address must be exactly "test".
+ * A single one would catch a real street — Testa Ave, Test Valley Road — and refusing to create a group for a
+ * genuine visit is far worse than opening a browser for a fake one.
+ */
+export function looksLikeTestLead(address, sellerName) {
+  const parts = String(address || '').split(',').map((p) => p.trim().toLowerCase());
+  const exactTests = parts.filter((p) => p === 'test').length;
+  if (exactTests >= 2) return true;
+  // "Test Test Test" as a seller name is not a person either.
+  const words = String(sellerName || '').trim().toLowerCase().split(/\s+/);
+  return words.length >= 2 && words.every((w) => w === 'test');
+}
+
 /** Read "Label: value" out of the event description the calendar module writes. */
 export function fieldFromDescription(description, label) {
   const prefix = `${label}:`.toLowerCase();
@@ -242,7 +263,9 @@ export function planForEvent(event, options) {
     defaultCountry = '1',
     template = DEFAULT_GROUP_TEMPLATE,
     now = new Date(),
-    alreadyDone = new Set()
+    alreadyDone = new Set(),
+    // On by default. A test lead on the calendar otherwise gets worked on by every run, forever.
+    skipTestLeads = true
   } = options || {};
 
   const title = String(event?.summary ?? '');
@@ -265,6 +288,9 @@ export function planForEvent(event, options) {
     || fieldFromDescription(event.description, 'Property')
     || title.replace(/^Property Visit\s*[-|·—]?\s*/i, '').trim();
   if (!address) return skip('no property address on the event');
+  if (skipTestLeads && looksLikeTestLead(address, fieldFromDescription(event.description, 'Seller'))) {
+    return skip(`test lead, ignored (${address})`);
+  }
 
   const name = groupName(address, start, timezone, template);
   if (alreadyDone.has(event.id)) return skip(`group already created (${name})`);

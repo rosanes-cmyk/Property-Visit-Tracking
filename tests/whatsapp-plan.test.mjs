@@ -12,7 +12,8 @@
  */
 import {
   toE164, fieldFromDescription, shortAddress, groupName, participants, planForEvent, planForEvents,
-  GROUP_NAME_MAX, suspiciousNumber, blockFromDescription, reiLinkFromDescription
+  GROUP_NAME_MAX, suspiciousNumber, blockFromDescription, reiLinkFromDescription,
+  looksLikeTestLead
 } from '../twin-visit-logger-sandbox/src/whatsapp/plan.mjs';
 
 let pass = 0, fail = 0;
@@ -257,6 +258,43 @@ check('an unrelated URL is not mistaken for one',
 check('nothing there', reiLinkFromDescription('Seller: X\nPhone: Y'), '');
 check('empty', reiLinkFromDescription(''), '');
 check('undefined does not throw', reiLinkFromDescription(undefined), '');
+
+console.log('\n=== Test leads are left alone ===');
+/*
+ * "Test, Test, Test, CA" sat on the calendar and every run picked it up — opening WhatsApp, checking its group,
+ * working on it, indefinitely. The workbook already excludes Source=TEST from the Board; the same exclusion
+ * belongs here.
+ */
+check('the test lead is recognised', looksLikeTestLead('Test, Test, Test, CA', 'Test Test Test'), true);
+check('a test seller name alone is enough', looksLikeTestLead('', 'Test Test'), true);
+
+console.log('\n--- and a real address is never mistaken for one ---');
+// Refusing to create a group for a genuine visit is far worse than opening a browser for a fake one.
+check('a real address', looksLikeTestLead('1390 Estudillo Ave, San Leandro, CA 94577', 'David Jackowitz'), false);
+check('a street that merely contains "test"', looksLikeTestLead('123 Testa Ave, Napa, CA', 'Jane Doe'), false);
+check('ONE part being exactly "test" is not enough',
+  looksLikeTestLead('5 Test Valley Rd, Test, CA', 'Bob'), false);
+check('a seller called Tester is a person', looksLikeTestLead('9 Oak St, Napa, CA', 'Tester Jones'), false);
+check('empty is not a test lead', looksLikeTestLead('', ''), false);
+check('undefined does not throw', looksLikeTestLead(undefined, undefined), false);
+
+console.log('\n--- and planForEvent skips it with a reason that says why ---');
+const testEvent = {
+  id: 'test-1',
+  summary: 'Property Visit | Test Test Test | Test, Test, Test, CA',
+  location: 'Test, Test, Test, CA',
+  start: { dateTime: '2026-08-06T14:00:00-07:00' }
+};
+const skipped = planForEvent(testEvent, {
+  teamNumbers: ['+15105550100'], now: new Date('2026-08-04T12:00:00-07:00')
+});
+check('it is skipped', skipped.create, false);
+check('and the reason names it', /test lead, ignored/.test(skipped.reason || ''), true);
+// The switch exists so a deliberate end-to-end test can still be run.
+const kept = planForEvent(testEvent, {
+  teamNumbers: ['+15105550100'], now: new Date('2026-08-04T12:00:00-07:00'), skipTestLeads: false
+});
+check('skipTestLeads:false processes it anyway', kept.create, true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
