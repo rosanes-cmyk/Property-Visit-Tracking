@@ -121,8 +121,44 @@ const DROPDOWNS = {
   'Golden Needle': ['Yes'],
 };
 
-/** column index (1-based) for a header name */
+/**
+ * Where a column REALLY is, read from the sheet's own header row.
+ *
+ * This used to be HEADERS.indexOf(name) + 1 — the position in the array above. The live Data tab has
+ * drifted to 74 columns against the 72 declared here, because the Node automation appends a column
+ * whenever one of its aliases finds no match (ADD_MISSING_COLUMNS=true). From 'REI BlackBook Link'
+ * onward, everything in the real sheet now sits one column to the right of where this code believed it
+ * was — so every read and write was addressing the neighbouring cell. The dashboard handed a
+ * reiblackbook.com URL to a field expecting a visit date, and a webAction write would have put the
+ * value in the wrong column altogether.
+ *
+ * So the sheet is the authority on WHERE a column is; HEADERS is only the list of names this code knows
+ * about. Cached for the execution: one read of the header row per run, not one per lookup.
+ */
+var HEADER_INDEX_ = null;
+function headerIndex_() {
+  if (HEADER_INDEX_) return HEADER_INDEX_;
+  const map = {};
+  const sh = dataSheet_();
+  const width = sh ? sh.getLastColumn() : 0;
+  if (width > 0) {
+    const live = sh.getRange(CFG.HEADER_ROW, 1, 1, width).getValues()[0];
+    live.forEach(function (name, i) {
+      const key = String(name).trim();
+      // First occurrence wins, so a duplicated heading further right cannot shadow the real column.
+      if (key && !(key in map)) map[key] = i + 1;
+    });
+  }
+  HEADER_INDEX_ = map;
+  return map;
+}
+
+/** column index (1-based) for a header name — the sheet's position, not the array's */
 function col(name) {
+  const live = headerIndex_()[name];
+  if (live) return live;
+  // Not on the sheet yet (a fresh tab, or a column setup() has still to add): fall back to the
+  // declared position, which is what a newly built sheet will have anyway.
   const i = HEADERS.indexOf(name);
   if (i < 0) throw new Error('Unknown column: ' + name);
   return i + 1;

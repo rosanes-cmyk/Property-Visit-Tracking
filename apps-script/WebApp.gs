@@ -88,9 +88,25 @@ function webGetData() {
   const last = sh.getLastRow();
   const rows = [];
   if (last >= CFG.FIRST_DATA_ROW) {
-    const vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, HEADERS.length).getValues();
+    /*
+     * Read the WHOLE width and map values by column NAME.
+     *
+     * This read HEADERS.length columns and zipped them onto HEADERS by position. The live tab has 74
+     * columns against the 72 declared, and is shifted by one from 'REI BlackBook Link' onward, so every
+     * field from there on took its neighbour's value — visitDate got the REI link, visitStatus got the
+     * date — and the last two columns were never read at all. Two real visits sat in the sheet and could
+     * not be found on the board.
+     *
+     * A name lookup is immune to that: an unexpected extra column is ignored, a heading this code does
+     * not know about is ignored, and a declared column the sheet does not have yet reads as blank
+     * instead of silently borrowing the cell next to it.
+     */
+    const idx = headerIndex_();
+    const width = Math.max(sh.getLastColumn(), HEADERS.length);
+    const vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, last - CFG.FIRST_DATA_ROW + 1, width).getValues();
     vals.forEach(function(v, i){
-      const rec = {}; HEADERS.forEach(function(h, j){ rec[h] = v[j]; });
+      const rec = {};
+      HEADERS.forEach(function(h){ const c = idx[h]; rec[h] = c ? v[c - 1] : ''; });
       if (!rec['Property Address'] || String(rec['Source']).trim() === 'TEST') return; // live records only
       // full = every column, dates/times made readable, for the accurate 61-field detail view
       const full = {}; HEADERS.forEach(function(h){ full[h] = cellDisplay_(h, rec[h]); });
