@@ -1,20 +1,18 @@
 /**
- * The 3pm digest — Cherry's revision: a work queue, not a data-quality report.
+ * The 3pm work queue — Cherry's SECOND revision: five pipeline stages plus gifts.
  *
  *   node tests/attention-digest.test.mjs
  *
- * Her acceptance criteria, from "3:00 PM LEAD NOTIFICATION REVISION":
- *   - every category represents ONE business action, not one database condition
- *   - each lead appears once, in the most urgent applicable bucket
- *   - each bucket shows its count; each line shows name, address, owner and the exact reason
- *   - unassigned leads say UNASSIGNED
- *   - Lost / Closed Out and Contract Signed never appear
- *   - no due date or action is invented in order to raise an alert
- *   - an ambiguous record is flagged, not guessed at
+ * Her words: "notification should be like this only — Upcoming Visit / Completed Visit - Need next
+ * course of action / Pending offer - ASAP / Offer Sent / Still negotiating (those leads that undecided
+ * after the offer has been sent). Also we want to track sending gifts to them as part of follow up."
  *
- * This runs the SHIPPED attentionBucket_ out of ChatNotify.gs rather than a copy of its rules. The
- * previous version of this file re-implemented the bucket logic, which meant the tests could agree
- * with themselves while disagreeing with the code that actually posts to Chat.
+ * This replaced a field-based structure (missing owner, missing next action, missing motivation…). The
+ * five below answer "where is this deal and who owes it a move" instead of "which cell is empty",
+ * which is what a manager reads a work queue for.
+ *
+ * These tests run the SHIPPED functions lifted out of ChatNotify.gs, not a copy of their rules, so
+ * they cannot agree with themselves while disagreeing with what posts to Chat.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,300 +28,252 @@ function check(name, got, want) {
 }
 
 const CHAT = read('apps-script/ChatNotify.gs');
-
-/* ------------------------------------------------------------------
- * Lift the real functions out of the .gs and run them here.
- * ---------------------------------------------------------------- */
 const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
-const source = [
-  slice('var ATTENTION_BUCKETS = [', '/** A sheet date cell'),
-  slice('function dateCell_(', 'function attentionBucket_('),
-  slice('function attentionBucket_(', '/**\n * Post the 3pm work queue')
-].join('\n');
+const source = slice('var ATTENTION_BUCKETS = [', '/**\n * Post the 3pm work queue');
 
-const { attentionBucket_, ATTENTION_BUCKETS } = new Function(
+const { attentionBucket_, giftPending_, excludedFromDigest_, money_, ATTENTION_BUCKETS } = new Function(
   'fmt_',
-  `${source}\nreturn { attentionBucket_: attentionBucket_, ATTENTION_BUCKETS: ATTENTION_BUCKETS };`
-)((d) => new Date(d).toISOString().slice(0, 10));
+  `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, money_, ATTENTION_BUCKETS };`
+)((d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }));
 
-const TODAY = new Date(2026, 7, 4);            // Aug 4 2026, local midnight
+const TODAY = new Date(2026, 7, 5);              // Aug 5 2026, local midnight
 const day = (y, m, d) => new Date(y, m - 1, d);
 const bucket = (rec) => { const h = attentionBucket_(rec, TODAY); return h ? h.key : null; };
 const reason = (rec) => { const h = attentionBucket_(rec, TODAY); return h ? h.reason : ''; };
 
-/** A record with nothing wrong with it, to vary one field at a time. */
-const OK = {
+/** A lead with a visit booked next week. Vary one field at a time from here. */
+const BASE = {
   'Property Address': '1390 Estudillo Ave, San Leandro, CA 94577',
   'Seller Name': 'David Jackowitz',
   'Current Stage': 'Visit Scheduled',
   'Visit Status': 'Scheduled',
-  'Visit Date': day(2026, 8, 20),
-  'Next Action': 'Conduct scheduled visit & log outcome',
-  'Next Action Due Date': day(2026, 8, 20),
-  'Assigned Owner': 'Juan',
-  'Stalled Status': 'No',
-  'Data Quality Status': 'OK'
+  'Visit Date': day(2026, 8, 12),
+  'Assigned Owner': 'Juan'
 };
 
-console.log('=== Cherry\'s seven buckets exist, in her priority order ===');
-check('eight buckets: her seven plus the ambiguity residue', ATTENTION_BUCKETS.length, 8);
-check('in her order', ATTENTION_BUCKETS.map((b) => b.title), [
-  'Visit Overdue',
-  'Offer Needs Completion',
-  'Missing Next Action',
-  'Missing Seller Motivation',
-  'Missing Assigned Owner',
-  'Long-Term Nurture Missing Follow-Up',
-  'Stalled',
-  'Flagged — ambiguous, needs a person'
+console.log("=== Cherry's five stages, plus gifts, in her order ===");
+check('six buckets', ATTENTION_BUCKETS.length, 6);
+check('in her reading order', ATTENTION_BUCKETS.map((b) => b.title), [
+  'Upcoming Visit',
+  'Completed Visit — Needs Next Course of Action',
+  'Pending Offer — ASAP',
+  'Offer Sent',
+  'Still Negotiating',
+  'Gift Follow-Up'
 ]);
+check('each of the five names one stage', ATTENTION_BUCKETS.slice(0, 5).map((b) => b.stage), [
+  'Visit Scheduled',
+  'Visit Completed — Needs Review',
+  'Offer Preparation',
+  'Offer Sent',
+  'Active Negotiation'
+]);
+check('the gift bucket is not tied to a stage', ATTENTION_BUCKETS[5].stage, '');
 check('every bucket names one action', ATTENTION_BUCKETS.every((b) => /\.$/.test(b.action)), true);
-check('every bucket has an icon', ATTENTION_BUCKETS.every((b) => !!b.icon), true);
+// The stages must be real values of the workbook's own dropdown, or a bucket can never fire.
+const STAGES = (read('apps-script/Config.gs').match(/'Current Stage':\s*\[([^\]]+)\]/) || [])[1] || '';
+check('every stage exists in the Current Stage dropdown',
+  ATTENTION_BUCKETS.slice(0, 5).every((b) => STAGES.includes(`'${b.stage}'`)), true);
 
-console.log('\n=== A healthy record does not appear at all ===');
-check('nothing wrong, nothing posted', bucket(OK), null);
-
-console.log('\n=== 1. Visit Overdue ===');
-const missed = { ...OK, 'Visit Date': day(2026, 8, 1) };
-check('a passed visit still marked Scheduled', bucket(missed), 'visitOverdue');
-check('the reason names the date', reason(missed), 'visit was 2026-08-01, still marked Scheduled');
-check("today's visit is not overdue", bucket({ ...OK, 'Visit Date': TODAY }), null);
-check('a completed visit is not overdue',
-  bucket({ ...missed, 'Visit Status': 'Completed', 'Seller Motivation': 'Relocating' }), null);
-check('a cancelled visit is not overdue', bucket({ ...missed, 'Visit Status': 'Canceled' }), null);
-// The sheet stores dates as serials when written by the API; both shapes must behave the same.
-check('a Sheets date serial works too', bucket({ ...OK, 'Visit Date': 46235 }), 'visitOverdue');
-
-console.log('\n=== 2. Offer Needs Completion ===');
-const offer = { ...OK, 'Current Stage': 'Offer Sent', 'Visit Status': 'Completed', 'Seller Motivation': 'Divorce' };
-check('Offer Sent with no amount and no date', bucket(offer), 'offerIncomplete');
-check('...and says so', reason(offer), 'stage is Offer Sent but neither the amount nor the sent date is filled in');
-check('amount only', reason({ ...offer, 'Approved Offer Amount': 450000 }),
-  'stage is Offer Sent but the sent date is blank');
-check('date only', reason({ ...offer, 'Offer Sent Date': day(2026, 8, 1) }),
-  'stage is Offer Sent but the offer amount is blank');
-check('both filled in disappears from the queue',
-  bucket({ ...offer, 'Approved Offer Amount': 450000, 'Offer Sent Date': day(2026, 8, 1) }), null);
-// A £0 offer is a real number, not a blank.
-check('a zero offer amount counts as filled in',
-  bucket({ ...offer, 'Approved Offer Amount': 0, 'Offer Sent Date': day(2026, 8, 1) }), null);
-check('an earlier stage with no offer figures is not this bucket',
-  bucket({ ...OK, 'Current Stage': 'Offer Preparation' }), null);
-
-console.log('\n=== 3. Missing Next Action ===');
-check('no action, no due date', bucket({ ...OK, 'Next Action': '', 'Next Action Due Date': '' }), 'missingNextAction');
-check('...and the reason says both', reason({ ...OK, 'Next Action': '', 'Next Action Due Date': '' }),
-  'no next action and no due date');
+console.log('\n=== 1. Upcoming Visit ===');
+check('a visit booked for next week', bucket(BASE), 'upcomingVisit');
+check('the reason gives the date', reason(BASE), 'visit Aug 12, 2026');
+check("today's visit says TODAY", reason({ ...BASE, 'Visit Date': TODAY }), 'visit TODAY');
+check('a time is included when there is one',
+  reason({ ...BASE, 'Visit Date': TODAY, 'Visit Time': '11:00 AM' }), 'visit TODAY at 11:00 AM');
 /*
- * This is the artifact Cherry queried: the stage cascade stamps a due date, nobody writes an action,
- * and the old digest reported it as "overdue". The work is to write the action — so it belongs here.
+ * Cherry's five have no "Visit Overdue" bucket. Dropping those leads silently would be the worst
+ * outcome of simplifying, since a passed visit still marked Scheduled is the one line that means
+ * something may have gone wrong with a seller. So it is called out INSIDE Upcoming Visit.
  */
-check('a due date the cascade stamped, with no action written',
-  reason({ ...OK, 'Next Action': '' }), 'a due date with no action written against it');
-check('an action with no due date',
-  reason({ ...OK, 'Next Action Due Date': '' }), 'next action "Conduct scheduled visit & log outcome" has no due date');
-check('whitespace is not an action', bucket({ ...OK, 'Next Action': '   ' }), 'missingNextAction');
+check('a passed visit stays visible, flagged OVERDUE',
+  reason({ ...BASE, 'Visit Date': day(2026, 8, 1) }),
+  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled');
+check('...and is marked so it can be sorted to the top',
+  attentionBucket_({ ...BASE, 'Visit Date': day(2026, 8, 1) }, TODAY).overdue, true);
+check('a future visit is not flagged overdue', !!attentionBucket_(BASE, TODAY).overdue, false);
+check('no visit date at all is still surfaced',
+  reason({ ...BASE, 'Visit Date': '' }), 'no visit date set — nothing to confirm against');
+// A Sheets serial must behave exactly like a real Date — the API writes serials.
+check('a date serial works too', reason({ ...BASE, 'Visit Date': 46235 }).startsWith('OVERDUE'), true);
 
-console.log('\n=== 4. Missing Seller Motivation ===');
-const visited = { ...OK, 'Visit Status': 'Completed', 'Visit Date': day(2026, 8, 1) };
-check('visit completed, motivation blank', bucket(visited), 'missingMotivation');
-check('the reason names the visit date', reason(visited), 'visit on 2026-08-01 completed, seller motivation still blank');
-check('filled in, gone', bucket({ ...visited, 'Seller Motivation': 'Inherited, wants a quick close' }), null);
-check('the review stage counts as visited',
-  bucket({ ...OK, 'Visit Status': '', 'Current Stage': 'Visit Completed — Needs Review' }), 'missingMotivation');
-// Motivation is a POST-visit field: an upcoming visit must not be nagged for it.
-check('an upcoming visit is not asked for motivation yet', bucket(OK), null);
+console.log('\n=== 2. Completed Visit — Needs Next Course of Action ===');
+const visited = { ...BASE, 'Current Stage': 'Visit Completed — Needs Review',
+  'Visit Status': 'Completed', 'Visit Date': day(2026, 8, 1) };
+check('lands in the decision bucket', bucket(visited), 'needsDecision');
+check('the reason names the visit date', reason(visited), 'visited Aug 1, 2026, no offer decision recorded yet');
+check('it copes with no visit date', reason({ ...visited, 'Visit Date': '' }), 'visited, no offer decision recorded yet');
 
-console.log('\n=== 5. Missing Assigned Owner ===');
-const noOwner = { ...OK, 'Assigned Owner': '' };
-check('no owner', bucket(noOwner), 'missingOwner');
-check('the reason is plain', reason(noOwner), 'no assigned owner');
-check('whitespace is not an owner', bucket({ ...OK, 'Assigned Owner': '  ' }), 'missingOwner');
+console.log('\n=== 3. Pending Offer — ASAP ===');
+const prep = { ...BASE, 'Current Stage': 'Offer Preparation', 'Visit Status': 'Completed' };
+check('offer being prepared', bucket(prep), 'offerPending');
+check('unpriced says so', reason(prep), 'offer not priced yet');
+check('a priced but unsent offer shows the figure',
+  reason({ ...prep, 'Approved Offer Amount': 450000 }), 'offer of $450,000 prepared but not sent');
+check('money is formatted with separators', money_(1250000), '$1,250,000');
+check('a zero offer is a real number', money_(0), '$0');
+check('text passes through untouched', money_('TBD'), 'TBD');
+
+console.log('\n=== 4. Offer Sent ===');
+const sent = { ...BASE, 'Current Stage': 'Offer Sent', 'Visit Status': 'Completed',
+  'Approved Offer Amount': 415000, 'Offer Sent Date': day(2026, 8, 1) };
+check('an offer that is out', bucket(sent), 'offerSent');
+check('the reason carries the figure and the date', reason(sent), '$415,000 · sent Aug 1, 2026');
+check('a missing sent date is named, not hidden',
+  reason({ ...sent, 'Offer Sent Date': '' }), '$415,000 · sent date not recorded');
+check('silence since is added when known',
+  reason({ ...sent, 'Days Since Last Activity': 6 }), '$415,000 · sent Aug 1, 2026 · no contact for 6 day(s)');
+
+console.log('\n=== 5. Still Negotiating ===');
+const negotiating = { ...BASE, 'Current Stage': 'Active Negotiation', 'Visit Status': 'Completed' };
+check('an undecided lead after the offer', bucket(negotiating), 'negotiating');
+check('with nothing recorded it says so', reason(negotiating), 'undecided since the offer went out');
+check('a counter is shown', reason({ ...negotiating, 'Counteroffer Amount': 480000 }),
+  'seller countered at $480,000');
+check('what the seller said is included',
+  reason({ ...negotiating, 'Counteroffer Amount': 480000, 'Last Contact Result': 'Wants to think it over' }),
+  'seller countered at $480,000 · Wants to think it over');
+check('a long note is clipped rather than filling the card',
+  reason({ ...negotiating, 'Last Contact Result': 'x'.repeat(200) }).length <= 90, true);
+
+console.log('\n=== 6. Gift Follow-Up — additive, the one place a lead can appear twice ===');
 /*
- * Her priority list puts Missing Next Action at 3 and Missing Assigned Owner at 5, so a lead missing
- * both reports as Missing Next Action. Raised as question C in docs/3pm-Digest-Revision.md — a manager
- * arguably needs the ownerless leads first — but implemented as specified, not quietly reordered.
+ * Gifts are recommended at any stage, so making the gift compete with the stage buckets would hide
+ * every gift behind the deal it belongs to. Sending a gift is a different job, often for a different
+ * person, than deciding a counter-offer.
  */
-check('missing next action outranks missing owner, per her order',
-  bucket({ ...OK, 'Assigned Owner': '', 'Next Action': '' }), 'missingNextAction');
+check('a recommended gift is pending',
+  giftPending_({ ...sent, 'Gift Status': 'Recommended' }), 'gift recommended — awaiting approval');
+check('the reason and approver are named when present',
+  giftPending_({ ...sent, 'Gift Status': 'Recommended', 'Gift Recommendation Reason': 'Visit went well',
+    'Gift Approval Owner': 'Cherry' }),
+  'gift recommended (Visit went well) — awaiting approval from Cherry');
+check('an approved gift still needs sending',
+  giftPending_({ ...sent, 'Gift Status': 'Approved', 'Gift Approved By': 'Cherry',
+    'Gift Approval Date': day(2026, 8, 2) }),
+  'gift approved by Cherry on Aug 2, 2026 — not sent yet');
+check('approved AND sent is finished',
+  giftPending_({ ...sent, 'Gift Status': 'Approved', 'Gift Sent Date': day(2026, 8, 3) }), '');
+check('"Sent" is finished', giftPending_({ ...sent, 'Gift Status': 'Sent' }), '');
+check('"Not Appropriate" is finished', giftPending_({ ...sent, 'Gift Status': 'Not Appropriate' }), '');
+check('"Not Reviewed" is not a commitment anyone made',
+  giftPending_({ ...sent, 'Gift Status': 'Not Reviewed' }), '');
+check('no gift status at all is silent', giftPending_(sent), '');
+check('the lead keeps its stage bucket as well as the gift',
+  bucket({ ...sent, 'Gift Status': 'Recommended' }), 'offerSent');
+// An excluded lead owes nothing, gift included.
+check('a closed-out lead owes no gift',
+  giftPending_({ ...sent, 'Current Stage': 'Lost / Closed Out', 'Gift Status': 'Recommended' }), '');
+// Every value of the Gift Status dropdown must be accounted for above.
+const GIFTS = (read('apps-script/Config.gs').match(/'Gift Status':\s*\[([^\]]+)\]/) || [])[1] || '';
+check('the dropdown has exactly the five values these rules cover',
+  (GIFTS.match(/'/g) || []).length / 2, 5);
 
-console.log('\n=== 6. Long-Term Nurture Missing Follow-Up ===');
-const nurture = { ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action Due Date': '' };
-check('in nurture with no follow-up date', bucket(nurture), 'nurtureNoFollowUp');
-check('the reason says so', reason(nurture), 'no follow-up date set');
-check('a past follow-up date is not a follow-up',
-  reason({ ...nurture, 'Next Action Due Date': day(2026, 7, 1) }), 'follow-up date 2026-07-01 is not in the future');
-check('a future date clears it', bucket({ ...nurture, 'Next Action Due Date': day(2026, 12, 1) }), null);
+console.log('\n=== Leads that never appear ===');
+check('Lost / Closed Out', bucket({ ...BASE, 'Current Stage': 'Lost / Closed Out' }), null);
+check('Contract Signed', bucket({ ...BASE, 'Current Stage': 'Contract Signed' }), null);
+check('a TEST row', bucket({ ...BASE, Source: 'TEST' }), null);
+check('no property address', bucket({ ...BASE, 'Property Address': '' }), null);
+check('a blank row', bucket({}), null);
+check('the exclusion says which rule caught it',
+  excludedFromDigest_({ ...BASE, 'Current Stage': 'Contract Signed' }), 'contract signed');
+check('...and nothing for a live lead', excludedFromDigest_(BASE), '');
+
+console.log('\n=== Stages Cherry\'s five do NOT cover ===');
 /*
- * The exemption that makes bucket 6 reachable at all: a nurture lead with no due date satisfies bucket
- * 3 as well, and bucket 3 comes first. Without exempting nurture from bucket 3, bucket 6 reads zero
- * forever. Flagged for approval rather than decided silently.
+ * Recorded as facts, not as desired behaviour. Her list is the five stages above, so these three now
+ * appear nowhere — and a verbal agreement with no contract out is a real gap worth her deciding on
+ * rather than discovering. Changing any of these means changing this test deliberately.
  */
-check('nurture is exempt from bucket 3, or bucket 6 could never fire',
-  bucket({ ...nurture, 'Next Action': '' }), 'nurtureNoFollowUp');
+check('Verbal Agreement appears NOWHERE (awaiting decision)',
+  bucket({ ...BASE, 'Current Stage': 'Verbal Agreement' }), null);
+check('Contract Sent appears NOWHERE (awaiting decision)',
+  bucket({ ...BASE, 'Current Stage': 'Contract Sent' }), null);
+check('Long-Term Nurture appears NOWHERE (awaiting decision)',
+  bucket({ ...BASE, 'Current Stage': 'Long-Term Nurture' }), null);
+check('a blank stage appears nowhere', bucket({ ...BASE, 'Current Stage': '' }), null);
+check('an unrecognised stage appears nowhere', bucket({ ...BASE, 'Current Stage': 'Dead Lead' }), null);
+// But a gift is still chased at those stages, because the gift rule does not read the stage.
+check('a nurture lead still owes its gift',
+  giftPending_({ ...BASE, 'Current Stage': 'Long-Term Nurture', 'Gift Status': 'Approved' }),
+  'gift approved — not sent yet');
 
-console.log('\n=== 7. Stalled ===');
-const stalled = { ...OK, 'Stalled Status': 'Yes', 'Days Since Last Activity': 6 };
-check('stalled with everything else in order', bucket(stalled), 'stalled');
-check('the reason counts the silence', reason(stalled), 'no activity for 6 day(s)');
-check('...and copes without the number', reason({ ...OK, 'Stalled Status': 'Yes' }), 'no recent activity');
+console.log('\n=== One lead, one stage bucket ===');
+// The five stages are mutually exclusive, so this is true by construction rather than by a tie-break.
+const everyStage = ATTENTION_BUCKETS.slice(0, 5).map((b) => bucket({ ...BASE, 'Current Stage': b.stage }));
+check('each stage lands in its own bucket', everyStage, ATTENTION_BUCKETS.slice(0, 5).map((b) => b.key));
+check('no stage lands in two', new Set(everyStage).size, 5);
 
-console.log('\n=== 8. Flagged — the ambiguity residue, not the old catch-all ===');
-check('flagged but matching none of the seven',
-  bucket({ ...OK, 'Data Quality Status': 'Exception', 'Exception Reason': 'Two sellers on one address' }), 'flagged');
-check('it carries the exception reason',
-  reason({ ...OK, 'Data Quality Status': 'Exception', 'Exception Reason': 'Two sellers on one address' }),
-  'Two sellers on one address');
-check('or the missing-fields list',
-  reason({ ...OK, 'Data Quality Status': 'Incomplete', 'Missing Required Fields': 'Phone' }), 'Phone');
-/*
- * The whole point of the revision: an incomplete record now reports the ACTION, not the flag. This
- * record is both Incomplete and missing its next action, and it must land in bucket 3.
- */
-check('a real missing field beats the generic flag',
-  bucket({ ...OK, 'Next Action': '', 'Data Quality Status': 'Incomplete' }), 'missingNextAction');
-
-console.log('\n=== Records that must never appear ===');
-check('Lost / Closed Out', bucket({ ...missed, 'Current Stage': 'Lost / Closed Out' }), null);
-check('Contract Signed', bucket({ ...missed, 'Current Stage': 'Contract Signed' }), null);
-check('a TEST row', bucket({ ...missed, Source: 'TEST' }), null);
-check('no property address', bucket({ ...missed, 'Property Address': '' }), null);
-check('an entirely blank row', bucket({}), null);
-
-console.log('\n=== One lead, one bucket ===');
-/*
- * Jose Anguiano is the record that appeared three times in the old digest, inflating the headline
- * count. Every condition below is true of him at once; he must produce exactly one line.
- */
-const jose = {
-  'Property Address': '2145 Capitol Ave, East Palo Alto, CA',
-  'Seller Name': 'Jose Anguiano',
-  'Current Stage': 'Visit Scheduled',
-  'Visit Status': 'Scheduled', 'Visit Date': day(2026, 8, 1),
-  'Next Action': '', 'Next Action Due Date': '',
-  'Assigned Owner': '',
-  'Seller Motivation': '',
-  'Stalled Status': 'Yes',
-  'Data Quality Status': 'Incomplete'
-};
-check('five conditions, one bucket', bucket(jose), 'visitOverdue');
-check('...and it is the most urgent one', ATTENTION_BUCKETS[0].key, 'visitOverdue');
-const hits = ATTENTION_BUCKETS.filter((b) => bucket(jose) === b.key);
-check('exactly one bucket claims him', hits.length, 1);
-
-console.log('\n=== The count is the number of leads ===');
-const many = [OK, missed, jose, noOwner, stalled, { ...visited }, { ...nurture },
-  { ...missed, 'Current Stage': 'Contract Signed' }];
-const lines = many.map(bucket).filter(Boolean);
-check('8 records in, 6 lines out (one healthy, one excluded)', lines.length, 6);
-check('no record produces two lines', lines.length, new Set(many.map((_, i) => i)).size - 2);
-
-/* ==================================================================
- * The edge-case matrix from the review, run against the shipped rules.
- *
- * Some of these record a GAP rather than a desired behaviour — a lead that appears nowhere. They are
- * asserted anyway, so the gap is a documented fact with a test against it rather than something
- * discovered later in production. Each one that awaits Cherry's decision says so.
- * ================================================================ */
-console.log('\n=== Edge cases: visits ===');
-check('date passed but Visit Status is BLANK — appears NOWHERE (awaiting decision)',
-  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': '' }), null);
-check('date is TODAY and still Scheduled — not overdue until the day ends (awaiting decision)',
-  bucket({ ...OK, 'Visit Date': TODAY }), null);
-check('Canceled with no next action lands in Missing Next Action',
-  bucket({ ...OK, 'Visit Status': 'Canceled', 'Next Action': '', 'Next Action Due Date': '' }), 'missingNextAction');
-// Two Visit Status values in this workbook's own dropdown that no bucket covers.
-check('"Reschedule Needed" with a passed date — appears NOWHERE (awaiting decision)',
-  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': 'Reschedule Needed' }), null);
-check('"Skipped — Offer Made" with a passed date is correctly silent',
-  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': 'Skipped — Offer Made' }), null);
-
-console.log('\n=== Edge cases: offers ===');
-const sent = { ...OK, 'Visit Status': 'Completed', 'Seller Motivation': 'x' };
-check('Offer Preparation with no amount — appears NOWHERE (awaiting decision)',
-  bucket({ ...sent, 'Current Stage': 'Offer Preparation' }), null);
-check('offer figures present but the stage was never moved — appears NOWHERE (awaiting decision)',
-  bucket({ ...sent, 'Approved Offer Amount': 450000, 'Offer Sent Date': day(2026, 8, 1) }), null);
-check('Offer Status "Sent" while the stage says otherwise — appears NOWHERE (awaiting decision)',
-  bucket({ ...sent, 'Offer Status': 'Sent' }), null);
-
-console.log('\n=== Edge cases: next actions ===');
-check('due date TODAY is not yet broken', bucket({ ...OK, 'Next Action Due Date': TODAY }), null);
-/*
- * THE Decision-3 gap, pinned: a written commitment whose date has passed appears nowhere. 49 records
- * were in this state under the old rules. Asserted so that reintroducing the bucket is a deliberate
- * change to this line, not an accident.
- */
-check('a valid next action PAST its due date appears NOWHERE (Decision 3)',
-  bucket({ ...OK, 'Next Action Due Date': day(2026, 8, 1) }), null);
-check('invalid text in the due date is treated as no due date',
-  bucket({ ...OK, 'Next Action Due Date': 'ASAP' }), 'missingNextAction');
-check('nurture with a future date but no action text is silent',
-  bucket({ ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action': '', 'Next Action Due Date': day(2026, 12, 1) }), null);
-
-console.log('\n=== Edge cases: ownership ===');
-// 'Matt/Juan' and 'Team' are legitimate values in this workbook's Assigned Owner dropdown, so a
-// shared owner is not a fault and must not be reported as one.
-check('a shared owner is a valid value, not a fault', bucket({ ...OK, 'Assigned Owner': 'Matt/Juan' }), null);
-check('an unrecognised owner name is NOT detected (awaiting decision)',
-  bucket({ ...OK, 'Assigned Owner': 'Jonathon' }), null);
-
-console.log('\n=== Edge cases: stalled ===');
-check('stalled AND overdue action reports as Stalled under the current order',
-  bucket({ ...OK, 'Stalled Status': 'Yes', 'Next Action Due Date': day(2026, 8, 1) }), 'stalled');
-check('stalled is never inferred from inactivity alone',
-  bucket({ ...OK, 'Stalled Status': '', 'Days Since Last Activity': 90 }), null);
-check('nurture with a future date but flagged Stalled reports as Stalled (awaiting decision)',
-  bucket({ ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action Due Date': day(2026, 12, 1), 'Stalled Status': 'Yes' }), 'stalled');
-
-console.log('\n=== Edge cases: the closed-elsewhere stages ===');
-/*
- * Closed / Sold / Dead Lead / Duplicate / Archived are NOT values of Current Stage in this workbook —
- * its dropdown has exactly ten, ending at 'Lost / Closed Out'. The terminal states live in Deal
- * Status, Deal Stage and Final Disposition instead, and none of them is currently an exclusion. A
- * lead marked "We're Passing" whose stage was never moved still reports as Visit Overdue.
- */
-const passed = { ...OK, 'Visit Date': day(2026, 8, 1) };
-check('Final Disposition "Closed Out" does NOT exclude (awaiting decision)',
-  bucket({ ...passed, 'Final Disposition': 'Closed Out' }), 'visitOverdue');
-check('Deal Status "We\'re Passing" does NOT exclude (awaiting decision)',
-  bucket({ ...passed, 'Deal Status': "We're Passing" }), 'visitOverdue');
-check('Deal Stage "Lost" does NOT exclude (awaiting decision)',
-  bucket({ ...passed, 'Deal Stage': 'Lost' }), 'visitOverdue');
-check('an unknown stage string still surfaces rather than vanishing',
-  bucket({ ...passed, 'Current Stage': 'Dead Lead' }), 'visitOverdue');
-
-console.log('\n=== The posted card meets her display rules ===');
+console.log('\n=== The posted card ===');
 const post = CHAT.slice(CHAT.indexOf('function sendAttentionDigestToChat'));
 check('unassigned is spelled out', /UNASSIGNED/.test(post), true);
-check('the owner is labelled "Owner:", per the approved sample format', post.includes("Owner: ' + (owner ||"), true);
-check('each line carries the seller name', /rec\['Seller Name'\]/.test(post), true);
-check('each line carries the address', /rec\['Property Address'\]/.test(post), true);
-check('each line carries the reason', /hit\.reason/.test(post), true);
+check('the owner is labelled', post.includes("Owner: '"), true);
+check('the seller name is on the line', /rec\['Seller Name'\]/.test(post), true);
+check('the address is on the line', /rec\['Property Address'\]/.test(post), true);
 check('each bucket shows its count', /\(' \+ arr\.length \+ '\)/.test(post), true);
 check('each bucket shows its action', /b\.action/.test(post), true);
-check('the header points at the first bucket with work in it', /start with/.test(post), true);
-check('it is numbered so priority is visible', /\(i \+ 1\)/.test(post), true);
-// Read-only: raising an alert must never write a date or an action back to the sheet.
-check('the digest never writes to the sheet', /setValue|setValues/.test(post), false);
+check('overdue visits are pushed to the top of their bucket', /hit\.overdue.*unshift/.test(post), true);
+check('gifts are counted separately from leads', /var leads = ATTENTION_BUCKETS\.reduce/.test(post), true);
+check('the header reports leads and gifts apart', /' lead\(s\)' \+ \(gifts \?/.test(post), true);
+check('the digest still writes nothing to the sheet', /setValue|setValues/.test(post), false);
+check('it stays silent when there is nothing to do', /if \(!total\) \{/.test(post), true);
+
+console.log('\n=== A cancelled visit KEEPS its calendar event, tagged ===');
+/*
+ * Cherry reversed this: "if the status of the calendar is cancelled it should not be removed in the
+ * calendar and this will notify as well". A visit vanishing off Juan's day looks identical to it never
+ * having been booked — nobody learns the seller cancelled, and no record survives that the slot was
+ * held. So the event stays, tagged, with its reminders off, and a Chat alert goes out once.
+ */
+const WEB = read('apps-script/WebApp.gs');
+check('Canceled is tagged, not deleted', /status === 'Canceled' \? 'CANCELED'/.test(WEB), true);
+check('Reschedule Needed gets its own tag', /'RESCHEDULE NEEDED'/.test(WEB), true);
+check('a closed-out lead is tagged too', /'CLOSED OUT'/.test(WEB), true);
+check('the tag path never calls delete',
+  /if \(tag\) \{[\s\S]{0,600}?markVisitEvents_/.test(WEB), true);
+check('deletion is now ONLY for a row with no visit date',
+  /if \(!visitDate\) \{\s*\n\s*var removed = deleteVisitEvents_/.test(WEB), true);
+
+console.log('\n--- what tagging does to the event ---');
+check('the title carries the tag', /e\.setTitle\(prefix \+ t\.replace/.test(WEB), true);
+check('reminders are stripped so it cannot ping anyone', /removeAllReminders\(\)/.test(WEB), true);
+check('the reason and date go into the description', /e\.setDescription\(/.test(WEB), true);
+check('the event is never moved or re-dated',
+  /markVisitEvents_[\s\S]{0,1800}?setTime|markVisitEvents_[\s\S]{0,1800}?setAllDayDate/.test(WEB), false);
+check('an old tag is replaced rather than stacked', /replace\(\/\^\\\[\[A-Z \]\+\\\]/.test(WEB), true);
+
+console.log('\n--- the alert fires once, on the transition ---');
+check('it notifies only when newly tagged', /if \(marked\.newlyTagged\)/.test(WEB), true);
+check('an already-tagged event reports newlyTagged false', /newlyTagged: fresh > 0/.test(WEB), true);
+check('the alert names the tag and says the event was kept',
+  /tagged \[' \+ tag \+ '\], with its reminders switched off/.test(WEB), true);
+check('it is silent with no webhook configured', /typeof chatWebhookUrl_ !== 'function' \|\| !chatWebhookUrl_\(\)/.test(WEB), true);
+
+console.log('\n--- one matcher, so tag and delete cannot disagree ---');
+check('a shared findVisitEvents_ exists', /function findVisitEvents_\(cal, addr, visitDate\)/.test(WEB), true);
+check('deleteVisitEvents_ uses it', /function deleteVisitEvents_[\s\S]{0,400}?findVisitEvents_\(cal/.test(WEB), true);
+check('markVisitEvents_ uses it', /function markVisitEvents_[\s\S]{0,700}?findVisitEvents_\(cal/.test(WEB), true);
+check('it matches this script\'s title format', /\^Property Visit\\b/.test(WEB), true);
+// Critical: once tagged, the title starts "[CANCELED] Property Visit …". Without stripping the tag
+// before matching, a re-booked visit would leave the cancelled copy on the calendar forever.
+check('it strips any tag before matching, so a re-book still finds the old copy',
+  /var t = String\(e\.getTitle\(\) \|\| ''\)\.replace/.test(WEB), true);
+check('the sync still runs after every dashboard action',
+  /function runHandler_[\s\S]{0,400}syncVisitCalendar_/.test(WEB), true);
 
 console.log('\n=== The preview script cannot disagree with what ships ===');
 /*
  * scripts/preview-3pm-digest.mjs prints the notification from the live sheet so Cherry can approve the
- * design before the rules are finalised. It carries a copy of the bucket logic because it runs in the
- * Node sandbox, which has no access to the .gs files — so the copy has to be provably identical, or the
- * thing she approves is not the thing that ships.
+ * design before rollout. It carries a copy of the rules because it runs in the Node sandbox, which has
+ * no access to the .gs files — so the copy has to be provably identical, or the thing she approves is
+ * not the thing that ships.
  */
 const PREVIEW = read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs');
-const lifted = [
-  slice('var ATTENTION_BUCKETS = [', '/** A sheet date cell'),
-  slice('function dateCell_(', 'function attentionBucket_('),
-  slice('function attentionBucket_(', '/**\n * Post the 3pm work queue')
-].join('\n').trim();
-check('the preview carries the rules verbatim', PREVIEW.includes(lifted), true);
+check('the preview carries the rules verbatim', PREVIEW.includes(source.trim()), true);
 check('it is marked as a copy, not a second implementation', /VERBATIM FROM apps-script\/ChatNotify\.gs/.test(PREVIEW), true);
-check('it posts nothing to Chat', /chatPost_|fetch\(|UrlFetchApp/.test(PREVIEW), false);
+check('it posts nothing to Chat', /chatPost_|UrlFetchApp/.test(PREVIEW), false);
 check('it writes nothing to the sheet', /values\.update|values\.append|batchUpdate/.test(PREVIEW), false);
+check('it counts gifts apart from leads too', /const gifts = found\.giftFollowUp\.length/.test(PREVIEW), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

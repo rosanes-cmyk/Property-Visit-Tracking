@@ -334,11 +334,39 @@ function syncVisitCalendar_(sh, rowNum) {
     var status = String(R.get('Visit Status') || '');
     var stage = String(R.get('Current Stage') || '');
     var visitDate = R.get('Visit Date');
-    var cancelled = status === 'Canceled' || status === 'Reschedule Needed' || stage === 'Lost / Closed Out';
+    /*
+     * A CANCELLED visit KEEPS its calendar event, tagged.
+     *
+     * This used to delete it. Cherry's rule: "if the status of the calendar is cancelled it should not
+     * be removed in the calendar and this will notify as well". She is right — a visit vanishing off
+     * Juan's day is indistinguishable from it never having been booked, so nobody learns that a seller
+     * cancelled, and there is no record that the slot was ever held. The event stays, its title carries
+     * the tag, its reminders are stripped so it cannot ping anyone, and the reason is written into the
+     * description. A Chat alert goes out the first time it is tagged.
+     *
+     * "Reschedule Needed" gets its own tag rather than sharing the cancelled one: the slot is dead but
+     * the lead is not, and those are different things to see on a calendar.
+     *
+     * The no-visit-date case still removes the event, because there is no date left for it to sit on.
+     */
+    var tag = status === 'Canceled' ? 'CANCELED'
+      : status === 'Reschedule Needed' ? 'RESCHEDULE NEEDED'
+        : stage === 'Lost / Closed Out' ? 'CLOSED OUT' : '';
 
-    if (cancelled || !visitDate) {
+    if (tag) {
+      var marked = markVisitEvents_(addr, visitDate, tag, String(R.get('Updated By') || ''));
+      logAuto_('CALENDAR', R.get('Property ID'), 'Visit event tagged ' + tag + ' (kept on the calendar) · ' + marked.detail);
+      // Alert once, on the transition. syncVisitCalendar_ runs after EVERY dashboard write, so
+      // notifying unconditionally would re-announce the same cancellation on every later edit.
+      if (marked.newlyTagged) {
+        notifyVisitTagged_(R, tag, visitDate);
+      }
+      return marked.detail;
+    }
+
+    if (!visitDate) {
       var removed = deleteVisitEvents_(addr, visitDate);
-      logAuto_('CALENDAR', R.get('Property ID'), 'Visit event removed (' + (cancelled ? status || stage : 'no visit date') + ') · ' + removed);
+      logAuto_('CALENDAR', R.get('Property ID'), 'Visit event removed (no visit date) · ' + removed);
       return removed;
     }
     // Re-point the event at the current date: drop any stale copy, then create it fresh.
@@ -509,27 +537,115 @@ function deleteVisitEvents_(addr, visitDate) {
   try {
     var cal = visitCalendar_();
     if (!cal) return 'calendar not found';
-    var title = 'Property Visit - ' + addr;
-    var from, to;
-    if (visitDate) { var d = new Date(visitDate); from = new Date(d.getTime() - 2*864e5); to = new Date(d.getTime() + 3*864e5); }
-    else { var n = new Date(); from = new Date(n.getTime() - 120*864e5); to = new Date(n.getTime() + 365*864e5); }
-    var evs = cal.getEvents(from, to, { search: addr });
-    var removed = 0;
-    // Match BOTH producers: this script writes "Property Visit - <addr>", while the local scraper
-    // writes "Property Visit | <seller> | <addr>". Anything starting "Property Visit" that carries
-    // this address is ours, so a cancel/reschedule cleans up either one.
-    // NB: use a FULL-length key here, not intakeNorm_ (which truncates to 24 chars and would drop
-    // the address out of a "Property Visit | Seller | Address" title).
-    var keyOf = function(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
-    var addrKey = keyOf(addr);
-    evs.forEach(function(e){
-      var t = e.getTitle() || '';
-      var mine = (t === title) || (/^Property Visit\b/i.test(t) && addrKey && keyOf(t).indexOf(addrKey) >= 0);
-      if (mine) { e.deleteEvent(); removed++; }
-    });
-    return removed ? ('removed ' + removed + ' event(s)') : 'no matching event';
+    var evs = findVisitEvents_(cal, addr, visitDate);
+    evs.forEach(function (e) { e.deleteEvent(); });
+    return evs.length ? ('removed ' + evs.length + ' event(s)') : 'no matching event';
   } catch (e) { return 'error: ' + e; }
 }
+
+/**
+ * Tag the visit's calendar event instead of deleting it, and keep it on the calendar.
+ *
+ * Returns { count, newlyTagged, detail }. newlyTagged is false when the tag was already on the title,
+ * which is what stops the same cancellation being announced again on every later dashboard write.
+ *
+ * What it does to the event:
+ *   - prefixes the title with "[TAG] " so it reads as cancelled at a glance in the calendar grid
+ *   - removes every reminder, so a cancelled visit cannot ping anyone to leave the office
+ *   - appends one dated line to the description, so the record of WHEN it was cancelled survives
+ * It never moves the event and never changes its date: the slot that was held stays visible.
+ */
+function markVisitEvents_(addr, visitDate, tag, by) {
+  if ((!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) || !addr) return { count: 0, newlyTagged: false, detail: 'no calendar / address' };
+  try {
+    var cal = visitCalendar_();
+    if (!cal) return { count: 0, newlyTagged: false, detail: 'calendar not found' };
+    var evs = findVisitEvents_(cal, addr, visitDate);
+    if (!evs.length) return { count: 0, newlyTagged: false, detail: 'no matching event' };
+
+    var prefix = '[' + tag + '] ';
+    var count = 0, fresh = 0;
+    evs.forEach(function (e) {
+      var t = e.getTitle() || '';
+      count++;
+      if (t.indexOf(prefix) === 0) return;                 // already tagged — leave it entirely alone
+      // Strip any OTHER tag first, so a reschedule that later cancels does not read "[CANCELED] [RESCHEDULE NEEDED] …"
+      e.setTitle(prefix + t.replace(/^\[[A-Z ]+\]\s*/, ''));
+      e.removeAllReminders();
+      var stamp = tag + ' on ' + fmt_(today_()) + (by ? ' by ' + by : '') + ' — kept for the record.';
+      var desc = e.getDescription() || '';
+      if (desc.indexOf(stamp) < 0) e.setDescription((desc ? desc + '\n\n' : '') + stamp);
+      fresh++;
+    });
+    return {
+      count: count,
+      newlyTagged: fresh > 0,
+      detail: fresh ? ('tagged ' + fresh + ' event(s)') : ('already tagged (' + count + ')')
+    };
+  } catch (e) { return { count: 0, newlyTagged: false, detail: 'error: ' + e }; }
+}
+
+/**
+ * Every calendar event that belongs to this property visit.
+ *
+ * Shared by the delete and the tag paths so they can never disagree about which events are ours — a
+ * mismatch would leave a cancelled event untagged, or delete something that was not a visit.
+ *
+ * Matches BOTH producers and any tag already applied:
+ *   "Property Visit - <addr>"                (this script)
+ *   "Property Visit | <seller> | <addr>"     (the local scraper)
+ *   "[CANCELED] Property Visit …"            (already tagged by markVisitEvents_)
+ */
+function findVisitEvents_(cal, addr, visitDate) {
+  var from, to;
+  if (visitDate) {
+    var d = new Date(visitDate);
+    from = new Date(d.getTime() - 2 * 864e5);
+    to = new Date(d.getTime() + 3 * 864e5);
+  } else {
+    var n = new Date();
+    from = new Date(n.getTime() - 120 * 864e5);
+    to = new Date(n.getTime() + 365 * 864e5);
+  }
+  // NB: a FULL-length key, not intakeNorm_ (which truncates to 24 chars and would drop the address
+  // out of a "Property Visit | Seller | Address" title).
+  var keyOf = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); };
+  var addrKey = keyOf(addr);
+  return (cal.getEvents(from, to, { search: addr }) || []).filter(function (e) {
+    var t = String(e.getTitle() || '').replace(/^\[[A-Z ]+\]\s*/, '');
+    return /^Property Visit\b/i.test(t) && addrKey && keyOf(t).indexOf(addrKey) >= 0;
+  });
+}
+
+/**
+ * Tell the team a booked visit is off. One card, at the moment it happens.
+ *
+ * Cherry asked for this alongside keeping the event: "this will notif as well". The 3pm work queue is
+ * the wrong place for it — a cancellation is news, not a task sitting in a queue, and by 3pm Juan may
+ * already have driven there. Silent when no webhook is configured.
+ */
+function notifyVisitTagged_(R, tag, visitDate) {
+  try {
+    if (typeof chatWebhookUrl_ !== 'function' || !chatWebhookUrl_()) return;
+    var when = visitDate ? fmt_(new Date(visitDate)) : 'date not recorded';
+    var time = String(R.get('Visit Time') || '').trim();
+    var owner = String(R.get('Assigned Owner') || '').trim() || 'UNASSIGNED';
+    var lines = [
+      '<b>' + (R.get('Seller Name') || '(no name)') + '</b> · ' + R.get('Property Address'),
+      'Was booked for ' + when + (time ? ' at ' + time : '') + ' · Owner: ' + owner,
+      '<i>The calendar event is still there, tagged [' + tag + '], with its reminders switched off.</i>'
+    ];
+    var widgets = [{ textParagraph: { text: lines.join('<br>') } }];
+    var url = (typeof dashboardUrl_ === 'function') ? dashboardUrl_() : '';
+    if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard', onClick: { openLink: { url: url } } }] } });
+    chatPost_({ cardsV2: [{ cardId: 'visit-tagged', card: {
+      header: { title: 'Visit ' + tag.toLowerCase(), subtitle: fmt_(today_()) },
+      sections: [{ widgets: widgets }]
+    } }] });
+    logAuto_('CHAT', R.get('Property ID'), 'Visit ' + tag + ' alert posted.');
+  } catch (e) { logAuto_('ERROR', 'notifyVisitTagged', String(e)); }
+}
+
 
 /**
  * Create a tracker row from an inbound lead (REI BlackBook webhook). Dedupes by address/phone,

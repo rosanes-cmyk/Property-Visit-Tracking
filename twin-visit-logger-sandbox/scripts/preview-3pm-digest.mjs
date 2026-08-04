@@ -27,17 +27,21 @@ const today_ = () => { const n = new Date(); return new Date(n.getFullYear(), n.
 
 /* ====== VERBATIM FROM apps-script/ChatNotify.gs — do not edit here ====== */
 var ATTENTION_BUCKETS = [
-  { key: 'visitOverdue', icon: '🚩', title: 'Visit Overdue', action: 'Confirm whether the visit happened — mark it Completed or Canceled.' },
-  { key: 'offerIncomplete', icon: '💵', title: 'Offer Needs Completion', action: 'Enter the offer amount and sent date, or correct the status.' },
-  { key: 'missingNextAction', icon: '📋', title: 'Missing Next Action', action: 'Assign the next action and its due date.' },
-  { key: 'missingMotivation', icon: '🗣', title: 'Missing Seller Motivation', action: 'Write up the post-visit seller motivation notes.' },
-  { key: 'missingOwner', icon: '👤', title: 'Missing Assigned Owner', action: 'Assign the person responsible for the lead.' },
-  { key: 'nurtureNoFollowUp', icon: '🌱', title: 'Long-Term Nurture Missing Follow-Up', action: 'Add a future follow-up date.' },
-  { key: 'stalled', icon: '🐢', title: 'Stalled', action: 'Decide the next step, move to nurture, or close it out.' },
-  { key: 'flagged', icon: '⚠️', title: 'Flagged — ambiguous, needs a person', action: 'Read the record and decide; it fits none of the buckets above.' }
+  { key: 'upcomingVisit', icon: '📅', title: 'Upcoming Visit', stage: 'Visit Scheduled',
+    action: 'Confirm the visit is going ahead. Afterwards mark it Completed or Canceled.' },
+  { key: 'needsDecision', icon: '📋', title: 'Completed Visit — Needs Next Course of Action', stage: 'Visit Completed — Needs Review',
+    action: 'Decide: make an offer, pass, or move to nurture — and set the next action.' },
+  { key: 'offerPending', icon: '⏱', title: 'Pending Offer — ASAP', stage: 'Offer Preparation',
+    action: 'Finish the offer and get it sent today.' },
+  { key: 'offerSent', icon: '📤', title: 'Offer Sent', stage: 'Offer Sent',
+    action: 'Follow up with the seller for a decision.' },
+  { key: 'negotiating', icon: '🤝', title: 'Still Negotiating', stage: 'Active Negotiation',
+    action: 'Decide the counter response and keep it moving.' },
+  { key: 'giftFollowUp', icon: '🎁', title: 'Gift Follow-Up', stage: '',
+    action: 'Approve the gift, or send it and record the sent date.' }
 ];
 
-
+/** A sheet date cell (real Date or Sheets serial) as a local midnight Date, or null. */
 function dateCell_(raw) {
   if (raw instanceof Date) return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
   if (typeof raw === 'number' && raw > 1000) {
@@ -47,109 +51,123 @@ function dateCell_(raw) {
   return null;
 }
 
-/**
- * Which ONE bucket this record belongs in, and the exact reason it is there. null = it does not appear.
- *
- * Ordered by Cherry's priority list, and the first match wins — that is what makes "one lead, one
- * bucket" true by construction rather than by a flag that has to be maintained.
- *
- * `today` is passed in so the decision is testable and does not depend on when the tests run.
- */
+/** Is this lead finished, or not a lead at all? Nothing excluded here ever reaches the notification. */
+function excludedFromDigest_(rec) {
+  var stage = String(rec['Current Stage'] || '').trim();
+  if (!rec['Property Address']) return 'no property address';
+  if (String(rec['Source']).trim() === 'TEST') return 'test row';
+  if (stage === 'Lost / Closed Out') return 'closed out';
+  if (stage === 'Contract Signed') return 'contract signed';
+  return '';
+}
 
+/**
+ * Which stage bucket this lead belongs in, and the exact reason it is listed. null = no stage bucket.
+ *
+ * One lead, one stage bucket: the stages are mutually exclusive, so there is no priority puzzle to
+ * solve — a lead is at exactly one point in the pipeline. The order of ATTENTION_BUCKETS is Cherry's
+ * reading order, not a tie-break.
+ *
+ * `today` is injected so the decision is testable and does not depend on when the tests run.
+ */
 function attentionBucket_(rec, today) {
+  if (excludedFromDigest_(rec)) return null;
   var stage = String(rec['Current Stage'] || '').trim();
 
-  // Never appears: no address to act on, a test row, or a lead that is finished either way.
-  if (!rec['Property Address']) return null;
-  if (String(rec['Source']).trim() === 'TEST') return null;
-  if (stage === 'Lost / Closed Out' || stage === 'Contract Signed') return null;
+  for (var i = 0; i < ATTENTION_BUCKETS.length; i++) {
+    var b = ATTENTION_BUCKETS[i];
+    if (!b.stage || b.stage !== stage) continue;
 
-  // 1. A visit whose date has passed while still marked Scheduled. Either it happened and nobody
-  //    logged it, or it was missed — and only a person knows which.
-  var visitOn = dateCell_(rec['Visit Date']);
-  if (String(rec['Visit Status']).trim() === 'Scheduled' && visitOn && visitOn < today) {
-    return { key: 'visitOverdue', reason: 'visit was ' + fmt_(visitOn) + ', still marked Scheduled' };
-  }
+    /*
+     * An overdue visit is not a separate bucket any more — Cherry's five do not include one. It is
+     * called out INSIDE Upcoming Visit instead, because a visit whose date has passed while still
+     * marked Scheduled is the single most urgent line in the whole message, and dropping it silently
+     * because there is no bucket for it would be the worst outcome of this simplification.
+     */
+    if (b.key === 'upcomingVisit') {
+      var on = dateCell_(rec['Visit Date']);
+      var status = String(rec['Visit Status'] || '').trim();
+      if (!on) return { key: b.key, reason: 'no visit date set — nothing to confirm against' };
+      if (on < today) {
+        return { key: b.key, overdue: true,
+          reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled') };
+      }
+      var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
+      var time = String(rec['Visit Time'] || '').trim();
+      return { key: b.key, reason: 'visit ' + when + (time ? ' at ' + time : '') };
+    }
 
-  // 2. The status says an offer is out, the numbers say otherwise.
-  if (stage === 'Offer Sent') {
-    var noAmount = !rec['Approved Offer Amount'] && Number(rec['Approved Offer Amount']) !== 0;
-    var noSent = !dateCell_(rec['Offer Sent Date']);
-    if (noAmount || noSent) {
-      return {
-        key: 'offerIncomplete',
-        reason: 'stage is Offer Sent but ' +
-          (noAmount && noSent ? 'neither the amount nor the sent date is filled in'
-            : noAmount ? 'the offer amount is blank' : 'the sent date is blank')
-      };
+    if (b.key === 'needsDecision') {
+      var visited = dateCell_(rec['Visit Date']);
+      return { key: b.key,
+        reason: 'visited' + (visited ? ' ' + fmt_(visited) : '') + ', no offer decision recorded yet' };
+    }
+
+    if (b.key === 'offerPending') {
+      var amount = rec['Approved Offer Amount'];
+      var has = amount !== '' && amount !== null && amount !== undefined;
+      return { key: b.key,
+        reason: has ? 'offer of ' + money_(amount) + ' prepared but not sent' : 'offer not priced yet' };
+    }
+
+    if (b.key === 'offerSent') {
+      var sentOn = dateCell_(rec['Offer Sent Date']);
+      var amt = rec['Approved Offer Amount'];
+      var parts = [];
+      if (amt !== '' && amt !== null && amt !== undefined) parts.push(money_(amt));
+      parts.push(sentOn ? 'sent ' + fmt_(sentOn) : 'sent date not recorded');
+      var quiet = Number(rec['Days Since Last Activity']);
+      if (isFinite(quiet) && quiet > 0) parts.push('no contact for ' + quiet + ' day(s)');
+      return { key: b.key, reason: parts.join(' · ') };
+    }
+
+    if (b.key === 'negotiating') {
+      var counter = rec['Counteroffer Amount'];
+      var said = String(rec['Last Contact Result'] || '').trim();
+      var bits = [];
+      if (counter !== '' && counter !== null && counter !== undefined) bits.push('seller countered at ' + money_(counter));
+      if (said) bits.push(said.length > 90 ? said.slice(0, 87) + '…' : said);
+      if (!bits.length) bits.push('undecided since the offer went out');
+      return { key: b.key, reason: bits.join(' · ') };
     }
   }
-
-  /*
-   * 3. Nobody has said what happens next.
-   *
-   * Long-Term Nurture is deliberately exempt: a nurture lead's "next action" IS its future follow-up
-   * date, and bucket 6 exists to ask for exactly that. Without this exemption bucket 3 would claim
-   * every nurture lead first and bucket 6 would always read zero.
-   */
-  if (stage !== 'Long-Term Nurture') {
-    var action = String(rec['Next Action'] || '').trim();
-    var due = dateCell_(rec['Next Action Due Date']);
-    if (!action || !due) {
-      return {
-        key: 'missingNextAction',
-        reason: !action && !due ? 'no next action and no due date'
-          : !action ? 'a due date with no action written against it'
-            : 'next action "' + action + '" has no due date'
-      };
-    }
-  }
-
-  // 4. The visit is done but what the seller actually wants was never written up. This is the field
-  //    the whole visit exists to capture, so it gets its own bucket rather than a "missing data" line.
-  var visited = String(rec['Visit Status']).trim() === 'Completed' || stage === 'Visit Completed — Needs Review';
-  if (visited && !String(rec['Seller Motivation'] || '').trim()) {
-    return {
-      key: 'missingMotivation',
-      reason: 'visit' + (visitOn ? ' on ' + fmt_(visitOn) : '') + ' completed, seller motivation still blank'
-    };
-  }
-
-  // 5. Work with no owner is work nobody does.
-  if (!String(rec['Assigned Owner'] || '').trim()) {
-    return { key: 'missingOwner', reason: 'no assigned owner' };
-  }
-
-  // 6. In nurture with nothing in the diary, which is the same as forgotten.
-  if (stage === 'Long-Term Nurture') {
-    var nurtureDue = dateCell_(rec['Next Action Due Date']);
-    if (!nurtureDue || nurtureDue <= today) {
-      return {
-        key: 'nurtureNoFollowUp',
-        reason: nurtureDue ? 'follow-up date ' + fmt_(nurtureDue) + ' is not in the future' : 'no follow-up date set'
-      };
-    }
-  }
-
-  // 7. Silent for days with everything above in order.
-  if (String(rec['Stalled Status']).trim() === 'Yes') {
-    var quiet = Number(rec['Days Since Last Activity']);
-    return {
-      key: 'stalled',
-      reason: isFinite(quiet) && quiet > 0 ? 'no activity for ' + quiet + ' day(s)' : 'no recent activity'
-    };
-  }
-
-  // 8. Flagged by validation but matching none of the seven — a person has to look.
-  var dq = String(rec['Data Quality Status'] || '').trim();
-  if (dq === 'Exception' || dq === 'Incomplete') {
-    return {
-      key: 'flagged',
-      reason: String(rec['Exception Reason'] || rec['Missing Required Fields'] || 'flagged ' + dq).trim()
-    };
-  }
-
   return null;
+}
+
+/**
+ * Does this lead owe a gift? Returns the reason, or '' when nothing is due.
+ *
+ * ADDITIVE, and deliberately so: a gift is recommended at any stage, so making it compete with the
+ * stage buckets would mean every gift stayed invisible behind the deal it belongs to. Sending a gift
+ * is a different errand, done by a different person, than deciding a counter-offer.
+ *
+ * 'Recommended' needs an approval; 'Approved' needs someone to actually send it and record the date.
+ * 'Sent' and 'Not Appropriate' are finished, and 'Not Reviewed' is not a commitment anyone has made.
+ */
+function giftPending_(rec) {
+  if (excludedFromDigest_(rec)) return '';
+  var status = String(rec['Gift Status'] || '').trim();
+  if (status === 'Recommended') {
+    var why = String(rec['Gift Recommendation Reason'] || '').trim();
+    var who = String(rec['Gift Approval Owner'] || '').trim();
+    return 'gift recommended' + (why ? ' (' + why + ')' : '') +
+      ' — awaiting approval' + (who ? ' from ' + who : '');
+  }
+  if (status === 'Approved') {
+    if (dateCell_(rec['Gift Sent Date'])) return '';       // approved AND sent: finished
+    var by = String(rec['Gift Approved By'] || '').trim();
+    var on = dateCell_(rec['Gift Approval Date']);
+    return 'gift approved' + (by ? ' by ' + by : '') + (on ? ' on ' + fmt_(on) : '') +
+      ' — not sent yet';
+  }
+  return '';
+}
+
+/** A currency cell as "$450,000". Non-numbers come back as they were written. */
+function money_(v) {
+  var n = Number(v);
+  if (!isFinite(n) || v === '' || v === null) return String(v == null ? '' : v);
+  return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 /* ====== END VERBATIM ====== */
@@ -176,18 +194,25 @@ for (const r of rows) {
   headers.forEach((h, i) => { if (h) rec[h] = r[i] === undefined ? '' : r[i]; });
   if (!rec['Property Address']) continue;
   scanned += 1;
-  const hit = attentionBucket_(rec, today);
-  if (!hit) continue;
   const owner = String(rec['Assigned Owner'] || '').trim();
-  found[hit.key].push({
+  const line = (reason) => ({
     seller: rec['Seller Name'] || '(no name)',
     address: rec['Property Address'],
     owner: owner || 'UNASSIGNED',
-    reason: hit.reason
+    reason
   });
+  const hit = attentionBucket_(rec, today);
+  if (hit) {
+    if (hit.overdue) found[hit.key].unshift(line(hit.reason));
+    else found[hit.key].push(line(hit.reason));
+  }
+  const gift = giftPending_(rec);
+  if (gift) found.giftFollowUp.push(line(gift));
 }
 
-const total = ATTENTION_BUCKETS.reduce((n, b) => n + found[b.key].length, 0);
+const gifts = found.giftFollowUp.length;
+const leads = ATTENTION_BUCKETS.reduce((n, b) => n + (b.key === 'giftFollowUp' ? 0 : found[b.key].length), 0);
+const total = leads + gifts;
 const active = ATTENTION_BUCKETS.filter((b) => found[b.key].length);
 
 const out = [];
@@ -204,7 +229,7 @@ say('');
 if (!total) {
   say('  Nothing needs attention — the notification would stay silent.');
 } else {
-  say(`  WORK QUEUE — ${total} lead(s)`);
+  say(`  WORK QUEUE — ${leads} lead(s)${gifts ? ` · ${gifts} gift(s) to action` : ''}`);
   say(`  ${fmt_(today)}  ·  start with ${active[0].title} (${found[active[0].key].length})`);
   say('');
   ATTENTION_BUCKETS.forEach((b, i) => {
