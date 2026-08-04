@@ -349,21 +349,34 @@ function cardHTML(r){
   return h+'</div></div>';
 }
 /*
- * Most overdue first — but an upcoming visit is not overdue at all, so this sorted tomorrow's booking to the
- * very BOTTOM of its section, below every stale lead. That is backwards for the one row somebody has to act on
- * within the day.
+ * Order depends on what the section is FOR.
  *
- * So: overdue rows first, worst first, as before. Then rows with nothing overdue, SOONEST VISIT FIRST — which
- * puts a visit happening tomorrow above one three weeks out, and above anything with no date at all.
+ * "Upcoming Visits (Scheduled)" is about what is coming, so overdue-first is the wrong rule there: it buried
+ * tomorrow's booking below every visit whose date had already slipped past. In that section, FUTURE visits
+ * come first, soonest first — then visits whose date has passed with nothing logged, most recent first.
+ * Tomorrow at the top; last week's missed visit below it, still visible.
+ *
+ * Every other section keeps most-overdue-first, which is right for work that is late.
  */
 function rowsFor(si,live){
   var s=SECTIONS[si];var rows=live.filter(s[1]).filter(keep);
-  rows.sort(function(a,b){
-    var od=(b.daysOverdue||0)-(a.daysOverdue||0);
-    if(od) return od;
-    var x=a.visitDate||'9999-99-99', y=b.visitDate||'9999-99-99';
-    return x<y?-1:x>y?1:0;
-  });
+  var byDate=(s[0].indexOf('Upcoming Visits')>=0);
+  var today=todayISO();
+  if(byDate){
+    rows.sort(function(a,b){
+      var x=a.visitDate||'', y=b.visitDate||'';
+      // No date at all sorts last: it cannot be placed on a timeline.
+      if(!x&&!y) return 0;
+      if(!x) return 1;
+      if(!y) return -1;
+      var xf=(x>=today), yf=(y>=today);
+      if(xf!==yf) return xf?-1:1;            // anything still to come outranks anything already passed
+      return xf ? (x<y?-1:x>y?1:0)           // future: soonest first
+                : (x>y?-1:x<y?1:0);          // passed: most recent first
+    });
+  } else {
+    rows.sort(function(a,b){return (b.daysOverdue||0)-(a.daysOverdue||0);});
+  }
   return rows;
 }
 function sectionInner(si,live){
