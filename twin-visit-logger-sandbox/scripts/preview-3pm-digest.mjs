@@ -54,10 +54,30 @@ function dateCell_(raw) {
 /** Is this lead finished, or not a lead at all? Nothing excluded here ever reaches the notification. */
 function excludedFromDigest_(rec) {
   var stage = String(rec['Current Stage'] || '').trim();
+  var source = String(rec['Source'] || '').trim();
   if (!rec['Property Address']) return 'no property address';
-  if (String(rec['Source']).trim() === 'TEST') return 'test row';
+  if (source === 'TEST') return 'test row';
   if (stage === 'Lost / Closed Out') return 'closed out';
   if (stage === 'Contract Signed') return 'contract signed';
+
+  /*
+   * Pre-cutover history is kept OUT of the work queue.
+   *
+   * The first live run posted 103 leads. Nearly every line read "Owner: UNASSIGNED · no visit date set",
+   * "offer not priced yet", or "no contact for 131 day(s)" — the rows imported from the old workbook,
+   * which carry a stage but no owner, no dates and no decisions. A 103-line message fails the one
+   * requirement Cherry set, that she can see what to work on first, and it fails it on volume rather
+   * than on anything about the categories.
+   *
+   * Source = 'Import' is the exact signature: importFromOldWorkbook stamps it, and nothing else does.
+   * The dashboard writes 'Manual', the REI intake writes 'Intake', the scraper writes its own. So no
+   * cutover date has to be invented and no live lead can be caught by accident.
+   *
+   * The rows are NOT touched, hidden or closed — they stay in the sheet and on the dashboard, where
+   * Operations can work through them deliberately. This only keeps them out of the daily message.
+   * Set CFG.DIGEST_INCLUDE_IMPORTED = true to put them back.
+   */
+  if (source === 'Import' && !CFG.DIGEST_INCLUDE_IMPORTED) return 'imported history (pre-cutover)';
   return '';
 }
 

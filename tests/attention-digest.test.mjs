@@ -32,9 +32,12 @@ const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
 const source = slice('var ATTENTION_BUCKETS = [', '/**\n * Post the 3pm work queue');
 
 const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS } = new Function(
-  'fmt_',
+  'fmt_', 'CFG',
   `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS };`
-)((d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }));
+)(
+  (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+  { DIGEST_INCLUDE_IMPORTED: false }
+);
 
 const TODAY = new Date(2026, 7, 5);              // Aug 5 2026, local midnight
 const day = (y, m, d) => new Date(y, m - 1, d);
@@ -312,6 +315,33 @@ const dupes = [...new Set(fnNames.filter((n, i) => fnNames.indexOf(n) !== i))];
 check('no function is defined twice in Code.combined.gs', dupes, []);
 check('the digest uses its own money formatter', /function digestMoney_\(v\)/.test(COMBINED), true);
 check('...and does not redefine the existing money_', (COMBINED.match(/^function money_/gm) || []).length, 1);
+
+console.log('\n=== Imported history stays OUT of the work queue ===');
+/*
+ * The first live run posted 103 leads, nearly all reading "Owner: UNASSIGNED · no visit date set" or
+ * "no contact for 131 day(s)" — the rows imported from the old workbook. That fails the one thing
+ * Cherry asked for, and it fails it on volume rather than on the categories.
+ *
+ * Source = 'Import' is the exact signature: importFromOldWorkbook stamps it and nothing else does
+ * (the dashboard writes 'Manual', the REI intake writes 'Intake'). So no cutover date is invented,
+ * and no live lead is caught by accident. The rows stay in the sheet and on the dashboard.
+ */
+check('an imported row is excluded', bucket({ ...BASE, Source: 'Import' }), null);
+check('...and the reason says why',
+  excludedFromDigest_({ ...BASE, Source: 'Import' }), 'imported history (pre-cutover)');
+check('an imported row owes no gift either',
+  giftPending_({ ...BASE, Source: 'Import', 'Gift Status': 'Recommended' }), '');
+check('a dashboard-added lead is NOT excluded', bucket({ ...BASE, Source: 'Manual' }), 'upcomingVisit');
+check('a REI intake lead is NOT excluded', bucket({ ...BASE, Source: 'Intake' }), 'upcomingVisit');
+check('a scraper lead with no Source is NOT excluded', bucket({ ...BASE, Source: '' }), 'upcomingVisit');
+// The flag must be able to put them back without touching the rules.
+const withImported = new Function('fmt_', 'CFG',
+  `${source}\nreturn { attentionBucket_ };`
+)((d) => String(d), { DIGEST_INCLUDE_IMPORTED: true }).attentionBucket_;
+check('CFG.DIGEST_INCLUDE_IMPORTED = true puts them back',
+  !!withImported({ ...BASE, Source: 'Import' }, TODAY), true);
+check('the flag is declared in Config.gs',
+  /DIGEST_INCLUDE_IMPORTED: false/.test(read('apps-script/Config.gs')), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

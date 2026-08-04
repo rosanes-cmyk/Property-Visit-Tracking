@@ -31,6 +31,9 @@ const CFG = {
   TASK_QUEUE_SHEET: 'Task Queue',   // visible internal task delivery (pilot)
   TEST_DATA_SHEET: 'Test Data',     // Source=TEST records live here, not on the live Board
   TRASH_SHEET: 'Trash',             // soft-deleted records (restorable from the dashboard)
+  // Put the pre-cutover imported rows back into the 3pm work queue. Off: they stay in the sheet and
+  // on the dashboard, but out of the daily message — see excludedFromDigest_.
+  DIGEST_INCLUDE_IMPORTED: false,
   INTAKE_INBOX_SHEET: 'Intake Inbox', // Zapier writes appointments here; a 10-min trigger logs them (for Workspaces that block public web apps)
   // Shared secret for the external website's JSON API (set the SAME value in Vercel APPS_SCRIPT_TOKEN).
   // Leave '' to disable the API (HTML dashboard still works). Use a long random string.
