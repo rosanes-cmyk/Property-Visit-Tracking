@@ -635,7 +635,15 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
     var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
     toast('Adding…');runAction('addRecord',null,params,close);};}
 
-function hydrate(x){return {id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
+/*
+ * rowNum MUST be carried through.
+ *
+ * hydrate builds a fresh object per record, so anything not named here is dropped. Keying the cards on
+ * rowNum without adding it here left every data-detail empty and openDetail matched nothing — the
+ * "Full record" button simply did nothing when clicked. The record's identity is the first field for
+ * that reason: it is the one property the page cannot work without.
+ */
+function hydrate(x){return {rowNum:x.rowNum,id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
 function onData(d){RECS=(d.records||[]).map(hydrate);TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 var TRASH=[];

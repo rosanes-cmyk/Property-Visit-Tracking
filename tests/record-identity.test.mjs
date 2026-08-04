@@ -77,5 +77,26 @@ console.log('\n--- a real Property ID still resolves, so an older page keeps wor
 check('P-0007 is row 4', findRowById_('P-0007'), 4);
 check('an unknown Property ID is not found', findRowById_('P-9999'), 0);
 
+console.log('\n=== hydrate must carry the identity through ===');
+/*
+ * The follow-up bug, and the reason this section exists: hydrate() builds a fresh object per record, so
+ * any field not named in it is dropped. Keying the cards on rowNum without adding it here left every
+ * data-detail empty, openDetail matched nothing, and "Full record" did nothing at all when clicked.
+ *
+ * This runs the real hydrate rather than reading the source, so the check cannot pass on a field that
+ * is named but mis-spelled.
+ */
+const hydrateSrc = DASH.slice(DASH.indexOf('function hydrate(x){return'), DASH.indexOf('function populateOwners'));
+const hydrate = new Function(`${hydrateSrc}\nreturn hydrate;`)();
+const record = { rowNum: 381, id: '', seller: 'Sara Davenport', address: '340 Vallejo Dr', stage: 'Visit Scheduled' };
+check('rowNum survives hydrate', hydrate(record).rowNum, 381);
+check('a blank Property ID also survives, for display', hydrate(record).id, '');
+check('the seller comes through', hydrate(record).seller, 'Sara Davenport');
+// The exact failure: with rowNum dropped, every card rendered data-detail="" and nothing was clickable.
+check('rowNum is not undefined — that is what broke the button',
+  hydrate(record).rowNum === undefined, false);
+check('two records keep distinct identities',
+  [hydrate({ ...record, rowNum: 380 }).rowNum, hydrate({ ...record, rowNum: 381 }).rowNum], [380, 381]);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
