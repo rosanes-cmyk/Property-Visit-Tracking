@@ -1480,12 +1480,38 @@ function webGetData() {
 
 /* ---------------- server: safe write actions ---------------- */
 
+/**
+ * The sheet row a dashboard action refers to. 0 = not found, and the caller must not write.
+ *
+ * Two things this now refuses to do, both of which it used to do silently:
+ *
+ *   A BLANK identifier no longer matches anything. Property ID is empty on every imported row, so
+ *   String(ids[i][0]) === String('') matched the FIRST blank-ID row — and a Save or Delete aimed at one
+ *   record landed on another. A blank id is a bug in the caller, so it returns 0 rather than guessing.
+ *
+ *   A ROW NUMBER is accepted directly. The dashboard now sends rowNum, which comes from the sheet and
+ *   is always unique, instead of a Property ID that may not exist. A plain integer inside the data
+ *   range is treated as that row; anything else still falls back to matching Property ID, so an older
+ *   deployment of the page keeps working.
+ */
 function findRowById_(id) {
   const sh = dataSheet_();
   const last = sh.getLastRow();
   if (last < CFG.FIRST_DATA_ROW) return 0;
+
+  const raw = String(id == null ? '' : id).trim();
+  if (!raw) return 0;                                    // never guess from a blank identifier
+
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (n >= CFG.FIRST_DATA_ROW && n <= last) return n;   // it is a row number
+  }
+
   const ids = sh.getRange(CFG.FIRST_DATA_ROW, col('Property ID'), last - CFG.FIRST_DATA_ROW + 1, 1).getValues();
-  for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return CFG.FIRST_DATA_ROW + i;
+  for (var i = 0; i < ids.length; i++) {
+    const v = String(ids[i][0]).trim();
+    if (v && v === raw) return CFG.FIRST_DATA_ROW + i;     // a blank cell can never be the match
+  }
   return 0;
 }
 

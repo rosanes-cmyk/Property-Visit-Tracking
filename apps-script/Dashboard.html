@@ -276,7 +276,18 @@ function detailField_(r,f,edit){
   else inp='<input data-h="'+esc(label)+'" type="text" value="'+esc(v)+'">';
   return '<div class="dl-row edit"><dt>'+esc(label)+'</dt><dd>'+inp+'</dd></div>';
 }
-function openDetail(id,edit){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;
+/*
+ * Records are addressed by ROW NUMBER, never by Property ID.
+ *
+ * Property ID is blank on a lot of rows — the imported ones never had it. This filtered on
+ * x.id===id, so every card with a blank ID carried data-detail="" and the filter returned the FIRST
+ * blank-ID record. Clicking "Full record" on Sara Davenport opened Jose Anguiano.
+ *
+ * That was the visible half. The same identifier is passed to runAction for Save and Delete, and the
+ * server's findRowById_ matched the first blank ID the same way — so Save wrote to the wrong row and
+ * Delete trashed the wrong record. rowNum comes straight from the sheet and is always unique.
+ */
+function openDetail(id,edit){var r=RECS.filter(function(x){return String(x.rowNum)===String(id);})[0];if(!r)return;
   var host=document.createElement('div');host.className='modal-bg';
   var body=SCHEMA.map(function(g){
     var rows=g[1].map(function(f){return detailField_(r,f,edit);}).join('');
@@ -334,7 +345,7 @@ function actionsFor(r){var a=[];
   a.push(['setNextAction','Set next action',0]); return a;}
 function cardHTML(r){
   var over=r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d overdue</span>':'';
-  var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.id)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
+  var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.rowNum)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
   h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
   if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
   if(r.sla)h+='<span class="badge crit">⚠ '+esc(r.sla)+'</span>'; if(r.conflict)h+='<span class="badge crit">🗓 Double-booked</span>'; if(r.gap>0)h+='<span class="badge crit">⚖ Gap '+money(r.gap)+'</span>'; if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
@@ -343,8 +354,8 @@ function cardHTML(r){
   var note=r.lastResult||r.visitNotes; if(note)h+='<div class="result">🗒 <span>'+esc(note)+'</span></div>';
   if(r.exception||r.missing)h+='<div class="flag">⚠ '+esc(r.exception||('Missing: '+r.missing))+'</div>';
   h+='<div class="acts">';
-  actionsFor(r).forEach(function(a){h+='<button class="btn2'+(a[2]?' primary':'')+'" data-act="'+a[0]+'" data-id="'+esc(r.id)+'">'+a[1]+'</button>';});
-  h+='<button class="btn2" data-detail="'+esc(r.id)+'">🔎 Full record</button>';
+  actionsFor(r).forEach(function(a){h+='<button class="btn2'+(a[2]?' primary':'')+'" data-act="'+a[0]+'" data-id="'+esc(r.rowNum)+'">'+a[1]+'</button>';});
+  h+='<button class="btn2" data-detail="'+esc(r.rowNum)+'">🔎 Full record</button>';
   if(r.rei)h+='<a class="rei" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">REI ↗</a>';
   return h+'</div></div>';
 }
@@ -452,7 +463,7 @@ function renderData(live){
   var h='<div class="datahead"><div class="sec" style="margin:6px 0"><h2>All records</h2><span class="n">'+rows.length+'</span></div><div class="dnote">Scroll the list ↓ · click any row to open the full record (all 61 columns)</div><button class="btn2" id="csv">⬇ Export CSV</button></div>';
   h+='<div class="tablewrap scroll"><table><colgroup>'+cols.map(function(c){return '<col class="c-'+c[0]+'">';}).join('')+'</colgroup><thead><tr>';
   cols.forEach(function(c){h+='<th data-k="'+c[0]+'">'+esc(c[1])+(SORT.k===c[0]?(SORT.dir>0?' ▲':' ▼'):'')+'</th>';}); h+='</tr></thead><tbody>';
-  rows.forEach(function(r){h+='<tr data-detail="'+esc(r.id)+'">'+cols.map(function(c){var k=c[0];
+  rows.forEach(function(r){h+='<tr data-detail="'+esc(r.rowNum)+'">'+cols.map(function(c){var k=c[0];
     if(k==='id')return '<td class="num">'+esc(r.id)+(r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d</span>':'')+'</td>';
     if(k==='seller')return '<td><b>'+sellerLink(r)+'</b></td>';
     if(k==='address')return '<td class="addr">'+esc(r.address||'—')+'</td>';
