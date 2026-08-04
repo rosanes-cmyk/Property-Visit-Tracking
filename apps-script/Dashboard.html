@@ -348,7 +348,24 @@ function cardHTML(r){
   if(r.rei)h+='<a class="rei" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">REI ↗</a>';
   return h+'</div></div>';
 }
-function rowsFor(si,live){var s=SECTIONS[si];var rows=live.filter(s[1]).filter(keep);rows.sort(function(a,b){return b.daysOverdue-a.daysOverdue;});return rows;}
+/*
+ * Most overdue first — but an upcoming visit is not overdue at all, so this sorted tomorrow's booking to the
+ * very BOTTOM of its section, below every stale lead. That is backwards for the one row somebody has to act on
+ * within the day.
+ *
+ * So: overdue rows first, worst first, as before. Then rows with nothing overdue, SOONEST VISIT FIRST — which
+ * puts a visit happening tomorrow above one three weeks out, and above anything with no date at all.
+ */
+function rowsFor(si,live){
+  var s=SECTIONS[si];var rows=live.filter(s[1]).filter(keep);
+  rows.sort(function(a,b){
+    var od=(b.daysOverdue||0)-(a.daysOverdue||0);
+    if(od) return od;
+    var x=a.visitDate||'9999-99-99', y=b.visitDate||'9999-99-99';
+    return x<y?-1:x>y?1:0;
+  });
+  return rows;
+}
 function sectionInner(si,live){
   var s=SECTIONS[si], rows=rowsFor(si,live);
   var pages=Math.max(1,Math.ceil(rows.length/PSIZE)); var pg=Math.min(PAGE[si]||0,pages-1); if(pg<0)pg=0; PAGE[si]=pg;
