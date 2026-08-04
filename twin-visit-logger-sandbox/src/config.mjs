@@ -77,11 +77,19 @@ const raw = {
   /*
    * WHATSAPP_ENABLED=false stops the WhatsApp step dead, wherever it is called from.
    *
-   * The number used for this was banned: automating WhatsApp Web breaches Meta's terms and they detect it. A
-   * disabled scheduled task is not enough of an off switch — someone runs the command by hand and the account
-   * is at risk again. This is the switch, and it defaults to ON only because existing setups rely on it.
+   * THREE numbers have now been banned or restricted running this: automating WhatsApp Web breaches Meta's
+   * terms and they detect it. The last one went the same way as the others, on a run that had the warm-up
+   * off, a 20-minute gap between sessions, a five-a-day cap and exactly one group created. There is no
+   * throttle setting that makes this safe, because the problem is not the volume — it is the automation.
+   *
+   * So the default is OFF. It used to be ON for the sake of existing setups, which is no longer a good
+   * enough reason: a disabled scheduled task is not an off switch, since anyone can run the command by
+   * hand, and an unset variable must not be what puts a fourth number at risk.
+   *
+   * The briefing goes to Google Chat instead (chatWebhookUrl) — the client's own Workspace, permitted to
+   * automate, and the part that carried the value. The group is created by hand, as the team did before.
    */
-  whatsappEnabled: bool(process.env.WHATSAPP_ENABLED, true),
+  whatsappEnabled: bool(process.env.WHATSAPP_ENABLED, false),
 
   /*
    * Three limits that exist only to reduce what WhatsApp sees. The client has chosen to run this on a number

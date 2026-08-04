@@ -156,7 +156,13 @@ Still out of scope: direct REI API integration, auto-sending seller communicatio
 is permitted; sending a message is not, and no send function exists), PDF reports, and advanced
 dashboard redesign.
 
-**WhatsApp automation is OFF (`WHATSAPP_ENABLED=false`). The number used for it was banned.**
+**WhatsApp automation is OFF, and `WHATSAPP_ENABLED` now defaults to `false` in `src/config.mjs`.
+THREE numbers have been banned or restricted running it.**
+
+The third went the same way as the first two on a run that had `WHATSAPP_SKIP_WARMUP=true`, a 20-minute gap
+between sessions, a cap of five groups a day, and exactly one group created. The limits are not the variable:
+the automation is. Do not propose tuning them further, and do not treat a disabled scheduled task as an off
+switch — the config default is the switch, because anyone can run the command by hand.
 
 Automating WhatsApp Web breaches Meta's terms of service and they detect it — this was a stated risk from the
 start of the project and it happened. No technique removes that risk, and the official WhatsApp Business Cloud
