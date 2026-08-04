@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-04-once';
+const BUILD = '2026-08-04-chat';
 
 const APPLY = process.argv.includes('--yes');
 
