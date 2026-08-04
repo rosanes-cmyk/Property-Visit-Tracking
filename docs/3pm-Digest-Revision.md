@@ -1,11 +1,12 @@
 # 3:00 PM Lead Notification — Revision
 
 **Requested by:** Cherry · **Owner:** Jonathan Rosanes · **System:** Twin Visit Logger → Google Chat
-**Status:** built and tested; two items below need approval before rollout.
+**Status:** `READY FOR CHERRY APPROVAL` — built and tested as a PROPOSED version. Not deployed. The
+live workbook still runs the previous four-bucket digest. Six decisions below are unresolved.
 
 Implemented in `apps-script/ChatNotify.gs` (`ATTENTION_BUCKETS`, `attentionBucket_`,
 `sendAttentionDigestToChat`), mirrored into `apps-script/Code.combined.gs`, covered by
-`tests/attention-digest.test.mjs` (63 checks).
+`tests/attention-digest.test.mjs` (85 checks, 0 failing).
 
 ---
 
@@ -50,17 +51,17 @@ illustrative until it runs against the live sheet.
 >
 > 🚩 **1. Visit Overdue (1)**
 > *Confirm whether the visit happened — mark it Completed or Canceled.*
-> **David Jackowitz** · 1390 Estudillo Ave, San Leandro, CA 94577 · 👤 Juan · *visit was 2026-08-04, still marked Scheduled*
+> **David Jackowitz** · 1390 Estudillo Ave, San Leandro, CA 94577 · Owner: Juan · *visit was 2026-08-04, still marked Scheduled*
 > ⎯
 > 📋 **3. Missing Next Action (1)**
 > *Assign the next action and its due date.*
-> **Vaishali Mehta** · 608 Charter St, Redwood City, CA 94063 · 👤 Juan · *next action "Conduct scheduled visit & log outcome" has no due date*
+> **Vaishali Mehta** · 608 Charter St, Redwood City, CA 94063 · Owner: Juan · *next action "Conduct scheduled visit & log outcome" has no due date*
 > ⎯
 > 🗣 **4. Missing Seller Motivation (5)**
 > *Write up the post-visit seller motivation notes.*
-> **Carol Parkinson** · 2409 Summer St, San Jose, CA 95116 · 👤 **UNASSIGNED** · *visit completed, seller motivation still blank*
-> **Jeff Tipton** · 550 El Capitan Dr, Danville, CA 94526 · 👤 **UNASSIGNED** · *visit completed, seller motivation still blank*
-> **Antoine Moore** · 3275 Dakota St, Oakland, CA 94602 · 👤 **UNASSIGNED** · *visit completed, seller motivation still blank*
+> **Carol Parkinson** · 2409 Summer St, San Jose, CA 95116 · Owner: **UNASSIGNED** · *visit completed, seller motivation still blank*
+> **Jeff Tipton** · 550 El Capitan Dr, Danville, CA 94526 · Owner: **UNASSIGNED** · *visit completed, seller motivation still blank*
+> **Antoine Moore** · 3275 Dakota St, Oakland, CA 94602 · Owner: **UNASSIGNED** · *visit completed, seller motivation still blank*
 > …and 2 more
 > ⎯
 > 🐢 **7. Stalled (7)**
@@ -90,7 +91,22 @@ Unchanged: the 3pm trigger, the Chat webhook, one-lead-one-line, and the exclusi
 Lost / Closed Out and TEST rows. **The digest still writes nothing** — no due date and no next
 action is created in order to raise an alert. That is asserted by a test.
 
-## 5. Two decisions needing approval (change-control rule, §9 of your brief)
+## 5. Decisions needing approval (change-control rule, §9 of your brief)
+
+Nothing below has been decided. The code implements Cherry's seven buckets in her order; every item
+here is either a technical necessity that needs blessing or a gap that needs a business answer.
+
+| # | Decision | Recommendation | If rejected |
+|---|---|---|---|
+| 1 | Long-Term Nurture exempt from bucket 3 | **Approve** — technically required for bucket 6 to fire | Drop bucket 6, or move it above bucket 3 |
+| 2 | Bucket 8 (ambiguous residue) exists | **Approve** under the stated limits | Flagged records appear only on the dashboard |
+| 3 | Add `Overdue Next Action` at priority 2 | **Approve** — 49 broken commitments currently vanish | Record the limitation in writing and in a test |
+| 4 | Legacy imported records | **Option A** filter now, B or C as cleanup | First digest is dominated by history |
+| 5 | No-property-address exclusion becomes a formal rule | **Approve** — there is nothing to act on | Such rows appear with a blank address |
+| 6 | Move `Missing Assigned Owner` above `Missing Next Action` | **Recommend**, not implemented | Ownerless leads stay scattered across buckets 3, 4, 6, 7 |
+| 7 | Exclude on `Deal Status` / `Deal Stage` / `Final Disposition` terminal values | **Approve** — see §8; these leads recur daily forever | Passed-on leads keep reporting as Visit Overdue |
+
+
 
 **(a) Long-Term Nurture is exempt from bucket 3.**
 A nurture lead's next action *is* its future follow-up date. Bucket 3 fires on a blank
@@ -116,7 +132,7 @@ exception and is deliberate**, covering "ambiguous, a person must look". It is t
 action is a judgement rather than a data entry, and it is last for that reason.
 
 **C. Can a manager tell immediately which employee needs to act? — YES, with one caveat.**
-Every line ends with `👤 <owner>` or `👤 UNASSIGNED` in bold. The caveat: because your priority order
+Every line carries `Owner: <name>` or `Owner: **UNASSIGNED**` in bold. The caveat: because your priority order
 puts Missing Next Action (3) above Missing Assigned Owner (5), a lead missing *both* reports under
 bucket 3, so bucket 5's count will look small while ownerless leads sit higher up. Every line still
 shows UNASSIGNED, so nothing is hidden — but if you want all ownerless leads gathered in one place,
@@ -134,24 +150,122 @@ bucket 5 has to move above bucket 3. See D.
    change in this revision and I have not tried to hide it — if a written commitment going past its
    date should be on the queue, it wants a bucket, and I would put it at 2.
 
-**E. Edge cases and combinations that do not fit cleanly:**
+**E. Edge cases — every combination run through the shipped function.**
 
-| Case | Current behaviour | Needs your decision? |
+Full verified matrix in §8 below. Six produce a lead that appears NOWHERE and need a decision:
+
+| Case | Actual result | Decision needed |
 |---|---|---|
-| Real next action, due date passed | Appears nowhere (unless Stalled) | **Yes** — see D2 |
+| Valid next action, due date passed | Appears nowhere | **Yes** — Decision 3 |
+| Visit date passed, `Visit Status` blank | Appears nowhere | **Yes** |
+| `Visit Status` = `Reschedule Needed`, date passed | Appears nowhere | **Yes** |
+| `Offer Preparation` with no amount | Appears nowhere | **Yes** |
+| Offer figures filled in but stage never moved to `Offer Sent` | Appears nowhere | **Yes** |
+| `Offer Status` = `Sent` while stage says otherwise | Appears nowhere | **Yes** |
+| Unrecognised owner name (e.g. "Jonathon") | Not detected | Optional — could validate against the 12-name dropdown |
 | Missing owner *and* missing next action | Bucket 3 | **Yes** — see D1 |
-| Nurture lead with no follow-up date | Bucket 6 | Approve §5(a) |
-| `Visit Status` blank, `Visit Date` in the past | Not Visit Overdue — status was never set to Scheduled | Probably wants flagging; say if so |
-| Visit Completed, motivation blank, no owner | Bucket 4 | No — motivation is the more specific action |
-| `Offer Preparation` with no amount | Appears nowhere | Confirm: is a prepared-but-unpriced offer chase-worthy? |
-| Legacy imports (≈209 with no REI link, no owner) | Will flood buckets 4, 5 and 7 | **Yes** — see below |
+| Stalled *and* overdue action | Bucket 7 | Changes if Decision 3 is approved |
+| Nurture with a future date but flagged Stalled | Bucket 7 | **Yes** — should nurture stay quiet? |
+| Invalid text in a due date (`ASAP`) | Bucket 3, reason says "has no due date" | Reason could say "is not a date" |
+| Shared owner (`Matt/Juan`, `Team`) | Silent — correct | No: these are valid dropdown values |
 
-**The legacy rows are the biggest practical risk to the 10-second goal.** Around 209 imported records
-have no REI link and no `Assigned Owner`, and the board already opens on 84 SLA breaches from them.
-They are real rows, so every rule here catches them, and the first digest will be dominated by
-pre-cutover history rather than live work. Three options: exclude records created before the cutover
-date, backfill owners, or set them to `Lost / Closed Out` so they archive out. This is a business
-decision and I have not assumed one.
+**On the "Closed / Sold / Dead Lead / Not Interested / Duplicate / Archived" stages:** none of them
+exist in this workbook. `Current Stage` has exactly ten values, ending at `Lost / Closed Out`
+(`apps-script/Config.gs:87`). No stage mapping is required — but the terminal states live in three
+OTHER columns, and none of them currently excludes anything:
+
+| Column | Terminal values | Currently excluded? |
+|---|---|---|
+| `Final Disposition` | `Lost`, `Closed Out`, `Contracted` | **No** |
+| `Deal Stage` | `Lost`, `Won` | **No** |
+| `Deal Status` | `We're Passing`, `Contract Cancelled`, `Seller Rejected Offer`, `Did Not Proceed`, `Sold to Competitor`, `Sold with Realtor`, `Referred to Realtor`, `Already listed`, `Sold (unknown buyer)`, `Acquired…`, `Wholesale - Deal Closed` | **No** |
+
+Verified: a lead whose `Deal Status` is `We're Passing`, or whose `Deal Stage` is `Lost`, but whose
+`Current Stage` was never moved, still reports as **Visit Overdue** and will do so every day
+indefinitely. This is a seventh decision and probably the highest-value one after Decision 3.
+
+**The legacy rows remain the biggest practical risk to the 10-second goal.** Around 209 imported
+records have no REI link and no `Assigned Owner`, and the board already opens on 84 SLA breaches from
+them. Every rule here catches them, so the first live digest will be dominated by pre-cutover history.
+Options A–D are in the review; I have assumed none of them and changed nothing.
+
+## 8. Verified edge-case matrix
+
+Produced by running the shipped `attentionBucket_` against each combination; every line below is also
+a permanent assertion in `tests/attention-digest.test.mjs`, including the ones that record a gap.
+
+### Visits
+| Case | Result |
+|---|---|
+| `Scheduled`, date before today | 1. Visit Overdue — *visit was 2026-08-01, still marked Scheduled* |
+| Date before today, `Visit Status` blank | **NOWHERE** |
+| `Completed`, motivation blank | 4. Missing Seller Motivation |
+| `Completed`, motivation blank, owner blank | 4. Missing Seller Motivation |
+| `Canceled`, next action blank | 3. Missing Next Action |
+| Date is today, still `Scheduled` | **NOWHERE** — not overdue until the day ends |
+| `Reschedule Needed`, date passed | **NOWHERE** |
+| `Skipped — Offer Made`, date passed | NOWHERE — correct |
+
+### Offers
+| Case | Result |
+|---|---|
+| `Offer Sent`, amount blank | 2. Offer Needs Completion — *the offer amount is blank* |
+| `Offer Sent`, sent date blank | 2. Offer Needs Completion — *the sent date is blank* |
+| `Offer Sent`, both blank | 2. Offer Needs Completion — *neither … is filled in* |
+| `Offer Preparation`, no amount | **NOWHERE** |
+| Figures present, stage not updated | **NOWHERE** |
+| `Offer Status` = `Sent`, stage differs | **NOWHERE** |
+| `Offer Sent`, both present | NOWHERE — correct |
+| Amount is `0`, date present | NOWHERE — a zero offer is a real number, not a blank |
+
+### Next actions
+| Case | Result |
+|---|---|
+| Action blank, due date populated | 3 — *a due date with no action written against it* |
+| Action populated, due date blank | 3 — *next action "…" has no due date* |
+| Both blank | 3 — *no next action and no due date* |
+| Due date is today | NOWHERE — not yet broken |
+| **Due date in the past** | **NOWHERE** — Decision 3 |
+| Due date is invalid text (`ASAP`) | 3 — treated as no due date |
+| Nurture, no future date | 6. Long-Term Nurture Missing Follow-Up |
+| Nurture, future date, no action text | NOWHERE |
+
+### Ownership
+| Case | Result |
+|---|---|
+| Owner blank, all else fine | 5. Missing Assigned Owner — *no assigned owner* |
+| Owner blank AND next action blank | 3. Missing Next Action (her priority order) |
+| Owner is whitespace | 5. Missing Assigned Owner |
+| Owner unrecognised (`Jonathon`) | **NOWHERE** — not validated |
+| Shared owner (`Matt/Juan`) | NOWHERE — a valid dropdown value |
+
+### Stalled
+| Case | Result |
+|---|---|
+| `Yes`, no reason supplied | 7. Stalled — *no recent activity* |
+| `Yes` and an overdue action | 7. Stalled |
+| `Yes` but `Lost / Closed Out` | NOWHERE — excluded |
+| Blank but 90 days inactive | NOWHERE — never inferred |
+| Nurture with future date, also `Yes` | 7. Stalled |
+
+### Exclusions
+| Case | Result |
+|---|---|
+| `Lost / Closed Out` | NOWHERE ✅ |
+| `Contract Signed` | NOWHERE ✅ |
+| `Source` = `TEST` | NOWHERE ✅ |
+| No property address | NOWHERE — awaiting approval as a formal rule |
+| `Final Disposition` = `Closed Out` | **1. Visit Overdue** — not excluded |
+| `Deal Status` = `We're Passing` | **1. Visit Overdue** — not excluded |
+| `Deal Stage` = `Lost` | **1. Visit Overdue** — not excluded |
+| Unknown stage string | Surfaces rather than vanishing |
+
+### Flagged / healthy
+| Case | Result |
+|---|---|
+| `Exception`, nothing else wrong | 8. Flagged — carries the exception reason |
+| `Incomplete` + missing next action | 3. Missing Next Action — the action beats the flag ✅ |
+| Nothing wrong | NOWHERE ✅ |
 
 ## 7. Definition of done — status
 
@@ -162,7 +276,7 @@ decision and I have not assumed one.
 | 10-second clarity | ✅ header names the top bucket; needs your sign-off on the sample |
 | Operational, not only technical | ✅ every reason states the action, not the flag |
 | Reasoning documented | ✅ §5 and §6 above; nothing redesigned silently |
-| Tested | ✅ 63 checks against the shipped function |
+| Tested | ✅ 85 checks against the shipped function, 0 failing |
 | Screenshot / test output before rollout | ⏳ needs one live run — menu → *post the attention digest now* |
 
 **To see it live:** paste `apps-script/Code.combined.gs` into the workbook's script, then use the

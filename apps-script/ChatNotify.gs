@@ -565,7 +565,7 @@ function sendAttentionDigestToChat() {
     var owner = String(rec['Assigned Owner'] || '').trim();
     found[hit.key].push(
       '<b>' + (rec['Seller Name'] || '(no name)') + '</b> · ' + rec['Property Address'] +
-      ' · ' + (owner ? '👤 ' + owner : '👤 <b>UNASSIGNED</b>') +
+      ' · Owner: ' + (owner || '<b>UNASSIGNED</b>') +
       ' · <i>' + hit.reason + '</i>'
     );
   });

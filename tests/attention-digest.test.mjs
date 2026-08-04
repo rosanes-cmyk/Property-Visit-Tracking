@@ -218,9 +218,85 @@ const lines = many.map(bucket).filter(Boolean);
 check('8 records in, 6 lines out (one healthy, one excluded)', lines.length, 6);
 check('no record produces two lines', lines.length, new Set(many.map((_, i) => i)).size - 2);
 
+/* ==================================================================
+ * The edge-case matrix from the review, run against the shipped rules.
+ *
+ * Some of these record a GAP rather than a desired behaviour — a lead that appears nowhere. They are
+ * asserted anyway, so the gap is a documented fact with a test against it rather than something
+ * discovered later in production. Each one that awaits Cherry's decision says so.
+ * ================================================================ */
+console.log('\n=== Edge cases: visits ===');
+check('date passed but Visit Status is BLANK — appears NOWHERE (awaiting decision)',
+  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': '' }), null);
+check('date is TODAY and still Scheduled — not overdue until the day ends (awaiting decision)',
+  bucket({ ...OK, 'Visit Date': TODAY }), null);
+check('Canceled with no next action lands in Missing Next Action',
+  bucket({ ...OK, 'Visit Status': 'Canceled', 'Next Action': '', 'Next Action Due Date': '' }), 'missingNextAction');
+// Two Visit Status values in this workbook's own dropdown that no bucket covers.
+check('"Reschedule Needed" with a passed date — appears NOWHERE (awaiting decision)',
+  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': 'Reschedule Needed' }), null);
+check('"Skipped — Offer Made" with a passed date is correctly silent',
+  bucket({ ...OK, 'Visit Date': day(2026, 8, 1), 'Visit Status': 'Skipped — Offer Made' }), null);
+
+console.log('\n=== Edge cases: offers ===');
+const sent = { ...OK, 'Visit Status': 'Completed', 'Seller Motivation': 'x' };
+check('Offer Preparation with no amount — appears NOWHERE (awaiting decision)',
+  bucket({ ...sent, 'Current Stage': 'Offer Preparation' }), null);
+check('offer figures present but the stage was never moved — appears NOWHERE (awaiting decision)',
+  bucket({ ...sent, 'Approved Offer Amount': 450000, 'Offer Sent Date': day(2026, 8, 1) }), null);
+check('Offer Status "Sent" while the stage says otherwise — appears NOWHERE (awaiting decision)',
+  bucket({ ...sent, 'Offer Status': 'Sent' }), null);
+
+console.log('\n=== Edge cases: next actions ===');
+check('due date TODAY is not yet broken', bucket({ ...OK, 'Next Action Due Date': TODAY }), null);
+/*
+ * THE Decision-3 gap, pinned: a written commitment whose date has passed appears nowhere. 49 records
+ * were in this state under the old rules. Asserted so that reintroducing the bucket is a deliberate
+ * change to this line, not an accident.
+ */
+check('a valid next action PAST its due date appears NOWHERE (Decision 3)',
+  bucket({ ...OK, 'Next Action Due Date': day(2026, 8, 1) }), null);
+check('invalid text in the due date is treated as no due date',
+  bucket({ ...OK, 'Next Action Due Date': 'ASAP' }), 'missingNextAction');
+check('nurture with a future date but no action text is silent',
+  bucket({ ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action': '', 'Next Action Due Date': day(2026, 12, 1) }), null);
+
+console.log('\n=== Edge cases: ownership ===');
+// 'Matt/Juan' and 'Team' are legitimate values in this workbook's Assigned Owner dropdown, so a
+// shared owner is not a fault and must not be reported as one.
+check('a shared owner is a valid value, not a fault', bucket({ ...OK, 'Assigned Owner': 'Matt/Juan' }), null);
+check('an unrecognised owner name is NOT detected (awaiting decision)',
+  bucket({ ...OK, 'Assigned Owner': 'Jonathon' }), null);
+
+console.log('\n=== Edge cases: stalled ===');
+check('stalled AND overdue action reports as Stalled under the current order',
+  bucket({ ...OK, 'Stalled Status': 'Yes', 'Next Action Due Date': day(2026, 8, 1) }), 'stalled');
+check('stalled is never inferred from inactivity alone',
+  bucket({ ...OK, 'Stalled Status': '', 'Days Since Last Activity': 90 }), null);
+check('nurture with a future date but flagged Stalled reports as Stalled (awaiting decision)',
+  bucket({ ...OK, 'Current Stage': 'Long-Term Nurture', 'Visit Status': '', 'Next Action Due Date': day(2026, 12, 1), 'Stalled Status': 'Yes' }), 'stalled');
+
+console.log('\n=== Edge cases: the closed-elsewhere stages ===');
+/*
+ * Closed / Sold / Dead Lead / Duplicate / Archived are NOT values of Current Stage in this workbook —
+ * its dropdown has exactly ten, ending at 'Lost / Closed Out'. The terminal states live in Deal
+ * Status, Deal Stage and Final Disposition instead, and none of them is currently an exclusion. A
+ * lead marked "We're Passing" whose stage was never moved still reports as Visit Overdue.
+ */
+const passed = { ...OK, 'Visit Date': day(2026, 8, 1) };
+check('Final Disposition "Closed Out" does NOT exclude (awaiting decision)',
+  bucket({ ...passed, 'Final Disposition': 'Closed Out' }), 'visitOverdue');
+check('Deal Status "We\'re Passing" does NOT exclude (awaiting decision)',
+  bucket({ ...passed, 'Deal Status': "We're Passing" }), 'visitOverdue');
+check('Deal Stage "Lost" does NOT exclude (awaiting decision)',
+  bucket({ ...passed, 'Deal Stage': 'Lost' }), 'visitOverdue');
+check('an unknown stage string still surfaces rather than vanishing',
+  bucket({ ...passed, 'Current Stage': 'Dead Lead' }), 'visitOverdue');
+
 console.log('\n=== The posted card meets her display rules ===');
 const post = CHAT.slice(CHAT.indexOf('function sendAttentionDigestToChat'));
 check('unassigned is spelled out', /UNASSIGNED/.test(post), true);
+check('the owner is labelled "Owner:", per the approved sample format', post.includes("Owner: ' + (owner ||"), true);
 check('each line carries the seller name', /rec\['Seller Name'\]/.test(post), true);
 check('each line carries the address', /rec\['Property Address'\]/.test(post), true);
 check('each line carries the reason', /hit\.reason/.test(post), true);
