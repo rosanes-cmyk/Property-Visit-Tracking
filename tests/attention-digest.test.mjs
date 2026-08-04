@@ -239,7 +239,9 @@ check('the seller name is on the line', /rec\['Seller Name'\]/.test(post), true)
 check('the address is on the line', /rec\['Property Address'\]/.test(post), true);
 check('each bucket shows its count', /\(' \+ arr\.length \+ '\)/.test(post), true);
 check('each bucket shows its action', /b\.action/.test(post), true);
-check('lines needing a decision are pushed to the top', /hit\.attention.*unshift/.test(post), true);
+check('decisions sort above ordinary upcoming visits', /if \(x\.attention !== y\.attention\) return x\.attention - y\.attention/.test(post), true);
+check('then soonest visit first', /return a - c;/.test(post), true);
+check('a dated line carries its sort key', /at: hit\.sort/.test(post), true);
 check('gifts are counted separately from leads', /var leads = ATTENTION_BUCKETS\.reduce/.test(post), true);
 check('the header reports leads and gifts apart', /' lead\(s\)' \+ \(gifts \?/.test(post), true);
 check('the digest still writes nothing to the sheet', /setValue|setValues/.test(post), false);
@@ -342,6 +344,29 @@ check('CFG.DIGEST_INCLUDE_IMPORTED = true puts them back',
   !!withImported({ ...BASE, Source: 'Import' }, TODAY), true);
 check('the flag is declared in Config.gs',
   /DIGEST_INCLUDE_IMPORTED: false/.test(read('apps-script/Config.gs')), true);
+
+console.log('\n=== Upcoming Visit is ordered by how soon the visit is ===');
+/*
+ * Cherry: "it should be prioritized, the upcoming visit by its date that near to visit". Before this
+ * the section came out in sheet order, so a visit three weeks away could sit above tomorrow's.
+ */
+const at = (rec) => attentionBucket_(rec, TODAY).sort;
+check("today's visit sorts before next week's",
+  at({ ...BASE, 'Visit Date': TODAY }) < at({ ...BASE, 'Visit Date': day(2026, 8, 12) }), true);
+check('an undated visit sorts last', at({ ...BASE, 'Visit Date': '' }), Infinity);
+check('a date serial produces the same key as a real Date',
+  at({ ...BASE, 'Visit Date': 46235 }), at({ ...BASE, 'Visit Date': day(2026, 8, 1) }));
+// The sort must run over the whole section, and decisions must still win over date.
+const order = [
+  { ...BASE, 'Visit Date': day(2026, 8, 20) },                       // furthest out
+  { ...BASE, 'Visit Date': day(2026, 8, 6) },                        // tomorrow
+  { ...BASE, 'Visit Date': day(2026, 8, 1) },                        // overdue
+  { ...BASE, 'Visit Date': day(2026, 8, 7), 'Visit Status': 'Canceled' }
+].map((r) => attentionBucket_(r, TODAY))
+  .sort((x, y) => (x.attention ? 0 : 1) - (y.attention ? 0 : 1) || x.sort - y.sort)
+  .map((h) => h.reason.slice(0, 12));
+check('overdue and cancelled first, then soonest',
+  order, ['OVERDUE — vi', 'CANCELED — w', 'visit Aug 6,', 'visit Aug 20']);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

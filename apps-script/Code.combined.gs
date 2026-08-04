@@ -3340,23 +3340,31 @@ function attentionBucket_(rec, today) {
        * Removing it from the section would be worse: a cancellation is exactly the thing someone has
        * to act on, by rebooking or closing the lead out. So it stays, labelled, and sorts to the top.
        */
+      /*
+       * `sort` orders the section by the visit's own date. Cherry: "it should be prioritized, the
+       * upcoming visit by its date that near to visit" — so the soonest visit is the first line, not
+       * whichever row happens to sit highest in the sheet. A visit with no date sorts last within its
+       * group, because there is no date to be near to.
+       */
+      var at = on ? on.getTime() : Infinity;
+
       if (status === 'Canceled') {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'CANCELED' + was + ' — rebook it or close the lead out' };
       }
       if (status === 'Reschedule Needed') {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
       }
 
-      if (!on) return { key: b.key, attention: true, reason: 'no visit date set — nothing to confirm against' };
+      if (!on) return { key: b.key, attention: true, sort: at, reason: 'no visit date set — nothing to confirm against' };
       if (on < today) {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled') };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
       var time = String(rec['Visit Time'] || '').trim();
-      return { key: b.key, reason: 'visit ' + when + (time ? ' at ' + time : '') };
+      return { key: b.key, sort: at, reason: 'visit ' + when + (time ? ' at ' + time : '') };
     }
 
     if (b.key === 'needsDecision') {
@@ -3469,18 +3477,35 @@ function sendAttentionDigestToChat() {
 
     var hit = attentionBucket_(rec, today);
     if (hit) {
-      // An overdue visit goes to the TOP of its bucket. It is the one line in the message that means
-      // something may already have gone wrong with a seller rather than merely being unfinished.
-      // Anything needing a decision — overdue, cancelled, reschedule, no date — sorts above the
-      // visits that are simply coming up, so the top of the section is always the part to act on.
-      if (hit.attention) found[hit.key].unshift(line(hit.reason));
-      else found[hit.key].push(line(hit.reason));
+      found[hit.key].push({ text: line(hit.reason), attention: hit.attention ? 0 : 1, at: hit.sort });
     }
 
     // Additive, on purpose — see giftPending_. A lead can be listed once for its stage and once for
     // a gift it owes, because those are two different jobs for two different people.
     var gift = giftPending_(rec);
-    if (gift) found.giftFollowUp.push(line(gift));
+    if (gift) found.giftFollowUp.push({ text: line(gift), attention: 1, at: undefined });
+  });
+
+  /*
+   * Order each section, then flatten to the lines that get posted.
+   *
+   * Two rules, in this order:
+   *   1. anything needing a decision first — overdue, cancelled, reschedule needed, no date set
+   *   2. then by the visit's own date, soonest first
+   *
+   * Cherry: "it should be prioritized, the upcoming visit by its date that near to visit". Before
+   * this, the section came out in whatever order the rows sat in the sheet, so tomorrow's visit could
+   * appear below one three weeks out. A line with no date sorts last within its group, and the
+   * sections that carry no date at all keep their sheet order because Array.sort is stable.
+   */
+  ATTENTION_BUCKETS.forEach(function (b) {
+    found[b.key] = found[b.key]
+      .sort(function (x, y) {
+        if (x.attention !== y.attention) return x.attention - y.attention;
+        var a = x.at === undefined ? 0 : x.at, c = y.at === undefined ? 0 : y.at;
+        return a - c;
+      })
+      .map(function (x) { return x.text; });
   });
 
   /*

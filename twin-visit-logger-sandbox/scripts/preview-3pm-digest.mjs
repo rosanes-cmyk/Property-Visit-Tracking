@@ -121,23 +121,31 @@ function attentionBucket_(rec, today) {
        * Removing it from the section would be worse: a cancellation is exactly the thing someone has
        * to act on, by rebooking or closing the lead out. So it stays, labelled, and sorts to the top.
        */
+      /*
+       * `sort` orders the section by the visit's own date. Cherry: "it should be prioritized, the
+       * upcoming visit by its date that near to visit" — so the soonest visit is the first line, not
+       * whichever row happens to sit highest in the sheet. A visit with no date sorts last within its
+       * group, because there is no date to be near to.
+       */
+      var at = on ? on.getTime() : Infinity;
+
       if (status === 'Canceled') {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'CANCELED' + was + ' — rebook it or close the lead out' };
       }
       if (status === 'Reschedule Needed') {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
       }
 
-      if (!on) return { key: b.key, attention: true, reason: 'no visit date set — nothing to confirm against' };
+      if (!on) return { key: b.key, attention: true, sort: at, reason: 'no visit date set — nothing to confirm against' };
       if (on < today) {
-        return { key: b.key, attention: true,
+        return { key: b.key, attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled') };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
       var time = String(rec['Visit Time'] || '').trim();
-      return { key: b.key, reason: 'visit ' + when + (time ? ' at ' + time : '') };
+      return { key: b.key, sort: at, reason: 'visit ' + when + (time ? ' at ' + time : '') };
     }
 
     if (b.key === 'needsDecision') {
