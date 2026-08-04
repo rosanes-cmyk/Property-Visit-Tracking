@@ -278,6 +278,38 @@ check('the alert names the tag and says the event was kept',
   /tagged \[' \+ tag \+ '\], with its reminders switched off/.test(WEB), true);
 check('it is silent with no webhook configured', /typeof chatWebhookUrl_ !== 'function' \|\| !chatWebhookUrl_\(\)/.test(WEB), true);
 
+console.log('\n--- a SHEET edit syncs the calendar too, not just a dashboard edit ---');
+/*
+ * The client set a visit to Canceled and nothing happened anywhere: no tag, no alert, no change. The
+ * cause was that syncVisitCalendar_ was only ever called from webAction, so cancelling on the dashboard
+ * worked and cancelling by typing in the sheet did nothing — two ways to record the same fact with two
+ * different outcomes, and the sheet is the one people actually use.
+ */
+const AUTO = read('apps-script/Automation.gs');
+check('the sheet-edit handler calls the calendar sync',
+  /if \(typeof syncVisitCalendar_ === 'function'\) syncVisitCalendar_\(sh, row\);/.test(AUTO), true);
+check('...on Visit Status', /header === 'Visit Status' \|\|/.test(AUTO), true);
+check('...on Current Stage', /header === 'Current Stage' \|\|/.test(AUTO), true);
+check('...and on Visit Date, so moving a visit moves the event',
+  /header === 'Visit Date' \|\| header === 'Visit Time'/.test(AUTO), true);
+check('it runs AFTER the row is flushed, so the sync reads the new value',
+  AUTO.indexOf('R.flush();\n\n    /*') < AUTO.indexOf('syncVisitCalendar_(sh, row)'), true);
+check('Canceled is recorded in the automation log',
+  /v === 'Canceled' \|\| v === 'Reschedule Needed'/.test(AUTO), true);
+/*
+ * The stage must NOT be moved automatically — "the seller cancelled" and "we are done with this lead"
+ * are different decisions and only one is safe to make without a person. Sliced to the branch body
+ * exactly: a looser window ran into the 'Completed' branch below, which legitimately does set the stage.
+ */
+const cancelBranch = AUTO.slice(
+  AUTO.indexOf("} else if (v === 'Canceled'"),
+  AUTO.indexOf("} else if (v === 'Completed')")
+);
+check('the Canceled branch exists and is its own block', cancelBranch.length > 0, true);
+check('cancelling does not set Current Stage', /R\.set\('Current Stage'/.test(cancelBranch), false);
+check('cancelling writes nothing to the row at all', /R\.set\(/.test(cancelBranch), false);
+check('...it only logs', /logAuto_\('INFO'/.test(cancelBranch), true);
+
 console.log('\n--- one matcher, so tag and delete cannot disagree ---');
 check('a shared findVisitEvents_ exists', /function findVisitEvents_\(cal, addr, visitDate\)/.test(WEB), true);
 check('deleteVisitEvents_ uses it', /function deleteVisitEvents_[\s\S]{0,400}?findVisitEvents_\(cal/.test(WEB), true);

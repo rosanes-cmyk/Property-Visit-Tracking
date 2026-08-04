@@ -941,6 +941,24 @@ function onEditInstallable(e) {
       case 'Current Stage':       onStageManual_(R); break;
     }
     R.flush();
+
+    /*
+     * A SHEET edit must move the calendar too, not only a dashboard edit.
+     *
+     * The client set a visit to Canceled and nothing happened — no tag on the calendar event, no Chat
+     * alert, nothing. The reason: syncVisitCalendar_ was only ever called from webAction, so cancelling
+     * from the dashboard worked and cancelling by typing in the sheet did nothing at all. Two ways to
+     * record the same fact, two different outcomes, and the sheet is the one people actually use.
+     *
+     * Visit Date and Visit Time are included even though they have no handler above: moving a visit in
+     * the sheet has to move the event, or the calendar quietly keeps the old date.
+     *
+     * After R.flush(), so the row on the sheet already holds the new value when syncVisitCalendar_
+     * re-reads it. typeof-guarded because Automation.gs is loaded without WebApp.gs in some setups.
+     */
+    if (header === 'Visit Status' || header === 'Current Stage' || header === 'Visit Date' || header === 'Visit Time') {
+      if (typeof syncVisitCalendar_ === 'function') syncVisitCalendar_(sh, row);
+    }
   } catch (err) {
     logAuto_('ERROR', 'onEdit', String(err));
   }
@@ -958,6 +976,21 @@ function onVisitStatus_(R) {
     enqueueTask_(visitor, R.get('Property ID'), R.get('Property Address'),
       'Scheduled-visit reminder — conduct visit & log outcome', R.get('Visit Date') || today_());
     logAuto_('INFO', R.get('Property ID'), 'Visit scheduled; reminder queued for ' + visitor + ' due ' + fmt_(R.get('Visit Date')));
+  } else if (v === 'Canceled' || v === 'Reschedule Needed') {
+    /*
+     * Cancelling records the fact and nothing more.
+     *
+     * Current Stage is deliberately NOT moved — realignStage_ leaves that for a person, because
+     * "the seller cancelled" and "we are done with this lead" are different decisions and only one of
+     * them is safe to make automatically. The lead therefore keeps appearing in the work queue, tagged
+     * CANCELED, until somebody rebooks it or closes it out. That is the intent, not an oversight.
+     *
+     * The calendar event and the Chat alert are handled by syncVisitCalendar_, which onEditInstallable
+     * now calls for this column. Before that, cancelling in the sheet did nothing at all.
+     */
+    logAuto_('INFO', R.get('Property ID'),
+      'Visit ' + v + ' — calendar event tagged and kept; stage left as "' + (R.get('Current Stage') || '(blank)') +
+      '" for a person to close out');
   } else if (v === 'Completed') {
     R.set('Current Stage', 'Visit Completed — Needs Review');
     R.setIfBlank('Assigned Owner', 'Jonathan');
