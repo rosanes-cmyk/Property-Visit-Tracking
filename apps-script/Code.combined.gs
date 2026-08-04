@@ -3346,14 +3346,14 @@ function attentionBucket_(rec, today) {
       var amount = rec['Approved Offer Amount'];
       var has = amount !== '' && amount !== null && amount !== undefined;
       return { key: b.key,
-        reason: has ? 'offer of ' + money_(amount) + ' prepared but not sent' : 'offer not priced yet' };
+        reason: has ? 'offer of ' + digestMoney_(amount) + ' prepared but not sent' : 'offer not priced yet' };
     }
 
     if (b.key === 'offerSent') {
       var sentOn = dateCell_(rec['Offer Sent Date']);
       var amt = rec['Approved Offer Amount'];
       var parts = [];
-      if (amt !== '' && amt !== null && amt !== undefined) parts.push(money_(amt));
+      if (amt !== '' && amt !== null && amt !== undefined) parts.push(digestMoney_(amt));
       parts.push(sentOn ? 'sent ' + fmt_(sentOn) : 'sent date not recorded');
       var quiet = Number(rec['Days Since Last Activity']);
       if (isFinite(quiet) && quiet > 0) parts.push('no contact for ' + quiet + ' day(s)');
@@ -3364,7 +3364,7 @@ function attentionBucket_(rec, today) {
       var counter = rec['Counteroffer Amount'];
       var said = String(rec['Last Contact Result'] || '').trim();
       var bits = [];
-      if (counter !== '' && counter !== null && counter !== undefined) bits.push('seller countered at ' + money_(counter));
+      if (counter !== '' && counter !== null && counter !== undefined) bits.push('seller countered at ' + digestMoney_(counter));
       if (said) bits.push(said.length > 90 ? said.slice(0, 87) + '…' : said);
       if (!bits.length) bits.push('undecided since the offer went out');
       return { key: b.key, reason: bits.join(' · ') };
@@ -3402,8 +3402,15 @@ function giftPending_(rec) {
   return '';
 }
 
-/** A currency cell as "$450,000". Non-numbers come back as they were written. */
-function money_(v) {
+/**
+ * A currency cell as "$450,000". Non-numbers come back as they were written.
+ *
+ * NOT called money_: there is already a money_ in this project with different behaviour — it returns
+ * '' for a zero amount, where this returns '$0'. Two functions of the same name in one Apps Script
+ * project silently resolve to whichever loads last, which made the offer-prep task text depend on file
+ * order. Distinct name, no collision, no order dependency.
+ */
+function digestMoney_(v) {
   var n = Number(v);
   if (!isFinite(n) || v === '' || v === null) return String(v == null ? '' : v);
   return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');

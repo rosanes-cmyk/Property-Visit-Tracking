@@ -31,9 +31,9 @@ const CHAT = read('apps-script/ChatNotify.gs');
 const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
 const source = slice('var ATTENTION_BUCKETS = [', '/**\n * Post the 3pm work queue');
 
-const { attentionBucket_, giftPending_, excludedFromDigest_, money_, ATTENTION_BUCKETS } = new Function(
+const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS } = new Function(
   'fmt_',
-  `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, money_, ATTENTION_BUCKETS };`
+  `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS };`
 )((d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }));
 
 const TODAY = new Date(2026, 7, 5);              // Aug 5 2026, local midnight
@@ -134,9 +134,9 @@ check('offer being prepared', bucket(prep), 'offerPending');
 check('unpriced says so', reason(prep), 'offer not priced yet');
 check('a priced but unsent offer shows the figure',
   reason({ ...prep, 'Approved Offer Amount': 450000 }), 'offer of $450,000 prepared but not sent');
-check('money is formatted with separators', money_(1250000), '$1,250,000');
-check('a zero offer is a real number', money_(0), '$0');
-check('text passes through untouched', money_('TBD'), 'TBD');
+check('money is formatted with separators', digestMoney_(1250000), '$1,250,000');
+check('a zero offer is a real number', digestMoney_(0), '$0');
+check('text passes through untouched', digestMoney_('TBD'), 'TBD');
 
 console.log('\n=== 4. Offer Sent ===');
 const sent = { ...BASE, 'Current Stage': 'Offer Sent', 'Visit Status': 'Completed',
@@ -298,6 +298,20 @@ check('it is marked as a copy, not a second implementation', /VERBATIM FROM apps
 check('it posts nothing to Chat', /chatPost_|UrlFetchApp/.test(PREVIEW), false);
 check('it writes nothing to the sheet', /values\.update|values\.append|batchUpdate/.test(PREVIEW), false);
 check('it counts gifts apart from leads too', /const gifts = found\.giftFollowUp\.length/.test(PREVIEW), true);
+
+console.log('\n=== The file people paste has no duplicate function names ===');
+/*
+ * Apps Script puts every file in one global scope, so two functions of the same name resolve to
+ * whichever loads last — silently. This digest defined its own money_ alongside an existing one with
+ * different behaviour (that one returns '' for zero, this returns '$0'), which made the offer-prep task
+ * text depend on file order. Renamed to digestMoney_; this check stops the next one.
+ */
+const COMBINED = read('apps-script/Code.combined.gs');
+const fnNames = COMBINED.match(/^function [A-Za-z0-9_]+\s*\(/gm).map((m) => m.slice(9).replace(/\s*\($/, ''));
+const dupes = [...new Set(fnNames.filter((n, i) => fnNames.indexOf(n) !== i))];
+check('no function is defined twice in Code.combined.gs', dupes, []);
+check('the digest uses its own money formatter', /function digestMoney_\(v\)/.test(COMBINED), true);
+check('...and does not redefine the existing money_', (COMBINED.match(/^function money_/gm) || []).length, 1);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
