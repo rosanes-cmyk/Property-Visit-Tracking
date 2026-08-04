@@ -286,6 +286,7 @@ console.log('\n--- a SHEET edit syncs the calendar too, not just a dashboard edi
  * different outcomes, and the sheet is the one people actually use.
  */
 const AUTO = read('apps-script/Automation.gs');
+const DASH_SRC = read('apps-script/Dashboard.html');
 check('the sheet-edit handler calls the calendar sync',
   /if \(typeof syncVisitCalendar_ === 'function'\) syncVisitCalendar_\(sh, row\);/.test(AUTO), true);
 check('...on Visit Status', /header === 'Visit Status' \|\|/.test(AUTO), true);
@@ -309,6 +310,24 @@ check('the Canceled branch exists and is its own block', cancelBranch.length > 0
 check('cancelling does not set Current Stage', /R\.set\('Current Stage'/.test(cancelBranch), false);
 check('cancelling writes nothing to the row at all', /R\.set\(/.test(cancelBranch), false);
 check('...it only logs', /logAuto_\('INFO'/.test(cancelBranch), true);
+
+console.log('\n--- the same change through any door gives the same outcome ---');
+/*
+ * Three ways to set Visit Status: type it in the sheet, edit the full record on the dashboard, or press
+ * an action button. They used to behave differently — the form only wrote the cells, so the stage
+ * cascade and the log line were skipped. All three now run onVisitStatus_ and sync the calendar.
+ */
+check('the full-record form runs the visit-status automation',
+  /if \(params\['Visit Status'\] !== undefined\) runHandler_\(onVisitStatus_, sh, rowNum\);/.test(WEB), true);
+check('...and the stage automation when the stage is edited',
+  /else if \(params\['Current Stage'\] !== undefined\) runHandler_\(onStageManual_, sh, rowNum\);/.test(WEB), true);
+check('an edit touching neither still syncs the calendar',
+  /else syncVisitCalendar_\(sh, rowNum\);/.test(WEB), true);
+check('runHandler_ syncs the calendar itself, so it is not done twice',
+  /function runHandler_[\s\S]{0,200}?syncVisitCalendar_\(sh, rowNum\);/.test(WEB), true);
+check('Visit Status is editable on the dashboard, with Canceled in the list',
+  /'Visit Status':\['','Scheduled','Completed','Canceled','Reschedule Needed'\]/.test(DASH_SRC), true);
+check('...and is not in the read-only list', /RO_FIELDS=\[[^\]]*'Visit Status'/.test(DASH_SRC), false);
 
 console.log('\n--- one matcher, so tag and delete cannot disagree ---');
 check('a shared findVisitEvents_ exists', /function findVisitEvents_\(cal, addr, visitDate\)/.test(WEB), true);

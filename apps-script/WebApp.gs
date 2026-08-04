@@ -309,7 +309,19 @@ function webAction(action, id, params) {
           else if (h === 'Approved Offer Amount' || h === 'Counteroffer Amount' || h === 'Asking Price' || h === 'Price Expectation') R.set(h, val === '' || val == null ? '' : Number(val));
           else R.set(h, val == null ? '' : val);
         });
-        stamp_(R); R.flush(); syncVisitCalendar_(sh, rowNum); break;
+        stamp_(R); R.flush();
+        /*
+         * Run the SAME automation a sheet edit would.
+         *
+         * This only wrote the cells and synced the calendar, so editing Visit Status through the
+         * full-record form gave a different result from typing it in the sheet or from pressing the
+         * "Mark visit completed" button — the stage cascade and the log line were skipped. One field,
+         * three doors, three outcomes. runHandler_ syncs the calendar itself, so it is not called twice.
+         */
+        if (params['Visit Status'] !== undefined) runHandler_(onVisitStatus_, sh, rowNum);
+        else if (params['Current Stage'] !== undefined) runHandler_(onStageManual_, sh, rowNum);
+        else syncVisitCalendar_(sh, rowNum);
+        break;
       }
       case 'deleteRecord':
         softDelete_(sh, rowNum); break;           // move to Trash sheet (restorable), then clear the row
