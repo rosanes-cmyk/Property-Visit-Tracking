@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-04-quiet';
+const BUILD = '2026-08-04-note-retry';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -438,7 +438,31 @@ async function main() {
         console.log('    recorded');
         state.groups[plan.eventId].noteAttemptedAt = new Date().toISOString();
         await writeState(state);
-        const noteWent = await maybePostNote(page, selectors, plan);
+        let noteWent = await maybePostNote(page, selectors, plan);
+        /*
+         * Creating a group does not reliably leave its conversation on screen.
+         *
+         * 340 Vallejo Dr came out perfectly — five members, right subject — and then: "no conversation is
+         * open (nothing matched #main header) — refusing to type anywhere". Correct refusal; the header is
+         * what proves the briefing is going to the group and not to a seller's 1:1 chat. But the group was
+         * right there, so the answer is to go and open it by name — the same route --repost-note takes,
+         * which posts it in one go — rather than leaving a noteless group for someone to notice.
+         *
+         * ONE extra attempt, inside the same run, and only when a missing conversation is what could have
+         * gone wrong: WHATSAPP_POST_NOTE=false and the seller hard-stop are decisions, not failures, and
+         * retrying those would just print the same refusal twice. postGroupNote re-checks for the marker
+         * after opening, so if the first attempt did land this one reads it and reports it as present
+         * instead of sending a second copy.
+         */
+        if (!noteWent && config.whatsappPostNote && !plan.sellerIncluded) {
+          const reopened = await openGroupByName(page, selectors, plan.name);
+          if (!reopened.opened) {
+            console.log(`    could not reopen it to post the note: ${reopened.reason}`);
+          } else {
+            console.log('    reopened the group by name — one more try at the note');
+            noteWent = await maybePostNote(page, selectors, plan);
+          }
+        }
         state.groups[plan.eventId].notePosted = noteWent;
         await writeState(state);
         if (!noteWent) {
