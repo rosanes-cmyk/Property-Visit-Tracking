@@ -71,16 +71,25 @@ export function noteAlreadyPresent(conversationText) {
 }
 
 /**
+ * ONE attempt at closing the REI task, then the visit is finished for good.
+ *
+ * The client's rule, in their words: task booked in REI becomes a calendar event, the calendar event becomes a
+ * WhatsApp group, "and that's the finished, no loop". So a visit is visited once: group created, note posted,
+ * REI task closed if it can be — and then never looked at again, whatever the outcome.
+ *
+ * It was 3, which meant a task the click could not confirm reopened a REI browser on the next run and the one
+ * after. Bounded, but still a loop, and still three browser windows for one visit. If the single attempt does
+ * not land, the run says so and the task stays open in REI — where a person will see it.
+ */
+export const MAX_TASK_ATTEMPTS = 1;
+
+/**
  * Which calendar event IDs need nothing further.
  *
- * `groups` is the state file's map of eventId -> { name, notePosted?, ... }. With note posting on, a
- * group whose note never went out is unfinished and gets picked up again on the next run: that is
- * what makes the noteless group already sitting in WhatsApp self-heal instead of needing to be
- * deleted and rebuilt by hand.
+ * `groups` is the state file's map of eventId -> { name, notePosted?, ... }. A visit is done once its group
+ * exists, its note is posted, and the REI task has had its one attempt — after which it is never looked at
+ * again. That is the whole chain: booking, calendar event, group, note, task closed. Finished.
  */
-/** Give up on closing a REI task after this many tries, rather than reopening REI every 2 minutes forever. */
-export const MAX_TASK_ATTEMPTS = 3;
-
 export function eventsFinished(groups = {}, { requireNote = true, requireTaskClosed = false } = {}) {
   const done = new Set();
   for (const [eventId, entry] of Object.entries(groups || {})) {
@@ -92,8 +101,9 @@ export function eventsFinished(groups = {}, { requireNote = true, requireTaskClo
      * the event was skipped before the task-closing step ever saw it — and the task could never be
      * closed on a later run. The three outcomes are separate and a visit is done only when all three are.
      *
-     * Bounded, though: after MAX_TASK_ATTEMPTS it stops, because reopening a REI browser every two
-     * minutes forever over a task that cannot be found is worse than leaving the task open and saying so.
+     * ONE attempt, though — see MAX_TASK_ATTEMPTS. After it, the visit is finished whatever happened, because
+     * reopening a REI browser over a task that could not be confirmed is a loop, and the client's rule is that
+     * there is no loop.
      */
     if (requireTaskClosed && !entry.reiTaskClosed && (entry.reiTaskAttempts || 0) < MAX_TASK_ATTEMPTS) {
       continue;

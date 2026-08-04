@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-04-notest';
+const BUILD = '2026-08-04-once';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -591,8 +591,8 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
         ? `    task marked complete (${result.clicked})`
         : `    clicked ${result.clicked || 'nothing'} but could not confirm — check REI by hand. Row now: ${result.rowText}`);
       if (!result.confirmed && entry.reiTaskAttempts >= MAX_TASK_ATTEMPTS) {
-        console.log(`    ${entry.reiTaskAttempts} attempts — giving up on this task. Close it in REI by hand.`);
-        console.log('    Nothing else about this visit is affected; the group and the note are done.');
+        console.log('    not retrying — close this task in REI by hand.');
+        console.log('    The visit is otherwise finished: the group exists and the note is posted.');
       }
       await notifyChat(
         result.confirmed

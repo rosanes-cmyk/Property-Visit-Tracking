@@ -132,10 +132,15 @@ check('a closed task finishes it',
 
 console.log('\n--- but it gives up rather than reopening REI forever ---');
 // A task that cannot be found would otherwise launch a browser every two minutes for the rest of time.
-check(`under ${MAX_TASK_ATTEMPTS} attempts it tries again`,
-  eventsFinished({ e: { ...noted, reiTaskAttempts: MAX_TASK_ATTEMPTS - 1 } }, { requireTaskClosed: true }).has('e'), false);
-check(`at ${MAX_TASK_ATTEMPTS} attempts it stops`,
-  eventsFinished({ e: { ...noted, reiTaskAttempts: MAX_TASK_ATTEMPTS } }, { requireTaskClosed: true }).has('e'), true);
+/*
+ * ONE attempt, then finished for good — the client's rule: booking becomes a calendar event, the event becomes
+ * a group, "and that's the finished, no loop". Three attempts meant three REI browser windows for one visit.
+ */
+check('one attempt is the limit', MAX_TASK_ATTEMPTS, 1);
+check('before any attempt it is unfinished',
+  eventsFinished({ e: { ...noted, reiTaskAttempts: 0 } }, { requireTaskClosed: true }).has('e'), false);
+check('after one attempt it is finished, confirmed or not',
+  eventsFinished({ e: { ...noted, reiTaskAttempts: 1 } }, { requireTaskClosed: true }).has('e'), true);
 check('the missing note still comes first',
   eventsFinished({ e: { name: 'A', reiTaskClosed: true } }, { requireNote: true, requireTaskClosed: true }).has('e'), false);
 check('requireTaskClosed defaults to false, so nothing changes unless asked',
