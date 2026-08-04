@@ -39,7 +39,7 @@ import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, loc
  * looked for. The banner ends that: the build and the actual file path are the first thing printed, so
  * "did my update land?" is answered before anything else happens.
  */
-const BUILD = '2026-08-04-chat';
+const BUILD = '2026-08-04-quiet';
 
 const APPLY = process.argv.includes('--yes');
 
@@ -259,6 +259,40 @@ async function main() {
     if (plan.sellerIncluded) console.log('     NOTE: the seller is in this group and can read everything posted in it.');
   }
 
+  /*
+   * Do not open WhatsApp more often than the configured gap.
+   *
+   * The timer fires every 2 minutes. Without this, a busy morning is forty WhatsApp Web sessions an hour from
+   * one machine — which is the shape of thing that gets an account banned, and one already was. The gap is
+   * recorded in the state file, so it holds across runs rather than only within one.
+   */
+  const lastOpened = state.lastOpenedAt ? Date.parse(state.lastOpenedAt) : 0;
+  const minutesSince = lastOpened ? (Date.now() - lastOpened) / 60000 : Infinity;
+  if (minutesSince < config.whatsappMinMinutesBetween) {
+    const wait = Math.ceil(config.whatsappMinMinutesBetween - minutesSince);
+    console.log(`\nWhatsApp was opened ${Math.floor(minutesSince)} min ago. Waiting ${wait} more min before`);
+    console.log(`opening it again (WHATSAPP_MIN_MINUTES_BETWEEN=${config.whatsappMinMinutesBetween}).`);
+    console.log(`${create.length} visit(s) still to do — the next run will pick them up.`);
+    return;
+  }
+
+  /*
+   * And a daily cap. Bulk group creation is the behaviour most associated with bans, and a runaway loop would
+   * be indistinguishable from it from the outside.
+   */
+  const today = localDay(new Date(), config.calendarTimezone);
+  const createdToday = Object.values(state.groups || {})
+    .filter((g) => g && g.at && localDay(new Date(g.at), config.calendarTimezone) === today).length;
+  if (createdToday >= config.whatsappMaxGroupsPerDay) {
+    console.log(`\n${createdToday} group(s) already created today — at the daily cap ` +
+      `(WHATSAPP_MAX_GROUPS_PER_DAY=${config.whatsappMaxGroupsPerDay}). Stopping.`);
+    console.log('Raise the cap in .env if this is a genuinely busy day, or create the rest by hand.');
+    return;
+  }
+
+  state.lastOpenedAt = new Date().toISOString();
+  await writeState(state);
+
   const context = await launchWhatsApp({
     userDataDir: config.whatsappUserDataDir,
     headless: false,
@@ -340,7 +374,19 @@ async function main() {
      * dropped from the cache below so the next run warms it again.
      */
     state.warmed = state.warmed || {};
-    const cold = REWARM ? everyNumber : everyNumber.filter((n) => !state.warmed[n]);
+    /*
+     * WHATSAPP_SKIP_WARMUP=true skips this entirely, and it is the right setting once the team numbers are SAVED
+     * AS CONTACTS on the phone: the picker finds saved contacts without help, and the warm-up is the noisiest
+     * thing this does — a full WhatsApp Web reload per number.
+     */
+    const cold = config.whatsappSkipWarmup
+      ? []
+      : (REWARM ? everyNumber : everyNumber.filter((n) => !state.warmed[n]));
+    if (config.whatsappSkipWarmup) {
+      console.log('\nWHATSAPP_SKIP_WARMUP=true — not resolving numbers through wa.me.');
+      console.log('This relies on the team numbers being saved as contacts on the phone. If the picker cannot');
+      console.log('find someone, the group comes out short and the run says which number it was.');
+    }
     const alreadyWarm = everyNumber.length - cold.length;
 
     if (alreadyWarm) {

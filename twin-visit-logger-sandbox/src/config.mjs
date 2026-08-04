@@ -81,7 +81,24 @@ const raw = {
    * disabled scheduled task is not enough of an off switch — someone runs the command by hand and the account
    * is at risk again. This is the switch, and it defaults to ON only because existing setups rely on it.
    */
-  whatsappEnabled: bool(process.env.WHATSAPP_ENABLED, true)
+  whatsappEnabled: bool(process.env.WHATSAPP_ENABLED, true),
+
+  /*
+   * Three limits that exist only to reduce what WhatsApp sees. The client has chosen to run this on a number
+   * after a previous one was banned, so the job now is to make the footprint as small as the work allows.
+   *
+   * skipWarmup: the wa.me warm-up navigates to WhatsApp Web once PER NUMBER and reloads the whole app each
+   *   time. It is only needed because the group picker cannot find numbers that are neither saved contacts nor
+   *   existing chats. SAVE THE TEAM NUMBERS AS CONTACTS on the phone and none of it is needed — that removes
+   *   the single noisiest thing this does.
+   * minMinutesBetween: the timer fires every 2 minutes. This is the real gap between sessions that open a
+   *   browser, so a two-minute schedule cannot become forty WhatsApp sessions an hour.
+   * maxGroupsPerDay: a cap. Bulk group creation is the behaviour most associated with bans, and a runaway loop
+   *   would otherwise be indistinguishable from one.
+   */
+  whatsappSkipWarmup: bool(process.env.WHATSAPP_SKIP_WARMUP, false),
+  whatsappMinMinutesBetween: int(process.env.WHATSAPP_MIN_MINUTES_BETWEEN, 20),
+  whatsappMaxGroupsPerDay: int(process.env.WHATSAPP_MAX_GROUPS_PER_DAY, 5)
 };
 
 const schema = z.object({
@@ -123,7 +140,10 @@ const schema = z.object({
   // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
   // to `raw` alone silently arrives as undefined.
   chatWebhookUrl: z.string(),
-  whatsappEnabled: z.boolean()
+  whatsappEnabled: z.boolean(),
+  whatsappSkipWarmup: z.boolean(),
+  whatsappMinMinutesBetween: z.number().int().nonnegative().max(1440),
+  whatsappMaxGroupsPerDay: z.number().int().positive().max(50)
 });
 
 export const config = schema.parse({
