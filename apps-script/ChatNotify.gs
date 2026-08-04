@@ -432,6 +432,16 @@ function removeChatNewBookingTrigger() {
  *     separate errand from moving the deal, and gifts are recommended at every stage, so a
  *     one-bucket-only rule would hide every gift behind its stage. See giftPending_.
  */
+/*
+ * How many leads each section lists before "…and N more".
+ *
+ * Five, at Cherry's instruction: "it only should have 5 person or lead should be included". It was
+ * eight, which on a phone pushed the later sections off the first screen entirely — and the point of
+ * the message is that she can see what to start on without scrolling. The count in the heading is
+ * always the true total, so nothing is hidden by shortening the list; the section says so itself.
+ */
+var DIGEST_LINES_PER_SECTION = 5;
+
 var ATTENTION_BUCKETS = [
   { key: 'upcomingVisit', icon: '📅', title: 'Upcoming Visit', stage: 'Visit Scheduled',
     action: 'Confirm the visit is going ahead. Afterwards mark it Completed or Canceled.' },
@@ -719,8 +729,10 @@ function sendAttentionDigestToChat() {
     widgets.push({ textParagraph: { text:
       b.icon + ' <b>' + (i + 1) + '. ' + b.title + ' (' + arr.length + ')</b><br>' +
       '<i>' + b.action + '</i><br>' +
-      arr.slice(0, 8).join('<br>') +
-      (arr.length > 8 ? ('<br>…and ' + (arr.length - 8) + ' more') : '')
+      arr.slice(0, DIGEST_LINES_PER_SECTION).join('<br>') +
+      (arr.length > DIGEST_LINES_PER_SECTION
+        ? ('<br>…and ' + (arr.length - DIGEST_LINES_PER_SECTION) + ' more')
+        : '')
     } });
     widgets.push({ divider: {} });
   });

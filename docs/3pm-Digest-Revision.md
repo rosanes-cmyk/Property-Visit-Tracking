@@ -57,7 +57,8 @@ Reasons state the actual condition, never a field name:
 | Still Negotiating | `seller countered at $495,000 · Wants 495k, thinking it over with her brother` |
 | Gift Follow-Up | `gift approved by Cherry on Aug 2, 2026 — not sent yet` |
 
-Eight leads per section, then `…and N more`, so it stays readable on a phone. **Overdue visits sort to
+**Five** leads per section, then `…and N more`, so the whole message fits a phone screen. The
+count in each heading is the true total, so shortening the list hides nothing. **Overdue visits sort to
 the top of section 1** — that is the one line meaning something may already have gone wrong with a
 seller, rather than merely being unfinished.
 
@@ -132,7 +133,7 @@ Nothing below is decided. Cherry's five stages are built exactly as she named th
 | 1 | **Verbal Agreement, Contract Sent and Long-Term Nurture appear nowhere.** Her five do not include them. | Add a section for Verbal Agreement + Contract Sent. A verbal agreement with no contract out is a deal being lost to silence. |
 | 2 | **Overdue visits have no section of their own** — they are flagged `OVERDUE` inside Upcoming Visit and sorted to the top. | Keep as is. It is visible without adding a section she did not ask for. |
 | 3 | **Gift Follow-Up lists a lead that also appears under its stage.** Breaks the earlier "one lead, one section" rule, deliberately. | Keep. The alternative hides every gift. |
-| 4 | **Legacy imported records.** ~209 rows with no owner and old dates. Most sit at `Visit Completed — Needs Review`, so they will fill section 2. | Exclude pre-cutover records from the notification, keep them in the sheet, clean up separately. Cherry supplies the cutover date. |
+| 4 | ~~Legacy imported records~~ **DONE.** The first live run posted 103 leads, nearly all imported history. | Rows with `Source = 'Import'` are now excluded — the exact signature `importFromOldWorkbook` stamps, so no cutover date was invented. They stay in the sheet and on the dashboard. `CFG.DIGEST_INCLUDE_IMPORTED` puts them back. |
 
 Decision 4 is the one that determines whether the 10-second goal is met in practice. Everything else
 can be right and it still fails on volume.

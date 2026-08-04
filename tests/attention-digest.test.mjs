@@ -368,5 +368,22 @@ const order = [
 check('overdue and cancelled first, then soonest',
   order, ['OVERDUE — vi', 'CANCELED — w', 'visit Aug 6,', 'visit Aug 20']);
 
+console.log('\n=== Five leads per section, not eight ===');
+/*
+ * Cherry: "it only should have 5 person or lead should be included". Eight pushed the later sections
+ * off a phone screen entirely, which defeats the message. The heading count stays the TRUE total, so
+ * shortening the list hides nothing — the section says "…and N more" itself.
+ */
+check('the cap is declared once, as a constant', /var DIGEST_LINES_PER_SECTION = 5;/.test(CHAT), true);
+check('the list is sliced to it', /arr\.slice\(0, DIGEST_LINES_PER_SECTION\)/.test(post), true);
+check('the overflow line counts from the same constant',
+  /arr\.length - DIGEST_LINES_PER_SECTION\) \+ ' more'/.test(post), true);
+check('no bare 8 is left behind in the digest', /slice\(0, 8\)|length > 8/.test(post), false);
+// The heading must show the real total, or a capped section would under-report the work.
+check('the heading counts every lead, not just the listed ones',
+  /\(' \+ arr\.length \+ '\)/.test(post), true);
+check('the preview uses the same cap',
+  /arr\.slice\(0, DIGEST_LINES_PER_SECTION\)/.test(read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs')), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

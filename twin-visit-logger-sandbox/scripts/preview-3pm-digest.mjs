@@ -26,6 +26,16 @@ const fmt_ = (d) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', m
 const today_ = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
 
 /* ====== VERBATIM FROM apps-script/ChatNotify.gs — do not edit here ====== */
+/*
+ * How many leads each section lists before "…and N more".
+ *
+ * Five, at Cherry's instruction: "it only should have 5 person or lead should be included". It was
+ * eight, which on a phone pushed the later sections off the first screen entirely — and the point of
+ * the message is that she can see what to start on without scrolling. The count in the heading is
+ * always the true total, so nothing is hidden by shortening the list; the section says so itself.
+ */
+var DIGEST_LINES_PER_SECTION = 5;
+
 var ATTENTION_BUCKETS = [
   { key: 'upcomingVisit', icon: '📅', title: 'Upcoming Visit', stage: 'Visit Scheduled',
     action: 'Confirm the visit is going ahead. Afterwards mark it Completed or Canceled.' },
@@ -295,11 +305,11 @@ if (!total) {
     if (!arr.length) return;
     say(`  ${b.icon} ${i + 1}. ${b.title.toUpperCase()} (${arr.length})`);
     say(`     ${b.action}`);
-    arr.slice(0, 8).forEach((x) => {
+    arr.slice(0, DIGEST_LINES_PER_SECTION).forEach((x) => {
       say(`     ${x.seller} · ${x.address}`);
       say(`     Owner: ${x.owner} · ${x.reason}`);
     });
-    if (arr.length > 8) say(`     …and ${arr.length - 8} more`);
+    if (arr.length > DIGEST_LINES_PER_SECTION) say(`     …and ${arr.length - DIGEST_LINES_PER_SECTION} more`);
     say('');
   });
   say('  [ Open dashboard to update ]');
