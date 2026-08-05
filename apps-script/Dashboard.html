@@ -61,6 +61,11 @@ select,input,textarea{padding:8px 10px;border:1px solid var(--border-2);border-r
 .card.crit:hover{box-shadow:var(--sh-lift),0 0 20px rgba(255,77,99,.18)}
 .card .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .card .seller{font-weight:700;font-size:15px;letter-spacing:-.1px} .card .addr{font-size:12px;color:var(--muted);margin-top:2px}
+/* The visit flag: CANCELED / RESCHEDULE / OVERDUE / NO DATE. Deliberately louder than the stage
+   chip beside it — the stage still says "Visit Scheduled" because cancelling does not move it, so this
+   is the only thing on the card saying the visit is not going ahead. */
+.chipflag{font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;margin-left:6px;
+  background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.45);color:#fca5a5;height:fit-content;letter-spacing:.03em}
 .chipstage{font-size:11px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;background:var(--surface-2);border:1px solid var(--border-2);color:var(--muted);height:fit-content}
 .meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:11px;font-size:12.5px;color:var(--muted);align-items:center}
 .meta b{color:var(--ink);font-weight:600}
@@ -345,7 +350,7 @@ function actionsFor(r){var a=[];
   a.push(['setNextAction','Set next action',0]); return a;}
 function cardHTML(r){
   var over=r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d overdue</span>':'';
-  var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.rowNum)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div>';
+  var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.rowNum)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span>'+(visitFlag(r)?'<span class="chipflag">'+esc(visitFlag(r))+'</span>':'')+'</div>';
   h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
   if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
   if(r.sla)h+='<span class="badge crit">⚠ '+esc(r.sla)+'</span>'; if(r.conflict)h+='<span class="badge crit">🗓 Double-booked</span>'; if(r.gap>0)h+='<span class="badge crit">⚖ Gap '+money(r.gap)+'</span>'; if(r.blocker)h+='<span class="badge warn">⛔ '+esc(r.blocker)+'</span>'; if(r.stalled)h+='<span class="badge warn">Stalled</span>'; if(r.stage==='Contract Signed')h+='<span class="badge good">Signed</span>';
@@ -369,12 +374,35 @@ function cardHTML(r){
  *
  * Every other section keeps most-overdue-first, which is right for work that is late.
  */
+/*
+ * What needs deciding about this visit, or '' when nothing does.
+ *
+ * The dashboard and the 3pm notification were disagreeing about the same record: the notification said
+ * "CANCELED — rebook it or close the lead out" while the card still read "Visit Scheduled" and sat in
+ * Upcoming Visits with no sign anything had happened. Cancelling deliberately does NOT move Current
+ * Stage — that decision belongs to a person — so the card has to say so instead of moving.
+ *
+ * Same wording and same precedence as attentionBucket_ in ChatNotify.gs, so the two views cannot tell
+ * a different story about one lead.
+ */
+function visitFlag(r){
+  var st=String(r.visitStatus||'').trim();
+  if(st==='Canceled') return 'CANCELED';
+  if(st==='Reschedule Needed') return 'RESCHEDULE';
+  if(!r.visitDate) return 'NO DATE';
+  if(st==='Scheduled'&&r.visitDate<todayISO()) return 'OVERDUE';
+  return '';
+}
 function rowsFor(si,live){
   var s=SECTIONS[si];var rows=live.filter(s[1]).filter(keep);
   var byDate=(s[0].indexOf('Upcoming Visits')>=0);
   var today=todayISO();
   if(byDate){
     rows.sort(function(a,b){
+      // Cancelled, reschedule-needed, overdue and undated all need a decision, so they come first —
+      // exactly as they do in the 3pm message.
+      var fa=visitFlag(a)?0:1, fb=visitFlag(b)?0:1;
+      if(fa!==fb) return fa-fb;
       var x=a.visitDate||'', y=b.visitDate||'';
       // No date at all sorts last: it cannot be placed on a timeline.
       if(!x&&!y) return 0;

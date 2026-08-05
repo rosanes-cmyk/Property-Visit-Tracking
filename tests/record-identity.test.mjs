@@ -98,5 +98,37 @@ check('rowNum is not undefined — that is what broke the button',
 check('two records keep distinct identities',
   [hydrate({ ...record, rowNum: 380 }).rowNum, hydrate({ ...record, rowNum: 381 }).rowNum], [380, 381]);
 
+console.log('\n=== The card and the 3pm message tell the same story ===');
+/*
+ * Sara Davenport was cancelled. The notification said "CANCELED — rebook it or close the lead out"; the
+ * dashboard card said "Visit Scheduled" and sat in Upcoming Visits with no sign anything had happened.
+ * Cancelling deliberately does not move Current Stage — that decision belongs to a person — so the card
+ * has to SAY so rather than move.
+ */
+const flagSrc = DASH.slice(DASH.indexOf('function visitFlag(r){'), DASH.indexOf('function rowsFor(si,live){'));
+const visitFlag = new Function('todayISO', `${flagSrc}\nreturn visitFlag;`)(() => '2026-08-05');
+
+check('a cancelled visit is flagged', visitFlag({ visitStatus: 'Canceled', visitDate: '2026-08-12' }), 'CANCELED');
+check('reschedule needed has its own flag',
+  visitFlag({ visitStatus: 'Reschedule Needed', visitDate: '2026-08-12' }), 'RESCHEDULE');
+check('a passed visit still marked Scheduled is OVERDUE',
+  visitFlag({ visitStatus: 'Scheduled', visitDate: '2026-08-01' }), 'OVERDUE');
+check('no visit date is flagged too', visitFlag({ visitStatus: 'Scheduled', visitDate: '' }), 'NO DATE');
+check("today's visit is not overdue", visitFlag({ visitStatus: 'Scheduled', visitDate: '2026-08-05' }), '');
+check('a future visit is clean', visitFlag({ visitStatus: 'Scheduled', visitDate: '2026-08-12' }), '');
+check('a completed visit is clean', visitFlag({ visitStatus: 'Completed', visitDate: '2026-08-01' }), '');
+// Cancelled beats overdue, the same precedence attentionBucket_ uses — a cancelled visit whose date has
+// passed must not read OVERDUE, which was the wording bug fixed on the notification side.
+check('cancelled outranks overdue',
+  visitFlag({ visitStatus: 'Canceled', visitDate: '2026-08-01' }), 'CANCELED');
+
+console.log('\n--- and it shows and sorts ---');
+check('the flag is rendered on the card', /<span class="chipflag">'\+esc\(visitFlag\(r\)\)/.test(DASH), true);
+check('it has its own style, louder than the stage chip', /\.chipflag\{/.test(DASH), true);
+check('flagged cards sort to the top of Upcoming Visits',
+  /var fa=visitFlag\(a\)\?0:1, fb=visitFlag\(b\)\?0:1;\s*\n\s*if\(fa!==fb\) return fa-fb;/.test(DASH), true);
+// The stage is still shown alongside, because it is still the truth about where the lead sits.
+check('the stage chip is still there', /<span class="chipstage">'\+esc\(r\.stage\)/.test(DASH), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
