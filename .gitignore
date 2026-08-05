@@ -2,3 +2,4 @@
 build/legacy-import.csv
 build/__pycache__/
 build/legacy-source-rows.json
+build/rei-links.json
