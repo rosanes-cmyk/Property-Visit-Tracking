@@ -207,10 +207,24 @@ export function calendarAffected(changes) {
   return changes.some((c) => c.field === 'Visit Date' || c.field === 'Visit Time' || c.field === 'Visit Status');
 }
 
-/** A one-line summary of a re-check, for the run log and the Chat message. */
-export function describeChanges(row, changes) {
+/**
+ * A one-line summary of a re-check, for the run log and the Chat message.
+ *
+ * `reiFields` is passed so "REI agrees with the sheet" can be told apart from "REI gave us nothing to
+ * compare". The first run said "no change in REI" for a lead whose visit was five days overdue, which
+ * reads like a clean bill of health — when it could equally have meant the page returned no appointment
+ * at all. Those two need different actions from a person, so they need different words.
+ */
+export function describeChanges(row, changes, reiFields = null) {
   const who = text(row['Seller Name']) || '(no name)';
   const where = text(row['Property Address']);
-  if (!changes.length) return `${who} · ${where} · no change in REI`;
-  return `${who} · ${where} · ` + changes.map((c) => `${c.field}: "${c.from || '(blank)'}" -> "${c.to}"`).join(' · ');
+  const head = `${who} · ${where} · `;
+  if (changes.length) {
+    return head + changes.map((c) => `${c.field}: "${c.from || '(blank)'}" -> "${c.to}"`).join(' · ');
+  }
+  if (reiFields && !Object.keys(reiFields).length) {
+    return head + 'REI returned NOTHING to compare — no appointment date and no contact fields. ' +
+      'The page may not have rendered, or the contact has no appointment in REI.';
+  }
+  return head + 'REI agrees with the sheet';
 }

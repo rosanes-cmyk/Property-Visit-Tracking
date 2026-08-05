@@ -15,6 +15,7 @@ import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
   recheckKey, parseSheetDate, reiFieldsFromScrape, diffFromRei, calendarAffected, describeChanges
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import fs from 'node:fs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -172,13 +173,41 @@ check('a corrected phone number does not', calendarAffected([{ field: 'Phone' }]
 check('no changes, no calendar work', calendarAffected([]), false);
 
 console.log('\n=== What the run reports ===');
-check('no change says so plainly',
-  describeChanges(JOSE, []), 'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · no change in REI');
+/*
+ * The first live run reported "no change in REI" for a visit five days overdue. That reads like a clean
+ * bill of health, when it could equally have meant the page returned nothing at all — and those two need
+ * different actions from a person. Agreement and silence must not share a sentence.
+ */
+check('agreement says so', describeChanges(JOSE, [], { 'Visit Date': '08/01/2026' }),
+  'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · REI agrees with the sheet');
+check('silence from REI says something different',
+  describeChanges(JOSE, [], {}).includes('REI returned NOTHING to compare'), true);
+check('...and suggests why', describeChanges(JOSE, [], {}).includes('may not have rendered'), true);
+check('with no reiFields given it stays neutral',
+  describeChanges(JOSE, []), 'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · REI agrees with the sheet');
 check('a change names both values',
   describeChanges(JOSE, [{ field: 'Visit Status', from: 'Scheduled', to: 'Canceled' }]),
   'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · Visit Status: "Scheduled" -> "Canceled"');
 check('a blank before is spelled out, not shown as nothing',
   describeChanges(JOSE, [{ field: 'Email', from: '', to: 'jose@example.com' }]).includes('"(blank)" -> "jose@example.com"'), true);
+
+console.log('\n=== --only ignores the schedule, never the eligibility rules ===');
+/*
+ * The first live run: `--only "Jose"` picked five rows, four of which had no REI link, and reported four
+ * failures the run could have predicted before opening a browser. It also matched "San Jose" in the
+ * address, which is how a search for one seller returned five.
+ */
+const RUNNER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
+check('seller names are tried first', /const bySeller = rows\.filter/.test(RUNNER), true);
+check('the address is only a fallback', /bySeller\.length\s*\?\s*bySeller/.test(RUNNER), true);
+check('it says which one matched', /matched \$\{matched\.length\} on seller name/.test(RUNNER), true);
+check('eligibility is still enforced', /const why = recheckSkipReason\(row\);/.test(RUNNER), true);
+check('...and it says what it dropped and why', /skipping \$\{row\['Seller Name'\]\} — \$\{why\}/.test(RUNNER), true);
+check('the coverage limit is stated, not buried in a tally',
+  /can ever be re-checked/.test(RUNNER), true);
+// The whole point: a row with no REI link must never reach the browser.
+check('a linkless row is ineligible, so --only cannot reach it',
+  recheckSkipReason({ ...JOSE, 'REI BlackBook Link': '' }), 'no REI link');
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

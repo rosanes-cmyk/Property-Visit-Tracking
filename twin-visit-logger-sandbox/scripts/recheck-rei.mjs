@@ -95,13 +95,43 @@ for (const row of rows) {
 for (const [why, n] of Object.entries(skipTally).sort((a, b) => b[1] - a[1])) {
   console.log(`  ${String(n).padStart(4)}  skipped — ${why}`);
 }
+/*
+ * Say plainly how little of the sheet this can ever see.
+ *
+ * The first run covered 4 rows out of 378 because 374 have no REI link — they are the imported history,
+ * and there is no page to open for them. That is not a fault in the re-check, but leaving it as one line
+ * in a tally invites the belief that the whole tracker is being kept accurate when a hundredth of it is.
+ */
+const eligibleCount = rows.length - Object.values(skipTally).reduce((a, b) => a + b, 0);
+console.log(`\n${eligibleCount} of ${rows.length} row(s) can ever be re-checked` +
+  (skipTally['no REI link'] ? ` — ${skipTally['no REI link']} have no REI link, so there is no page to open.` : '.'));
 
 const state = await readState();
 let candidates = pickRecheckCandidates(rows, state, { now: new Date(), limit: LIMIT });
 if (ONLY) {
-  candidates = rows.filter((r) =>
-    `${r['Seller Name']} ${r['Property Address']}`.toLowerCase().includes(ONLY)).slice(0, LIMIT);
-  console.log(`\n--only "${ONLY}" → ${candidates.length} row(s), ignoring the schedule`);
+  /*
+   * --only ignores the SCHEDULE, never the eligibility rules.
+   *
+   * It used to ignore both, so `--only "Jose"` picked four rows with no REI link and then reported four
+   * failures that were entirely predictable — the run knew there was nothing to open before it opened a
+   * browser. It also matched "San Jose" in the address, which is how a search for one seller returned
+   * five. Seller names are tried first now, and the address only if no seller matched.
+   */
+  const bySeller = rows.filter((r) => String(r['Seller Name'] || '').toLowerCase().includes(ONLY));
+  const matched = bySeller.length
+    ? bySeller
+    : rows.filter((r) => String(r['Property Address'] || '').toLowerCase().includes(ONLY));
+  if (bySeller.length) console.log(`\n--only "${ONLY}" → matched ${matched.length} on seller name`);
+  else console.log(`\n--only "${ONLY}" → no seller matched; matched ${matched.length} on address`);
+
+  const eligible = [];
+  for (const row of matched) {
+    const why = recheckSkipReason(row);
+    if (why) console.log(`    skipping ${row['Seller Name']} — ${why}`);
+    else eligible.push(row);
+  }
+  candidates = eligible.slice(0, LIMIT);
+  console.log(`--only → ${candidates.length} row(s) to check, ignoring the schedule`);
 }
 
 if (!candidates.length) {
@@ -131,7 +161,7 @@ try {
 
     const reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
     const changes = diffFromRei(row, reiFields);
-    console.log(`    ${describeChanges(row, changes)}`);
+    console.log(`    ${describeChanges(row, changes, reiFields)}`);
 
     const key = recheckKey(row);
     state[key] = { ...(state[key] || {}), lastCheckedAt: new Date().toISOString() };
