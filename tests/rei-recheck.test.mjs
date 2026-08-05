@@ -32,8 +32,12 @@ const NOW = new Date('2026-08-05T17:00:00-07:00');   // Aug 5 2026, 5pm Pacific
 const JOSE = {
   'Seller Name': 'Jose Anguiano',
   'Property Address': '2145 Capitol Ave, East Palo Alto, CA, 94303',
-  'REI BlackBook Link': 'https://my.reiblackbook.com/contacts/20473369',
-  'REI Record ID': '20473369',
+  // A placeholder id on purpose. This fixture previously carried 20473369 — the SAMPLE contact used in
+  // this repo's docs and helper scripts — which read like Jose's real link and led to the wrong contact
+  // being diagnosed and a cancellation being attributed to the wrong seller. Jose's real link lives in
+  // the sheet, not here, and nothing in this suite needs it.
+  'REI BlackBook Link': 'https://my.reiblackbook.com/contacts/EXAMPLE-NOT-A-REAL-CONTACT',
+  'REI Record ID': 'EXAMPLE-NOT-A-REAL-CONTACT',
   'Current Stage': 'Visit Scheduled',
   'Visit Status': 'Scheduled',
   'Visit Date': '08/01/2026',
@@ -104,9 +108,10 @@ check('an accurate sheet produces none',
 const mixed = [...many, JOSE];
 check('the passed-but-scheduled lead is checked first',
   pickRecheckCandidates(mixed, {}, { now: NOW })[0]['Seller Name'], 'Jose Anguiano');
-check('the state key prefers the REI record id', recheckKey(JOSE), '20473369');
+check('the state key prefers the REI record id', recheckKey(JOSE), 'EXAMPLE-NOT-A-REAL-CONTACT');
 check('...and falls back to the link',
-  recheckKey({ ...JOSE, 'REI Record ID': '' }), 'https://my.reiblackbook.com/contacts/20473369');
+  recheckKey({ ...JOSE, 'REI Record ID': '' }),
+  'https://my.reiblackbook.com/contacts/EXAMPLE-NOT-A-REAL-CONTACT');
 
 console.log('\n=== Reading dates the way the sheet writes them ===');
 /** yyyy-mm-dd from a local Date, so a parse can be asserted without pulling in a date library. */
