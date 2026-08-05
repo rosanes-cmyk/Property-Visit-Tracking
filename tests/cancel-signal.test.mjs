@@ -18,7 +18,7 @@
  * The risk in widening a regex over free page text is firing on the wrong sentence, so most of what
  * follows tests what must NOT match.
  */
-import { cancellationEvidence, deadLeadTags, visitOutcomeFromNotes } from '../twin-visit-logger-sandbox/src/rei/cancel-signal.mjs';
+import { cancellationEvidence, deadLeadTags, visitOutcomeFromNotes, wantsReschedule } from '../twin-visit-logger-sandbox/src/rei/cancel-signal.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -214,6 +214,87 @@ for (const note of [
 check("Lili's real note still fires", visitOutcomeFromNotes(LILI).status, 'Canceled');
 check("Henry's real note still fires", visitOutcomeFromNotes(HENRY).status, 'Canceled');
 check('a plain completion still fires', visitOutcomeFromNotes('Visit completed, offer at 450k').status, 'Completed');
+
+console.log('\n=== "Cancelled but still wanted" is Reschedule Needed, not Canceled ===');
+/*
+ * Found on the FIRST live run of the audit, row 77, before anything was applied:
+ *
+ *   "Appointment booked Apr 2,2026 12PM · 4/2/2026 - Appointment canceled due to lead needs to work a
+ *    double shift. Pending reschedule"
+ *
+ * Reading that as Canceled throws away the only part that matters — Todd still wants the visit. The
+ * workbook has a distinct status for it and syncVisitCalendar_ tags the event [RESCHEDULE NEEDED] rather
+ * than [CANCELED], because the slot is dead and the lead is not.
+ */
+const TODD = 'and 7/25/2025 Appointment booked Apr 2,2026 12PM 4/2/2026 - Appointment canceled due to ' +
+  'lead needs to work a double shift. Pending reschedule';
+check("Todd is Reschedule Needed, not Canceled", visitOutcomeFromNotes(TODD).status, 'Reschedule Needed');
+check('...and labelled as such', visitOutcomeFromNotes(TODD).kind, 'reschedule');
+check("...spelled as the workbook's dropdown spells it",
+  ['Scheduled', 'Completed', 'Canceled', 'Reschedule Needed', 'Skipped — Offer Made']
+    .includes(visitOutcomeFromNotes(TODD).status), true);
+for (const note of [
+  'cancelled the visit, seller wants to rebook next week',
+  'appointment canceled - pending reschedule',
+  'visit cancelled, needs to be rescheduled',
+  'cancelled the walkthrough, rescheduling needed',
+  'cancelled the visit — she asked to reschedule for after the holiday'
+]) {
+  check(`"${note.slice(0, 46)}" -> Reschedule Needed`, visitOutcomeFromNotes(note).status, 'Reschedule Needed');
+}
+// A plain cancellation with no reschedule intent stays Canceled.
+check('a plain cancellation is still Canceled',
+  visitOutcomeFromNotes('cancelled the visit, not selling after all').status, 'Canceled');
+/*
+ * A bare "cancelled" with no visit named is deliberately ignored — my own test case got this wrong before
+ * the code did. Notes say "cancelled the mailer", "cancelled the contract", "cancelled her listing"; only a
+ * cancellation with the VISIT named is evidence about a visit.
+ */
+check('a bare "cancelled" with nothing named moves nothing',
+  visitOutcomeFromNotes('cancelled — she asked to reschedule for after the holiday').status, '');
+check('...and naming the visit is what makes it evidence',
+  visitOutcomeFromNotes('cancelled the visit — she asked to reschedule').status, 'Reschedule Needed');
+check('a cancelled MAILER is not a cancelled visit',
+  visitOutcomeFromNotes('cancelled the mailer campaign for this zip').status, '');
+check('a cancelled CONTRACT is not a cancelled visit',
+  visitOutcomeFromNotes('cancelled the contract, buyer walked').status, '');
+
+check('wantsReschedule is exported and testable on its own', wantsReschedule('pending reschedule'), true);
+check('...and says no when there is no intent', wantsReschedule('cancelled, not selling'), false);
+
+console.log('\n--- a visit ALREADY moved to a new time is live, and untouched ---');
+/*
+ * "Appointment cancelled, rescheduled to Aug 12 at 2pm" contains a cancellation and would have been marked
+ * Canceled — on a lead with a LIVE appointment, whose visit Juan still has to drive to. Past tense plus a
+ * preposition is the whole difference between "this needs rebooking" and "this was rebooked".
+ */
+for (const note of [
+  'Appointment cancelled, rescheduled to Aug 12 at 2pm',
+  'visit cancelled and rebooked for next Tuesday',
+  'cancelled the walkthrough, moved to Aug 20',
+  'appointment pushed to the 14th'
+]) {
+  check(`"${note.slice(0, 46)}" writes nothing`, visitOutcomeFromNotes(note).status, '');
+}
+check('...and is labelled so a report could say why',
+  visitOutcomeFromNotes('Appointment cancelled, rescheduled to Aug 12').kind, 'already-moved');
+// REI's appointment fields are the authority on the NEW date, and the re-check reads those.
+check('a plain "pending reschedule" is not mistaken for an already-moved visit',
+  visitOutcomeFromNotes('appointment canceled - pending reschedule').kind, 'reschedule');
+
+console.log('\n--- the hedge list is split by POSITION ---');
+/*
+ * One list checked on both sides was wrong in both directions. A MODAL after the phrase is talking about
+ * something else ("cancelled the visit, seller wants to rebook" — the cancellation is real); a QUALIFIER
+ * after it is talking about the phrase itself ("no show risk").
+ */
+check('a modal AFTER no longer suppresses a real cancellation',
+  visitOutcomeFromNotes('cancelled the visit, seller wants to rebook next week').status, 'Reschedule Needed');
+check('a modal BEFORE still does',
+  visitOutcomeFromNotes('seller wants to cancel the visit').status, '');
+check('a qualifier AFTER still suppresses', visitOutcomeFromNotes('no show risk on this one').status, '');
+check('a qualifier BEFORE still suppresses',
+  visitOutcomeFromNotes('worried about a cancelled walkthrough').status, '');
 
 console.log('\n=== What the audit will and will not write ===');
 const AUDIT = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/audit-notes.mjs', import.meta.url), 'utf8');

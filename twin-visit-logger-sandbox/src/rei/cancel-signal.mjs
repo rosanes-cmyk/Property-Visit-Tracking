@@ -67,17 +67,26 @@ const CANCEL_PHRASES = [
  * "wants to" and "risk of" stay as phrases rather than bare words — a note reading "seller wants 495k" is
  * not a hedge, and neither is "high risk lead" three sentences away.
  */
-const HEDGE = new RegExp('\\b(?:may|might|could|would|if|will|going to|wants to|asked to|threatened to'
-  + '|risk|risks|risk of|potential|potentially|chance|possibility|possible|possibly|likely|unlikely'
-  + '|concern|concerned|worry|worried|maybe|perhaps|expect|expecting|in case)\\b', 'i');
+const HEDGE_MODAL = /\b(?:may|might|could|would|if|will|going to|wants? to|asked to|threatened to|hoping to|expect|expecting|in case|maybe|perhaps)\b/i;
+
+/*
+ * Qualifiers that turn the phrase itself into a possibility. These read the same on either side.
+ *
+ * Split from the modals by POSITION, because one list checked both ways was wrong in both directions.
+ * "cancelled the visit, seller wants to rebook next week" was SUPPRESSED — a plain cancellation lost
+ * because "wants to" trailed it — while "no show risk" needed the trailing check to be caught at all. A
+ * modal after the phrase is talking about something else; a qualifier after it is talking about the phrase.
+ */
+const HEDGE_QUALIFIER = /\b(?:risk|risks|potential|potentially|chance|possibility|possible|possibly|likely|unlikely|concern|concerned|worry|worried)\b/i;
 
 /** Is this match hedged by the words immediately around it? */
 function isHedged(text, match) {
   const at = match.index ?? 0;
   const end = at + match[0].length;
-  return HEDGE.test(text.slice(Math.max(0, at - 40), at))
-    || HEDGE.test(match[0])
-    || HEDGE.test(text.slice(end, end + 24));
+  const before = text.slice(Math.max(0, at - 40), at);
+  const after = text.slice(end, end + 24);
+  return HEDGE_MODAL.test(before) || HEDGE_MODAL.test(match[0])
+    || HEDGE_QUALIFIER.test(before) || HEDGE_QUALIFIER.test(after);
 }
 
 /**
@@ -155,6 +164,40 @@ const DONE_PHRASES = [
   new RegExp(`${THING}\\s+went\\s+(?:well|ahead|fine|great)`, 'i')
 ];
 
+/*
+ * A visit called off but still wanted — "Reschedule Needed", not "Canceled".
+ *
+ * Found on the first live run of the notes audit, row 77: "Appointment canceled due to lead needs to work
+ * a double shift. Pending reschedule". Reading that as Canceled throws away the only part that matters —
+ * Todd still wants the visit. The workbook has a distinct Visit Status for it, and syncVisitCalendar_ tags
+ * the event [RESCHEDULE NEEDED] rather than [CANCELED], because the slot is dead but the lead is not.
+ *
+ * Future INTENT only. "rescheduled to Aug 12" is the past tense of a move that already happened, and that
+ * lead has a live appointment rather than a missing one, so it must not land here.
+ */
+const RESCHEDULE_PHRASES = [
+  /pending\s+re-?schedul/i,
+  /re-?schedul(?:e|ing)\s+(?:pending|needed|required)/i,
+  /(?:needs?|need\s+to|to\s+be|will|wants?\s+to|hoping\s+to|asked\s+to)\s+(?:be\s+)?re-?schedul/i,
+  /re-?book(?:ing)?\s+(?:pending|needed|required)/i,
+  /(?:needs?|wants?\s+to|will)\s+(?:to\s+)?re-?book/i
+];
+
+/*
+ * A reschedule that already happened, with a new time.
+ *
+ * "Appointment cancelled, rescheduled to Aug 12 at 2pm" contains a cancellation and would have been marked
+ * Canceled — on a lead that has a LIVE appointment. Past tense plus a preposition is the difference between
+ * "this needs rebooking" and "this was rebooked", and only the first is a missing visit.
+ */
+const ALREADY_MOVED = /(?:re-?scheduled|re-?booked|moved|pushed|shifted)\s+(?:to|for|until|till)\b/i;
+
+/** Does the note say the visit is still wanted, just not on that date? */
+export function wantsReschedule(notes) {
+  const text = String(notes == null ? '' : notes).replace(/\s+/g, ' ');
+  return RESCHEDULE_PHRASES.some((p) => p.test(text));
+}
+
 /**
  * What a free-text note says happened to the visit: { status, kind, phrase }.
  *
@@ -177,8 +220,21 @@ export function visitOutcomeFromNotes(notes) {
   const hedged = (match) => isHedged(text, match);
 
   // Cancelled first: it is the most consequential and the most clearly worded of the three.
+  /*
+   * A visit that was moved to a new time is not a missing visit. Checked FIRST, before the cancellation
+   * that usually sits in the same sentence, and it deliberately writes nothing: REI's appointment fields
+   * are the authority on when the new visit is, and the re-check reads those.
+   */
+  if (ALREADY_MOVED.test(text)) return { status: '', kind: 'already-moved', phrase: '' };
+
   const cancel = cancellationEvidence(text);
-  if (cancel.cancelled) return { status: 'Canceled', kind: 'canceled', phrase: cancel.phrase };
+  if (cancel.cancelled) {
+    // Still wanted, just not then. Strictly more informative than Canceled, and it keeps the lead alive.
+    if (wantsReschedule(text)) {
+      return { status: 'Reschedule Needed', kind: 'reschedule', phrase: cancel.phrase };
+    }
+    return { status: 'Canceled', kind: 'canceled', phrase: cancel.phrase };
+  }
 
   for (const [patterns, status, kind] of [
     [NOSHOW_PHRASES, 'Canceled', 'no-show'],
