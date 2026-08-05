@@ -29,6 +29,11 @@
 param(
   [int]$IntervalMinutes = 2,
   [int]$WhatsAppIntervalMinutes = 2,
+  # How often to go back to REI for leads already in the tracker. Two hours matches the short clock in
+  # recheck.mjs for a visit whose date has passed while the row still says Scheduled — the case where the
+  # board is actively wrong about today. Anything much tighter just opens browsers for no reason.
+  [int]$RecheckIntervalMinutes = 120,
+  [switch]$SkipRecheck,
   [switch]$SkipWhatsApp
 )
 
@@ -36,6 +41,9 @@ $ErrorActionPreference = "Stop"
 
 if ($IntervalMinutes -lt 1 -or $IntervalMinutes -gt 1439) {
   throw "IntervalMinutes must be between 1 and 1439."
+}
+if ($RecheckIntervalMinutes -lt 5 -or $RecheckIntervalMinutes -gt 1439) {
+  throw "RecheckIntervalMinutes must be between 5 and 1439. Each run opens a REI browser page per lead."
 }
 if ($WhatsAppIntervalMinutes -lt 1 -or $WhatsAppIntervalMinutes -gt 1439) {
   throw "WhatsAppIntervalMinutes must be between 1 and 1439."
@@ -71,10 +79,18 @@ if (-not $SkipWhatsApp) {
   Write-Host "  (WhatsApp task skipped: -SkipWhatsApp)"
 }
 
+if (-not $SkipRecheck) {
+  New-VisitTask -Name "Twin Visit Logger REI Recheck" -Runner "recheck.cmd" `
+    -Every $RecheckIntervalMinutes -What "re-read REI for leads already logged"
+} else {
+  Write-Host "  (REI re-check task skipped: -SkipRecheck)"
+}
+
 Write-Host ""
 Write-Host "Logs:"
 Write-Host "  logs\scheduled-task.log     the REI runs"
 if (-not $SkipWhatsApp) { Write-Host "  logs\whatsapp-task.log      the WhatsApp runs" }
+if (-not $SkipRecheck) { Write-Host "  logs\recheck-task.log       the REI re-checks" }
 Write-Host ""
 Write-Host "Check them with:   Get-Content logs\scheduled-task.log -Tail 30"
 Write-Host "See the tasks:     schtasks /Query /TN `"Twin Visit Logger Sandbox`""
