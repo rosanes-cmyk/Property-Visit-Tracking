@@ -1,13 +1,13 @@
 # 3:00 PM Lead Notification — Cherry's structure
 
 **Requested by:** Cherry · **Owner:** Jonathan Rosanes · **System:** Twin Visit Logger → Google Chat
-**Status:** `READY FOR CHERRY APPROVAL` — built and tested, **not deployed**. The live 3:00 PM message
-is still the old four-bucket version. Four decisions below are open.
+**Status:** `LIVE — AWAITING CHERRY'S SIGN-OFF ON THE FORMAT`. Deployed and posting; the 3:00 PM
+trigger is installed. One decision below is still open (§5.1). Everything Cherry asked for is built.
 
 Implemented in `apps-script/ChatNotify.gs` (`ATTENTION_BUCKETS`, `attentionBucket_`, `giftPending_`,
 `sendAttentionDigestToChat`), mirrored into `apps-script/Code.combined.gs`. Calendar behaviour in
 `apps-script/WebApp.gs` (`syncVisitCalendar_`, `markVisitEvents_`, `notifyVisitTagged_`). Covered by
-`tests/attention-digest.test.mjs` — 95 checks, 0 failing.
+`tests/attention-digest.test.mjs` — 146 checks, and `tests/record-identity.test.mjs` — 24. 16 suites, 0 failing.
 
 > **History.** An earlier revision built eight buckets around *missing fields* — missing owner, missing
 > next action, missing seller motivation. Cherry replaced it: *"notification should be like this only"*,
@@ -131,12 +131,30 @@ Nothing below is decided. Cherry's five stages are built exactly as she named th
 | # | Decision | Recommendation |
 |---|---|---|
 | 1 | **Verbal Agreement, Contract Sent and Long-Term Nurture appear nowhere.** Her five do not include them. | Add a section for Verbal Agreement + Contract Sent. A verbal agreement with no contract out is a deal being lost to silence. |
-| 2 | **Overdue visits have no section of their own** — they are flagged `OVERDUE` inside Upcoming Visit and sorted to the top. | Keep as is. It is visible without adding a section she did not ask for. |
-| 3 | **Gift Follow-Up lists a lead that also appears under its stage.** Breaks the earlier "one lead, one section" rule, deliberately. | Keep. The alternative hides every gift. |
+| 2 | ~~Overdue visits have no section~~ **DONE.** Flagged `OVERDUE` inside Upcoming Visit and sorted to the top, above the visits merely coming up. Cancelled and reschedule-needed sort there too. |
+| 3 | ~~Gift Follow-Up lists a lead twice~~ **DONE, deliberately.** Leads and gifts are counted separately in the header so the headline number still means "leads that need something". |
 | 4 | ~~Legacy imported records~~ **DONE.** The first live run posted 103 leads, nearly all imported history. | Rows with `Source = 'Import'` are now excluded — the exact signature `importFromOldWorkbook` stamps, so no cutover date was invented. They stay in the sheet and on the dashboard. `CFG.DIGEST_INCLUDE_IMPORTED` puts them back. |
 
-Decision 4 is the one that determines whether the 10-second goal is met in practice. Everything else
-can be right and it still fails on volume.
+**Only decision 1 remains.** A lead that reaches `Verbal Agreement` — the seller has said yes — or
+`Contract Sent` appears in no notification at all until somebody signs. Those are the two most valuable
+leads in the pipeline and the two the message is silent about. Adding two sections is a ten-minute
+change; leaving them out is a defensible choice; doing neither by default is not.
+
+## 5a. Everything Cherry asked for, and where it is
+
+| Her instruction | Status |
+|---|---|
+| Five sections, named as she named them | ✅ §1 |
+| Track gifts as part of follow-up | ✅ §1, section 6 |
+| "Only 5 person or lead should be included" per section | ✅ §2 |
+| "Prioritized… by its date that near to visit" | ✅ soonest first; decisions above them |
+| Cancelled visit stays on the calendar, not deleted | ✅ §6 |
+| A cancellation notifies | ✅ §6 — immediately, not at 3pm |
+| One lead, one section | ✅ by construction; gifts the one deliberate exception |
+| Name, address, owner, exact reason on every line | ✅ §2 |
+| `UNASSIGNED` shown clearly | ✅ bold |
+| Never invent a next action or due date | ✅ the notification cannot write at all |
+| She can see what to start on in 10 seconds | ⏳ needs her eyes on a live card |
 
 ## 6. Cancelling a visit — Cherry's second change
 
