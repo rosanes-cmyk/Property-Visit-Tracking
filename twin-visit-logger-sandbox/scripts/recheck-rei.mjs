@@ -32,6 +32,7 @@ import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
+import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK
@@ -238,7 +239,23 @@ try {
 
     // Write ONLY the changed cells, one range each. Writing the whole row would clobber every column a
     // person has edited since the row was created.
-    const data = changes
+    /*
+     * Refuse a value the sheet's dropdown will reject, and say so, rather than let it fail the batch.
+     *
+     * mapOwner already guarantees this upstream. This is the second check, in the code that actually
+     * writes, because one bad cell does not fail alone — it fails every other correction in the same
+     * request, silently, and with 367 leads now linked that is a whole batch of real fixes lost.
+     */
+    const DROPDOWN = { 'Assigned Owner': OWNER_VALUES, 'Assigned Visitor': VISITOR_VALUES };
+    const legal = changes.filter((c) => {
+      const allowed = DROPDOWN[c.field];
+      if (!allowed || allowed.includes(String(c.to))) return true;
+      console.log(`    SKIPPED ${c.field} = "${c.to}" — not a value the sheet's dropdown accepts.`);
+      console.log(`      Add it to the ${c.field} list in the workbook if that is a real person.`);
+      return false;
+    });
+
+    const data = legal
       .filter((c) => colOf.has(c.field))
       .map((c) => ({
         range: `${config.trackerSheet}!${columnLetter(colOf.get(c.field) + 1)}${row.__rowNumber}`,

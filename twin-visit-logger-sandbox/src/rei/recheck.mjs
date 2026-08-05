@@ -19,6 +19,7 @@
  * in the standard library — so the decisions stay testable without the sandbox's node_modules.
  */
 import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
+import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 
 const ZONE = 'America/Los_Angeles';
 
@@ -283,9 +284,17 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
     if (text(value)) out[field] = text(value);
   }
   // Whoever REI says the appointment belongs to. diffFromRei only lets this land on an EMPTY cell.
+  /*
+   * Mapped, not passed through. REI's field is free text: it held "Thea, Cherry" for Maria Ramos, and
+   * "Thea" is in neither dropdown. A value outside a dropdown does not fail its own cell — it fails the
+   * whole write, taking every other correction in the batch with it. mapOwner returns '' when it cannot
+   * recognise anybody, which leaves a blank the dashboard already flags rather than a silent failure.
+   */
   if (text(scraped.assignedOwner)) {
-    out['Assigned Owner'] = text(scraped.assignedOwner);
-    out['Assigned Visitor'] = text(scraped.assignedOwner);
+    const owner = mapOwner(scraped.assignedOwner);
+    const visitor = mapVisitor(scraped.assignedOwner);
+    if (owner) out['Assigned Owner'] = owner;
+    if (visitor) out['Assigned Visitor'] = visitor;
   }
 
   /*
