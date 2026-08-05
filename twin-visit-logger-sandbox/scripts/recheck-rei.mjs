@@ -34,7 +34,7 @@ import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
-  diffFromRei, calendarAffected, describeChanges, RECHECKABLE
+  diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK
 } from '../src/rei/recheck.mjs';
 
 const args = process.argv.slice(2);
@@ -368,7 +368,18 @@ if (deadFlagged.length) {
   }
   console.log('Set these to "Lost / Closed Out" on the dashboard if that is right. Not done automatically.');
 }
-console.log(`Fields a re-check may ever touch: ${RECHECKABLE.join(', ')}`);
+/*
+ * The footer has to list what the run can ACTUALLY change.
+ *
+ * It printed only RECHECKABLE, directly underneath a run that had just changed Current Stage, Approved
+ * Offer Amount and Next Action. A closing line that contradicts the evidence above it is worse than no
+ * line at all, and it is the fourth time in this feature that a summary has understated what happened.
+ */
+console.log(`Fields a re-check may overwrite: ${RECHECKABLE.join(', ')}`);
+console.log(`Fields it may fill only when empty: ${FILL_IF_BLANK.join(', ')}`);
+console.log('Current Stage: advanced FORWARD only, never off a closed-out or nurture lead.');
+console.log("Next Action: replaced only when blank or still holding the automation's own wording.");
+console.log('Never touched: Visit Notes, Seller Motivation, Assigned Owner/Visitor once named.');
 
 /** 1-based column index to an A1 letter. */
 function columnLetter(n) {

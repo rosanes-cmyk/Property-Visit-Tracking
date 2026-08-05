@@ -272,6 +272,16 @@ check('eligibility is still enforced', /const why = recheckSkipReason\(row\);/.t
 check('...and it says what it dropped and why', /skipping \$\{row\['Seller Name'\]\} — \$\{why\}/.test(RUNNER), true);
 check('the coverage limit is stated, not buried in a tally',
   /can ever be re-checked/.test(RUNNER), true);
+/*
+ * The closing footer must list what the run can actually change. It printed only RECHECKABLE, directly
+ * underneath a run that had just changed Current Stage, Approved Offer Amount and Next Action — a summary
+ * contradicting the evidence above it, for the fourth time in this feature.
+ */
+check('the footer separates overwrite from fill-only',
+  /Fields a re-check may overwrite:[\s\S]*Fields it may fill only when empty:/.test(RUNNER), true);
+check('...and names the stage rule', /advanced FORWARD only/.test(RUNNER), true);
+check('...and the Next Action rule', /still holding the automation's own wording/.test(RUNNER), true);
+check('...and what is never touched', /Never touched: Visit Notes, Seller Motivation/.test(RUNNER), true);
 // The whole point: a row with no REI link must never reach the browser.
 check('a linkless row is ineligible, so --only cannot reach it',
   recheckSkipReason({ ...JOSE, 'REI BlackBook Link': '' }), 'no REI link');
