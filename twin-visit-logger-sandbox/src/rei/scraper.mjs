@@ -260,7 +260,8 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
      * A cancellation still wins: an appointment cannot be both called off and carried out, and the
      * cancelled signal comes from the notification itself, which is the more direct evidence.
      */
-    let taskComplete = false;
+    let visitTaskState = 'not-checked';
+    let visitTaskReason = 'the appointment was already cancelled, so the task was not consulted';
     if (!cancelled) {
       try {
         const apptDay = appointmentStartIso
@@ -269,15 +270,43 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
         const thisVisit = { phone: normalize(phone || phoneFallback || emailFallback.phone || ''), date: apptDay };
         const tasks = await readTasks(page, selectorConfig, { timezone: config.calendarTimezone });
         const mine = tasks.find((t) => taskMatchesVisit(t, thisVisit));
-        taskComplete = Boolean(mine && mine.complete);
+        if (mine && mine.complete) {
+          visitTaskState = 'complete';
+          visitTaskReason = 'REI shows the booked-appointment task ticked off';
+        } else if (mine) {
+          visitTaskState = 'open';
+          visitTaskReason = 'REI shows the booked-appointment task still open';
+        } else if (!tasks.length) {
+          visitTaskState = 'unknown';
+          visitTaskReason = 'no booked-appointment task rows could be read on the contact page';
+        } else {
+          visitTaskState = 'unknown';
+          visitTaskReason = `${tasks.length} booked-appointment task(s) on the contact, none matching this ` +
+            `visit on phone AND date${apptDay ? ` (${apptDay})` : ' (no appointment date to match on)'}`;
+        }
       } catch (error) {
-        // Never fail a scrape over this. A missing task list means "unknown", and unknown must read as
-        // "no change" rather than as "not completed" — the diff already refuses to act on a blank.
-        taskComplete = false;
+        visitTaskState = 'unknown';
+        visitTaskReason = `reading the task list failed: ${error.message}`;
       }
     }
 
-    const taskStatus = cancelled ? 'Cancelled' : taskComplete ? 'Completed' : '';
+    /*
+     * 'unknown' is NOT 'open', and it must not be reported as though the question was answered.
+     *
+     * This is the same mistake the run summary already had to be corrected for once: "no change in REI"
+     * read like a clean bill of health when it could equally have meant the page returned nothing. Here
+     * the stakes are the same. There are two distinct reasons the matching task can be absent —
+     *
+     *   - REI MOVES a completed task out of the panel, so 'gone' can mean 'done'. completeTask's own
+     *     confirmation logic treats a vanished row as evidence of completion.
+     *   - or the panel simply did not render, or this appointment never had a task at all.
+     *
+     * Absent therefore cannot be treated as complete: doing so would stamp 'Completed' on every lead
+     * whose task panel failed to load. It equally cannot be reported as 'still open'. So it stays
+     * unknown, nothing is written, and the run SAYS the question went unanswered — which is the only
+     * version a person can act on, by opening REI or running rei-task-doctor.
+     */
+    const taskStatus = cancelled ? 'Cancelled' : visitTaskState === 'complete' ? 'Completed' : '';
 
     const result = {
       reiLink: effectiveLink,
@@ -290,6 +319,8 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       assignedOwner: normalize(assignedOwner || emailFallback.assignedOwner),
       taskTitle: normalize(emailFallback.rawTitle || ''),
       taskStatus,
+      visitTaskState,
+      visitTaskReason,
       contactStage: normalize(contactStage),
       propertyDetails: normalize(amountOffer ? `Amount Offer: ${amountOffer}` : ''),
       notes: notes.join('\n\n'),

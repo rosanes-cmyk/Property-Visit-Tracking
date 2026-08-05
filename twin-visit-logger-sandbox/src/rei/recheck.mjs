@@ -307,7 +307,7 @@ export function calendarAffected(changes) {
  * reads like a clean bill of health — when it could equally have meant the page returned no appointment
  * at all. Those two need different actions from a person, so they need different words.
  */
-export function describeChanges(row, changes, reiFields = null) {
+export function describeChanges(row, changes, reiFields = null, scraped = null) {
   const who = text(row['Seller Name']) || '(no name)';
   const where = text(row['Property Address']);
   const head = `${who} · ${where} · `;
@@ -317,6 +317,24 @@ export function describeChanges(row, changes, reiFields = null) {
   if (reiFields && !Object.keys(reiFields).length) {
     return head + 'REI returned NOTHING to compare — no appointment date and no contact fields. ' +
       'The page may not have rendered, or the contact has no appointment in REI.';
+  }
+
+  /*
+   * "REI agrees with the sheet" must not be printed when the most important question went unanswered.
+   *
+   * For an overdue visit the only question that matters is whether it happened. If the task list could
+   * not be read, or held no task matching this visit, then that question has no answer — and printing
+   * agreement reads as "checked, all fine" for a lead whose visit date passed a week ago. Saying so
+   * plainly is the difference between the board being accurate and merely looking accurate.
+   */
+  if (scraped && scraped.visitTaskState === 'unknown') {
+    return head + 'dates and contact details agree, but REI could not tell us whether the visit ' +
+      `happened — ${scraped.visitTaskReason}. Open the lead in REI, or run ` +
+      'scripts/rei-task-doctor.mjs against it.';
+  }
+  if (scraped && scraped.visitTaskState === 'open') {
+    return head + 'REI agrees with the sheet — and REI still has the visit task OPEN, so REI does not ' +
+      'know the outcome either. Somebody has to mark it Completed or Canceled.';
   }
   return head + 'REI agrees with the sheet';
 }

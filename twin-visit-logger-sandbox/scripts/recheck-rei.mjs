@@ -162,7 +162,7 @@ try {
 
     const reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
     const changes = diffFromRei(row, reiFields);
-    console.log(`    ${describeChanges(row, changes, reiFields)}`);
+    console.log(`    ${describeChanges(row, changes, reiFields, scraped)}`);
 
     const key = recheckKey(row);
     state[key] = { ...(state[key] || {}), lastCheckedAt: new Date().toISOString() };

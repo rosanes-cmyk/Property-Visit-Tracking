@@ -349,7 +349,7 @@ check('a cancellation reaches the calendar even with no appointment time left',
 console.log('\n=== The scraper can actually SEE a completed task ===');
 const SCRAPER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
 check('taskStatus is no longer only Cancelled-or-blank',
-  /taskStatus = cancelled \? 'Cancelled' : taskComplete \? 'Completed' : ''/.test(SCRAPER), true);
+  /taskStatus = cancelled \? 'Cancelled' : visitTaskState === 'complete' \? 'Completed' : ''/.test(SCRAPER), true);
 check('it reads scoped task rows, not a page-wide regex', /readTasks\(page, selectorConfig/.test(SCRAPER), true);
 check('the task must match THIS visit on phone and date', /taskMatchesVisit\(t, thisVisit\)/.test(SCRAPER), true);
 // readTasks only. completeTask is the single REI write this project can make and must not be reachable
@@ -357,8 +357,60 @@ check('the task must match THIS visit on phone and date', /taskMatchesVisit\(t, 
 check('it imports the read-only task lister', /^import \{ readTasks \} from '\.\/tasks\.mjs';$/m.test(SCRAPER), true);
 check('it never imports the one function that WRITES to REI',
   /^import[^\n]*completeTask/m.test(SCRAPER), false);
-check('a failure to read tasks means unknown, not "not completed"',
-  /taskComplete = false;\s*\n\s*\}\s*\n\s*\}/.test(SCRAPER), true);
+// The distinction is asserted properly further down; nothing may collapse "could not read" into a false.
+check('there is no bare boolean left to collapse the three states into two',
+  /taskComplete/.test(SCRAPER), false);
+
+console.log('\n=== "REI agrees" must not be printed when the question went unanswered ===');
+/*
+ * The live run on Jose printed "REI agrees with the sheet" for a lead whose visit was four days past.
+ * That is true about the dates and says nothing about the thing that actually matters — did the visit
+ * happen? — and it reads as a clean bill of health.
+ *
+ * Absent cannot be treated as complete: REI MOVES a completed task out of the panel (completeTask's own
+ * confirmation logic relies on that), so 'gone' can mean 'done' — but it can equally mean the panel did
+ * not render, and stamping 'Completed' on every lead whose page failed to load would be a catastrophe.
+ * So the three states stay distinct and the run says which one it got.
+ */
+const AGREES = { 'Seller Name': 'Jose Anguiano', 'Property Address': '2145 Capitol Ave' };
+const said = (state, reason) => describeChanges(AGREES, [], { 'Visit Date': '08/01/2026' },
+  { visitTaskState: state, visitTaskReason: reason });
+
+check('an unreadable task list is NOT reported as agreement',
+  /could not tell us whether the visit happened/.test(said('unknown', 'no booked-appointment task rows could be read')), true);
+check('...and it says exactly why',
+  /no booked-appointment task rows could be read/.test(said('unknown', 'no booked-appointment task rows could be read')), true);
+check('...and it names the tool that settles it',
+  /rei-task-doctor/.test(said('unknown', 'x')), true);
+check('an OPEN task says REI does not know either',
+  /REI still has the visit task OPEN/.test(said('open', 'still open')), true);
+check('...and names who has to act', /Somebody has to mark it Completed or Canceled/.test(said('open', 'x')), true);
+check('a plain agreement is still short', said('not-checked', ''),
+  'Jose Anguiano · 2145 Capitol Ave · REI agrees with the sheet');
+// Back-compatible: the runner's summary loop calls it with two arguments.
+check('it still works with no scrape passed',
+  describeChanges(AGREES, [], { 'Visit Date': '08/01/2026' }),
+  'Jose Anguiano · 2145 Capitol Ave · REI agrees with the sheet');
+check('a real change still wins over any task state',
+  /Visit Status/.test(describeChanges(AGREES, [{ field: 'Visit Status', from: 'Scheduled', to: 'Completed' }],
+    {}, { visitTaskState: 'unknown', visitTaskReason: 'x' })), true);
+check('"REI returned NOTHING" still takes precedence over the task state',
+  /REI returned NOTHING/.test(describeChanges(AGREES, [], {}, { visitTaskState: 'unknown', visitTaskReason: 'x' })), true);
+
+console.log('\n--- the scraper distinguishes complete / open / unknown ---');
+check('only a complete task becomes Completed',
+  /visitTaskState === 'complete' \? 'Completed' : ''/.test(SCRAPER), true);
+check('a matched-but-open task is "open", not "unknown"', /visitTaskState = 'open'/.test(SCRAPER), true);
+check('an empty task list is "unknown", never "open"',
+  /if \(!tasks\.length\) \{\s*\n\s*visitTaskState = 'unknown'/.test(SCRAPER), true);
+check('a task that does not match this visit is also "unknown"',
+  /none matching this /.test(SCRAPER), true);
+check('a thrown error is "unknown" and carries the message',
+  /visitTaskState = 'unknown';\s*\n\s*visitTaskReason = `reading the task list failed/.test(SCRAPER), true);
+check('the state and the reason both reach the caller',
+  /visitTaskState,\s*\n\s*visitTaskReason,/.test(SCRAPER), true);
+check('the runner passes the scrape in so it can say so',
+  /describeChanges\(row, changes, reiFields, scraped\)/.test(RUNNER), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
