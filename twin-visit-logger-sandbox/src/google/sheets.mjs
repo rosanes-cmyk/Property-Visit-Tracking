@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
+import { mapLeadSource } from './lead-source.mjs';
 
 // Fields the automation may write. Everything else in the tracker stays human-owned.
 export const CANONICAL_HEADERS = [
@@ -242,6 +243,8 @@ export async function findExistingVisit(auth, visit) {
   };
 }
 
+export { mapLeadSource };
+
 function visitToRecord(visit) {
   const start = visit.appointmentStartIso
     ? DateTime.fromISO(visit.appointmentStartIso).setZone(config.calendarTimezone)
@@ -301,7 +304,7 @@ function visitToRecord(visit) {
     'Assigned Owner': visit.assignedOwner || '',
     'Assigned Visitor': visit.assignedOwner || '',
     'REI BlackBook Link': visit.reiLink || '',
-    'Lead Source': visit.leadSource || '',
+    'Lead Source': mapLeadSource(visit.leadSource),
     'Next Action': cancelled ? '' : 'Conduct scheduled visit & log outcome',
     'Next Action Due Date': hasValidStart ? start.toFormat('MM/dd/yyyy') : '',
     'Last Contact Result': clipCell(noteParts.join(' · '), 500),
