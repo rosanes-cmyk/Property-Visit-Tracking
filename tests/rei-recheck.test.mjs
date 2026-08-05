@@ -184,8 +184,34 @@ console.log('\n=== What the run reports ===');
  * bill of health, when it could equally have meant the page returned nothing at all — and those two need
  * different actions from a person. Agreement and silence must not share a sentence.
  */
-check('agreement says so', describeChanges(JOSE, [], { 'Visit Date': '08/01/2026' }),
-  'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · REI agrees with the sheet');
+/*
+ * Agreement NAMES the fields REI answered on, and the ones it did not.
+ *
+ * "no changes" and "REI had nothing to say" were indistinguishable, and the difference turned out to be
+ * the whole story on the lead this feature was built for: Jose's contact carries no appointment at all,
+ * so the dates were never compared — yet the run reported that the dates agreed.
+ */
+check('agreement names what was actually confirmed',
+  describeChanges(JOSE, [], { 'Visit Date': '08/01/2026' }),
+  'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · REI confirms Visit Date · ' +
+  'REI gave no Visit Time, Seller Name, Phone, Email, so those were NOT checked');
+check('a complete answer from REI has nothing unchecked to report',
+  describeChanges(JOSE, [], { 'Visit Date': '08/01/2026', 'Visit Time': '10:30 AM',
+    'Seller Name': 'Jose Anguiano', Phone: '(650) 771-7814', Email: 'j@example.com' }),
+  'Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303 · ' +
+  'REI confirms Visit Date, Visit Time, Seller Name, Phone, Email');
+// Visit Status is deliberately not reported: REI only yields one on a cancellation or a completion, so on
+// a healthy lead it is legitimately blank and listing it every run would be noise.
+check('Visit Status is never listed as unchecked',
+  /Visit Status/.test(describeChanges(JOSE, [], { 'Visit Date': '08/01/2026' })), false);
+check('no appointment on the page is called out as unsettleable',
+  /no future re-check will settle it/.test(describeChanges(JOSE, [],
+    { 'Seller Name': 'Jose Anguiano', Phone: '(650) 771-7814' },
+    { visitTaskState: 'unknown', visitTaskReason: 'no booked-appointment task rows could be read' })), true);
+check('...but a lead REI still holds an appointment for is not',
+  /no future re-check will settle it/.test(describeChanges(JOSE, [],
+    { 'Visit Date': '08/12/2026', 'Visit Time': '2:00 PM' },
+    { visitTaskState: 'unknown', visitTaskReason: 'x' })), false);
 check('silence from REI says something different',
   describeChanges(JOSE, [], {}).includes('REI returned NOTHING to compare'), true);
 check('...and suggests why', describeChanges(JOSE, [], {}).includes('may not have rendered'), true);
@@ -390,12 +416,14 @@ check('...and it names the tool that settles it',
 check('an OPEN task says REI does not know either',
   /REI still has the visit task OPEN/.test(said('open', 'still open')), true);
 check('...and names who has to act', /Somebody has to mark it Completed or Canceled/.test(said('open', 'x')), true);
-check('a plain agreement is still short', said('not-checked', ''),
-  'Jose Anguiano · 2145 Capitol Ave · REI agrees with the sheet');
+check('a plain agreement names the one field REI answered on', said('not-checked', ''),
+  'Jose Anguiano · 2145 Capitol Ave · REI confirms Visit Date · ' +
+  'REI gave no Visit Time, Seller Name, Phone, Email, so those were NOT checked');
 // Back-compatible: the runner's summary loop calls it with two arguments.
 check('it still works with no scrape passed',
   describeChanges(AGREES, [], { 'Visit Date': '08/01/2026' }),
-  'Jose Anguiano · 2145 Capitol Ave · REI agrees with the sheet');
+  'Jose Anguiano · 2145 Capitol Ave · REI confirms Visit Date · ' +
+  'REI gave no Visit Time, Seller Name, Phone, Email, so those were NOT checked');
 check('a real change still wins over any task state',
   /Visit Status/.test(describeChanges(AGREES, [{ field: 'Visit Status', from: 'Scheduled', to: 'Completed' }],
     {}, { visitTaskState: 'unknown', visitTaskReason: 'x' })), true);

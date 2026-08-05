@@ -320,21 +320,54 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
   }
 
   /*
-   * "REI agrees with the sheet" must not be printed when the most important question went unanswered.
+   * "Agrees" must name the fields REI actually answered on.
    *
-   * For an overdue visit the only question that matters is whether it happened. If the task list could
-   * not be read, or held no task matching this visit, then that question has no answer — and printing
-   * agreement reads as "checked, all fine" for a lead whose visit date passed a week ago. Saying so
-   * plainly is the difference between the board being accurate and merely looking accurate.
+   * Rule 2 skips a field REI returned blank, which correctly protects the sheet — but it makes "no
+   * changes" indistinguishable from "REI had nothing to say". The message said "dates and contact
+   * details agree" for a lead whose REI page turned out to carry no appointment AT ALL: the dates were
+   * never compared, because there was nothing to compare them to. Reporting a match that never happened
+   * is the same failure as "REI agrees with the sheet", one level finer, so the fields are named.
    */
+  // Not told what REI returned is different from told it returned nothing. The runner's summary loop
+  // calls this with two arguments; it must stay neutral rather than invent a finding.
+  if (!reiFields) return head + 'REI agrees with the sheet';
+
+  /*
+   * Visit Status is left out of the reporting.
+   *
+   * REI only yields one when the appointment is cancelled or the task is ticked off, so on every healthy
+   * lead it is legitimately blank. Listing it as "NOT checked" every single run would be noise, and the
+   * question it answers — did the visit happen — is already the subject of the task-state sentence below.
+   */
+  const REPORTED = RECHECKABLE.filter((f) => f !== 'Visit Status');
+  const supplied = REPORTED.filter((f) => text(reiFields[f]));
+  const missing = REPORTED.filter((f) => !text(reiFields[f]));
+  const confirmed = supplied.length ? `REI confirms ${supplied.join(', ')}` : 'REI confirmed nothing';
+  const notChecked = missing.length
+    ? ` · REI gave no ${missing.join(', ')}, so ${missing.length === 1 ? 'that field was' : 'those were'} NOT checked`
+    : '';
+
+  /*
+   * No appointment on the REI page is the headline, not a footnote.
+   *
+   * The row exists because a booking email arrived, so REI HAD an appointment once. If the contact page
+   * no longer carries one, REI cannot confirm or deny the visit — not now and not on any future run. That
+   * makes it a job for a person rather than something a re-check will eventually catch, and a person will
+   * only know that if the run says it.
+   */
+  const noAppointment = !text(reiFields?.['Visit Date']) && !text(reiFields?.['Visit Time']);
+
   if (scraped && scraped.visitTaskState === 'unknown') {
-    return head + 'dates and contact details agree, but REI could not tell us whether the visit ' +
-      `happened — ${scraped.visitTaskReason}. Open the lead in REI, or run ` +
-      'scripts/rei-task-doctor.mjs against it.';
+    return head + `${confirmed}${notChecked}. REI could not tell us whether the visit happened — ` +
+      `${scraped.visitTaskReason}.` +
+      (noAppointment
+        ? ' REI holds no appointment for this contact any more, so no future re-check will settle it ' +
+          'either. Somebody has to mark the visit Completed or Canceled.'
+        : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.');
   }
   if (scraped && scraped.visitTaskState === 'open') {
-    return head + 'REI agrees with the sheet — and REI still has the visit task OPEN, so REI does not ' +
-      'know the outcome either. Somebody has to mark it Completed or Canceled.';
+    return head + `${confirmed}${notChecked}. REI still has the visit task OPEN, so REI does not know ` +
+      'the outcome either. Somebody has to mark it Completed or Canceled.';
   }
-  return head + 'REI agrees with the sheet';
+  return head + confirmed + notChecked;
 }
