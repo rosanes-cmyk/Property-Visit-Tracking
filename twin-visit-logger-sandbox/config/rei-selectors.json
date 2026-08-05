@@ -155,10 +155,7 @@
       "Start"
     ],
     "assignedOwner": [
-      "Appointment Assigned To",
-      "Appointment Assigned",
       "Assigned To",
-      "Assigned User",
       "Owner",
       "Sales Agent"
     ],
@@ -184,7 +181,7 @@
       "Next Action",
       "Next Step"
     ],
-    "_comment_assignedOwner": "REI's label is 'Appointment Assigned To', not 'Assigned To'. Labels are matched as a PREFIX of the leaf text ('Appointment Assigned ToJuan'), so 'Assigned To' never matched and every owner came back blank -- which is why the dashboard showed 'Unassigned' and 'Missing: Assigned Owner' on leads REI had assigned to Juan. Longest first, or 'Assigned To' would win and strip the wrong number of characters."
+    "_comment": "DEAD BLOCK -- nothing reads this. The scraper reads listItemLabels (see `const L = selectorConfig.listItemLabels` in src/rei/scraper.mjs); grep for `.labels` finds only Gmail's own API. Kept because deleting a block no test covers is its own risk, but do NOT edit it expecting an effect: I changed assignedOwner here to fix 'Missing: Assigned Owner' and nothing happened, because listItemLabels.assignedOwner already said 'Appointment Assigned To'. The label was never the bug."
   },
   "tabs": {
     "notes": [

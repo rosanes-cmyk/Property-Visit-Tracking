@@ -691,25 +691,36 @@ for (const f of FILL_IF_BLANK) check(`${f} is not overwritable`, RECHECKABLE.inc
 check('a re-run after filling changes nothing',
   diffFromRei({ ...AMELIA, 'Assigned Owner': 'Juan', 'Assigned Visitor': 'Juan' }, FROM_REI).length, 0);
 
-console.log('\n--- the label that never matched ---');
+console.log('\n--- the label was NOT the bug, and the block I edited is dead ---');
+/*
+ * I diagnosed this wrong and should not be able to again.
+ *
+ * rei-selectors.json has TWO label blocks. The scraper reads listItemLabels (`const L =
+ * selectorConfig.listItemLabels`). I "fixed" `labels.assignedOwner` to add 'Appointment Assigned To',
+ * announced it as the root cause of "Missing: Assigned Owner" across the board, and it changed nothing —
+ * listItemLabels.assignedOwner already said exactly that, and nothing reads `labels` at all.
+ *
+ * So these assert which block is live, and that the live one is correct. Why REI still returned no owner
+ * for Amelia is a separate, open question that rei-fields.mjs answers by printing the real page pairs.
+ */
 const SELECTORS = JSON.parse(fs.readFileSync(
   new URL('../twin-visit-logger-sandbox/config/rei-selectors.json', import.meta.url), 'utf8'));
-check("REI's real label is listed", SELECTORS.labels.assignedOwner.includes('Appointment Assigned To'), true);
-// Longest first, or "Assigned To" wins and slices the wrong number of characters off the value.
-check('...and comes before the shorter one',
-  SELECTORS.labels.assignedOwner.indexOf('Appointment Assigned To')
-    < SELECTORS.labels.assignedOwner.indexOf('Assigned To'), true);
-/* The shipped matcher, run against the real leaf text from Amelia's contact page. */
+check('the scraper reads listItemLabels, not labels',
+  /const L = selectorConfig\.listItemLabels/.test(SCRAPER), true);
+check("the LIVE block already names REI's real label",
+  SELECTORS.listItemLabels.assignedOwner.includes('Appointment Assigned To'), true);
+check('the dead block is marked as dead', /DEAD BLOCK/.test(SELECTORS.labels._comment), true);
+check('...and says which one is live', /listItemLabels/.test(SELECTORS.labels._comment), true);
+/* The shipped matcher against the real leaf text — the LIVE label list resolves it. */
 const matcherSrc = SCRAPER.slice(SCRAPER.indexOf('function valueForLabel'), SCRAPER.indexOf('// Long-form leaf items'));
 const valueForLabel = new Function('normalize', `${matcherSrc}\nreturn valueForLabel;`)(
   (v) => String(v || '').replace(/\s+/g, ' ').trim());
-const REAL_PAIRS = ['Appointment Assigned ToJuan', 'Appointment DateAug 01, 2026, 9:00 AM',
-  'Appointment TypeIn-Person Property Visit', 'Amount Offer$930,000'];
-check('the real page text now resolves to Juan',
-  valueForLabel(REAL_PAIRS, SELECTORS.labels.assignedOwner), 'Juan');
-check('the OLD label list returned nothing — this was the bug',
-  valueForLabel(REAL_PAIRS, ['Assigned To', 'Owner', 'Sales Agent']), '');
-// Money is visible on the same page and is still not touched: an offer amount is a decision.
+check('"Appointment Assigned ToJuan" resolves to Juan with the live list',
+  valueForLabel(['Appointment Assigned ToJuan'], SELECTORS.listItemLabels.assignedOwner), 'Juan');
+// So a blank owner means the PAIR was absent from the page dump, not that the label was wrong.
+check('an absent pair yields nothing, which is the real failure mode',
+  valueForLabel(['Phone (Home)(650) 566-5268'], SELECTORS.listItemLabels.assignedOwner), '');
+// Money is on the same page and still untouched: an offer amount is a decision.
 check('Amount Offer is not a fillable field', FILL_IF_BLANK.includes('Approved Offer Amount'), false);
 
 console.log('\n--- and the run says "filled", not "changed" ---');
