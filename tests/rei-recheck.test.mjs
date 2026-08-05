@@ -204,14 +204,17 @@ check('a complete answer from REI has nothing unchecked to report',
 // a healthy lead it is legitimately blank and listing it every run would be noise.
 check('Visit Status is never listed as unchecked',
   /Visit Status/.test(describeChanges(JOSE, [], { 'Visit Date': '08/01/2026' })), false);
-check('no appointment on the page is called out as unsettleable',
+// taskPanelOpened is required: without it the run cannot know whether an empty task list means the
+// appointment is gone or that the panel never rendered. Asserted properly further down.
+check('no appointment on the page is called out as unsettleable — once we have actually looked',
   /no future re-check will settle it/.test(describeChanges(JOSE, [],
     { 'Seller Name': 'Jose Anguiano', Phone: '(650) 771-7814' },
-    { visitTaskState: 'unknown', visitTaskReason: 'no booked-appointment task rows could be read' })), true);
+    { visitTaskState: 'unknown', visitTaskReason: 'the Tasks panel was opened and holds no booked-appointment task',
+      taskPanelOpened: true })), true);
 check('...but a lead REI still holds an appointment for is not',
   /no future re-check will settle it/.test(describeChanges(JOSE, [],
     { 'Visit Date': '08/12/2026', 'Visit Time': '2:00 PM' },
-    { visitTaskState: 'unknown', visitTaskReason: 'x' })), false);
+    { visitTaskState: 'unknown', visitTaskReason: 'x', taskPanelOpened: true })), false);
 check('silence from REI says something different',
   describeChanges(JOSE, [], {}).includes('REI returned NOTHING to compare'), true);
 check('...and suggests why', describeChanges(JOSE, [], {}).includes('may not have rendered'), true);
@@ -414,7 +417,8 @@ check('it reads scoped task rows, not a page-wide regex', /readTasks\(page, sele
 check('the task must match THIS visit on phone and date', /taskMatchesVisit\(t, thisVisit\)/.test(SCRAPER), true);
 // readTasks only. completeTask is the single REI write this project can make and must not be reachable
 // from a read path; the name appears in the scraper only in the comment saying so.
-check('it imports the read-only task lister', /^import \{ readTasks \} from '\.\/tasks\.mjs';$/m.test(SCRAPER), true);
+check('it imports the read-only task lister and the panel opener',
+  /^import \{ readTasks, openPanel \} from '\.\/tasks\.mjs';$/m.test(SCRAPER), true);
 check('it never imports the one function that WRITES to REI',
   /^import[^\n]*completeTask/m.test(SCRAPER), false);
 // The distinction is asserted properly further down; nothing may collapse "could not read" into a false.
@@ -517,6 +521,70 @@ check('...and the summary repeats it with the row numbers',
   /Set these to "Lost \/ Closed Out" on the dashboard if that is right\. Not done automatically\./.test(RUNNER), true);
 // A tag must never become a Current Stage write. RECHECKABLE plus the one guarded transition is the lot.
 check('no tag-driven stage write exists', /Lost \/ Closed Out'\s*\}\)/.test(RUNNER), false);
+
+console.log('\n=== An empty task list only means "no appointment" if we LOOKED ===');
+/*
+ * The worst call of this whole feature, and it went to the client twice.
+ *
+ * Two real leads reported "0 booked-appointment tasks" and were described as "REI holds no appointment for
+ * this contact any more, so no future re-check will settle it either". Nothing in the code opened REI's
+ * Tasks panel — the `tabs` block has sat in rei-selectors.json unused since it was written — so the rows
+ * had never rendered. An empty result from a page where the tasks do not appear is evidence about the
+ * scraper, not about the appointment, and the two demand opposite actions: fix a selector, or go and mark
+ * a visit.
+ */
+const noAppt = { 'Seller Name': 'Amelia Middel', 'Property Address': '460 5th Avenue, Redwood City' };
+const contactOnly = { 'Seller Name': 'Amelia Middel', Phone: '(650) 555-0000', Email: 'a@example.com' };
+
+const neverLooked = describeChanges(noAppt, [], contactOnly,
+  { visitTaskState: 'unknown', visitTaskReason: "REI's tasks were never read — no Tasks / Appointments tab could be found", taskPanelOpened: false });
+check('an unopened panel is called a SCRAPER problem', /SCRAPER problem, not a data problem/.test(neverLooked), true);
+check('...and refuses to conclude anything about the visit',
+  /Nothing can be concluded about the visit from this run/.test(neverLooked), true);
+check('...and does NOT claim REI has no appointment',
+  /REI holds no appointment/.test(neverLooked), false);
+check('...and does NOT send somebody off to mark a visit',
+  /Somebody has to mark/.test(neverLooked), false);
+
+const lookedAndEmpty = describeChanges(noAppt, [], contactOnly,
+  { visitTaskState: 'unknown', visitTaskReason: 'the Tasks panel was opened (clicked tab "Tasks") and holds no booked-appointment task', taskPanelOpened: true });
+check('an OPENED but empty panel does claim REI has no appointment',
+  /REI holds no appointment/.test(lookedAndEmpty), true);
+check('...and says a future re-check will not help',
+  /no future re-check will settle it/.test(lookedAndEmpty), true);
+check('...and is not blamed on the scraper', /SCRAPER problem/.test(lookedAndEmpty), false);
+
+console.log('\n--- the panel is opened before the tasks are read ---');
+const TASKS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/tasks.mjs', import.meta.url), 'utf8');
+const DOCTOR = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/rei-task-doctor.mjs', import.meta.url), 'utf8');
+check('openPanel exists', /export async function openPanel/.test(TASKS), true);
+check('the scraper opens it BEFORE reading',
+  SCRAPER.indexOf('openPanel(page') < SCRAPER.indexOf('readTasks(page'), true);
+check('it uses the tabs config that had never been read', /selectorConfig\.tabs\?\.tasks/.test(SCRAPER), true);
+check('the doctor opens it too', /await openPanel\(page/.test(DOCTOR), true);
+check('...and says up front when it could not', /Everything below is therefore inconclusive/.test(DOCTOR), true);
+check('...and lists the real panel names so the guess can be replaced',
+  /Panels this contact page actually offers/.test(DOCTOR), true);
+
+console.log('\n--- and clicking is restricted to an allowlist ---');
+/*
+ * Opening a panel means clicking on a page this project treats as read-only. The set of clickable names is
+ * fixed in code, so a stray or hostile value in the config cannot turn this into a general click function.
+ */
+const openable = /const OPENABLE = (\/.+\/i);/.exec(TASKS)?.[1];
+check('an allowlist regex exists', Boolean(openable), true);
+const OPENABLE = new RegExp(openable.slice(1, -2), 'i');
+for (const ok of ['Tasks', 'Task', 'Appointments', 'Notes', 'Activity', 'Timeline', 'Property']) {
+  check(`"${ok}" may be opened`, OPENABLE.test(ok), true);
+}
+for (const no of ['Delete', 'Remove', 'Archive', 'Cancel', 'Send Text', 'Mark Complete', 'Trash', '']) {
+  check(`"${no}" may NOT be clicked`, OPENABLE.test(no), false);
+}
+check('a label off the allowlist is skipped, not clicked',
+  /if \(!OPENABLE\.test\(name\)\) continue;/.test(TASKS), true);
+// It must remain a read path: the doctor and the scraper may open panels, never complete a task.
+check('openPanel does not touch the completion control', /completeControl/.test(
+  TASKS.slice(TASKS.indexOf('export async function openPanel'), TASKS.indexOf('export async function readTasks'))), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -6,7 +6,7 @@ import { config } from '../config.mjs';
 import { assertAuthenticated } from './browser.mjs';
 // readTasks is READ-ONLY — it lists task rows and clicks nothing. completeTask, the one REI write this
 // project can make, is deliberately not imported here.
-import { readTasks } from './tasks.mjs';
+import { readTasks, openPanel } from './tasks.mjs';
 import { taskMatchesVisit } from './task-gate.mjs';
 import { cancellationEvidence, deadLeadTags } from './cancel-signal.mjs';
 
@@ -274,12 +274,21 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
      */
     let visitTaskState = 'not-checked';
     let visitTaskReason = 'the appointment was already cancelled, so the task was not consulted';
+    let taskPanel = { opened: false, how: 'not attempted' };
     if (!cancelled) {
       try {
         const apptDay = appointmentStartIso
           ? DateTime.fromISO(appointmentStartIso, { zone: config.calendarTimezone }).toFormat('yyyy-MM-dd')
           : '';
         const thisVisit = { phone: normalize(phone || phoneFallback || emailFallback.phone || ''), date: apptDay };
+        /*
+         * Open the Tasks panel FIRST, or there is nothing to read.
+         *
+         * Without this, readTasks saw only the default contact view. Two real leads therefore reported
+         * "0 booked-appointment tasks" and were described as having no appointment in REI at all — a
+         * conclusion drawn from a panel that had never been opened.
+         */
+        taskPanel = await openPanel(page, selectorConfig.tabs?.tasks || ['Tasks', 'Appointments']);
         const tasks = await readTasks(page, selectorConfig, { timezone: config.calendarTimezone });
         const mine = tasks.find((t) => taskMatchesVisit(t, thisVisit));
         if (mine && mine.complete) {
@@ -290,7 +299,11 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
           visitTaskReason = 'REI shows the booked-appointment task still open';
         } else if (!tasks.length) {
           visitTaskState = 'unknown';
-          visitTaskReason = 'no booked-appointment task rows could be read on the contact page';
+          // These two are NOT the same finding, and conflating them is what produced a confident,
+          // wrong "REI holds no appointment for this contact any more".
+          visitTaskReason = taskPanel.opened
+            ? `the Tasks panel was opened (${taskPanel.how}) and holds no booked-appointment task`
+            : `REI's tasks were never read — ${taskPanel.how}`;
         } else {
           visitTaskState = 'unknown';
           visitTaskReason = `${tasks.length} booked-appointment task(s) on the contact, none matching this ` +
@@ -334,6 +347,10 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       visitTaskState,
       visitTaskReason,
       // The sentence that caused a Cancelled status, so a write from free text is never silent.
+      // Whether the Tasks panel was actually opened. An empty task list only means "no appointment"
+      // when this is true; otherwise it means we never looked in the right place.
+      taskPanelOpened: taskPanel.opened,
+      taskPanelHow: taskPanel.how,
       cancelPhrase: cancelEvidence.phrase,
       deadLeadTags: deadTags,
       contactStage: normalize(contactStage),

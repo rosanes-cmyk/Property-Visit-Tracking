@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs/promises';
 import { launchReiContext, assertAuthenticated } from '../src/rei/browser.mjs';
-import { readTasks } from '../src/rei/tasks.mjs';
+import { readTasks, openPanel } from '../src/rei/tasks.mjs';
 import { config } from '../src/config.mjs';
 
 const url = process.argv.find((a) => /^https?:\/\//i.test(a));
@@ -26,6 +26,23 @@ await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
 await assertAuthenticated(page, selectors.login || {});
 await page.waitForSelector("a[href^='tel:'], a[href^='mailto:']", { timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(3000);
+
+/*
+ * Open the Tasks panel before looking for task rows.
+ *
+ * The doctor reported "no match" on all five taskRows selectors for two real leads, and that was read as
+ * "REI has no appointment". It meant nothing of the kind: the panel had never been opened, so the rows had
+ * never rendered. Reporting whether the panel opened is now the FIRST thing, because every line below it
+ * is worthless if it did not.
+ */
+console.log('=== Opening the Tasks panel ===');
+const panel = await openPanel(page, selectors.tabs?.tasks || ['Tasks', 'Appointments']);
+console.log(`  ${panel.opened ? 'OK      ' : 'FAILED  '}${panel.how}`);
+if (!panel.opened) {
+  console.log('  Everything below is therefore inconclusive — the task rows were never rendered.');
+  console.log('  Look at the open browser window: find the tab or heading that lists tasks/appointments');
+  console.log('  and tell me its exact wording, so tabs.tasks in config/rei-selectors.json can name it.');
+}
 
 console.log('\n=== Which task-row selector resolves ===');
 for (const selector of selectors.tasks?.taskRows || []) {
@@ -68,7 +85,22 @@ if (tasks.length) {
 if (tasks.length) {
   const row = page.locator(tasks[0].selector).nth(tasks[0].index);
 
-  console.log('\n=== Everything identifiable INSIDE the first task row ===');
+  /*
+ * What panels the page actually offers, by name.
+ *
+ * tabs.tasks guesses "Tasks" and "Appointments". If neither exists the guess has to be replaced, and that
+ * is impossible without knowing the real wording — so list every tab and accordion header on the page.
+ */
+console.log('\n=== Panels this contact page actually offers ===');
+for (const role of ['tab', 'button']) {
+  const names = await page.getByRole(role).evaluateAll(
+    (els) => els.map((e) => (e.innerText || e.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
+      .filter((t) => t && t.length < 40)
+  ).catch(() => []);
+  for (const name of [...new Set(names)]) console.log(`  ${role.padEnd(7)} "${name}"`);
+}
+
+console.log('\n=== Everything identifiable INSIDE the first task row ===');
   const inside = await row.evaluate((el) => {
     const out = [];
     for (const node of el.querySelectorAll('*')) {

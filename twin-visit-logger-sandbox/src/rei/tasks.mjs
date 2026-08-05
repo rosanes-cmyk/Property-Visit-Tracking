@@ -38,6 +38,51 @@ export function parseTaskTitle(title, { timezone = 'America/Los_Angeles' } = {})
   return { title: text, phone, date };
 }
 
+/*
+ * Only these panel names may ever be clicked.
+ *
+ * An allowlist, not a denylist. Opening a panel means clicking something on a page this project treats as
+ * read-only, so the set is fixed here in code and a label from the config that is not on it is ignored.
+ * CLAUDE.md permits exactly this — "open only safe navigation tabs such as Notes, Tasks/Appointments,
+ * Property, and Activity/Timeline" — and nothing else is reachable through this function.
+ */
+const OPENABLE = /^(tasks?|appointments?|notes?|activity|timeline|history|property|properties)$/i;
+
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Open a panel on the contact page by its visible name, so its contents render. Read-only otherwise.
+ *
+ * Returns { opened, how } — `how` is reported by the caller, because "we looked and found nothing" and
+ * "we never managed to look" need to be told apart downstream.
+ *
+ * Why this exists: nothing opened the Tasks panel. `tabs` has sat in rei-selectors.json unused since the
+ * config was written, so readTasks only ever saw whatever renders on the default contact view. That is how
+ * two real leads reported "0 booked-appointment tasks" while a third reported four — and all four of that
+ * third one's "tasks" were NOTES whose text happened to contain the phrase. No real REI task row had ever
+ * actually been read, and an empty result was being reported as "REI holds no appointment".
+ */
+export async function openPanel(page, labels = [], { timeout = 4000 } = {}) {
+  for (const label of labels) {
+    const name = String(label).trim();
+    if (!OPENABLE.test(name)) continue;
+    const exact = new RegExp(`^\\s*${escapeRegex(name)}\\s*$`, 'i');
+    // A real tab first, then an accordion header — REI uses both, and its class names are scrambled
+    // (css-0), so the accessible name is the only stable handle.
+    for (const role of ['tab', 'button']) {
+      const target = page.getByRole(role, { name: exact }).first();
+      if (!(await target.count().catch(() => 0))) continue;
+      if ((await target.getAttribute('aria-expanded').catch(() => null)) === 'true') {
+        return { opened: true, how: `${role} "${name}" was already open` };
+      }
+      await target.click({ timeout }).catch(() => {});
+      await page.waitForTimeout(1500);
+      return { opened: true, how: `clicked ${role} "${name}"` };
+    }
+  }
+  return { opened: false, how: `no ${labels.join(' / ')} tab or accordion could be found on the page` };
+}
+
 /**
  * Read the tasks visible on a contact page. Read-only.
  * Returns [{ index, title, phone, date, complete }].

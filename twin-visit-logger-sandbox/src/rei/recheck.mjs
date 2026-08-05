@@ -348,22 +348,28 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
     : '';
 
   /*
-   * No appointment on the REI page is the headline, not a footnote.
+   * "REI holds no appointment any more" is only sayable if we actually LOOKED.
    *
-   * The row exists because a booking email arrived, so REI HAD an appointment once. If the contact page
-   * no longer carries one, REI cannot confirm or deny the visit — not now and not on any future run. That
-   * makes it a job for a person rather than something a re-check will eventually catch, and a person will
-   * only know that if the run says it.
+   * This sentence went out for two real leads on the strength of an empty task list — from a Tasks panel
+   * that was never opened, because nothing in the code opened it. An empty result from a page where the
+   * tasks do not render is not evidence about the appointment; it is evidence about the scraper. So the
+   * claim now requires taskPanelOpened, and when the panel could not be opened the run says THAT instead,
+   * because the fix is a selector rather than a person marking a visit.
    */
-  const noAppointment = !text(reiFields?.['Visit Date']) && !text(reiFields?.['Visit Time']);
+  const noAppointment = !text(reiFields['Visit Date']) && !text(reiFields['Visit Time']);
+  const looked = Boolean(scraped?.taskPanelOpened);
 
   if (scraped && scraped.visitTaskState === 'unknown') {
-    return head + `${confirmed}${notChecked}. REI could not tell us whether the visit happened — ` +
-      `${scraped.visitTaskReason}.` +
-      (noAppointment
+    const tail = !looked
+      ? " This is a SCRAPER problem, not a data problem: REI's Tasks panel could not be opened, so its " +
+        'tasks were never read. Nothing can be concluded about the visit from this run. ' +
+        'Run scripts/rei-task-doctor.mjs against the lead to see what the page offers.'
+      : noAppointment
         ? ' REI holds no appointment for this contact any more, so no future re-check will settle it ' +
           'either. Somebody has to mark the visit Completed or Canceled.'
-        : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.');
+        : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.';
+    return head + `${confirmed}${notChecked}. REI could not tell us whether the visit happened — ` +
+      `${scraped.visitTaskReason}.${tail}`;
   }
   if (scraped && scraped.visitTaskState === 'open') {
     return head + `${confirmed}${notChecked}. REI still has the visit task OPEN, so REI does not know ` +
