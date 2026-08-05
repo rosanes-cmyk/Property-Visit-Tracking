@@ -20,6 +20,7 @@
  */
 import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
+import { latestReiNote, contactResultReplaceable } from './notes.mjs';
 
 const ZONE = 'America/Los_Angeles';
 
@@ -309,6 +310,20 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   const money = parseReiMoney(scraped.amountOffer);
   if (money) out['Approved Offer Amount'] = money;
   if (text(scraped.nextAction)) out['Next Action'] = text(scraped.nextAction);
+
+  /*
+   * REI's most recent note, so the board shows what actually happened last.
+   *
+   * "whatever happen in the rei notes and all will go to the dashboard right and add it there?" It did not.
+   * Amelia's card read "Auto-logged from REI task email · REI stage: 2 Follow Up" — written the day the row
+   * was created — while REI held that morning's call summary and an email update confirming the $930,000
+   * terms had been acknowledged.
+   *
+   * Last Contact Result, not Visit Notes. That column's whole purpose is the latest contact result, and
+   * Visit Notes belongs to whoever stood in the property.
+   */
+  const note = latestReiNote(scraped.notes);
+  if (note) out['Last Contact Result'] = note;
   return out;
 }
 
@@ -386,6 +401,16 @@ export function diffFromRei(row, reiFields) {
    * while REI said "Confirm that Amelia prepared and sent the formal offer". Replacing our own boilerplate
    * is not overwriting anyone's work; replacing a commitment somebody made would be, so that is refused.
    */
+  /*
+   * The note replaces the cell only when it is blank or still holds this project's own intake line.
+   * Anything else there was typed by a person and is left exactly as it is.
+   */
+  const noteFromRei = text(reiFields['Last Contact Result']);
+  if (noteFromRei && noteFromRei !== text(row['Last Contact Result'])
+      && contactResultReplaceable(row['Last Contact Result'])) {
+    changes.push({ field: 'Last Contact Result', from: text(row['Last Contact Result']), to: noteFromRei });
+  }
+
   const nextFromRei = text(reiFields['Next Action']);
   if (nextFromRei && nextFromRei !== text(row['Next Action']) && nextActionReplaceable(row['Next Action'])) {
     changes.push({ field: 'Next Action', from: text(row['Next Action']), to: nextFromRei });
