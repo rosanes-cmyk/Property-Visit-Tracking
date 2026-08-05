@@ -118,12 +118,43 @@ if (ONLY) {
    * browser. It also matched "San Jose" in the address, which is how a search for one seller returned
    * five. Seller names are tried first now, and the address only if no seller matched.
    */
-  const bySeller = rows.filter((r) => String(r['Seller Name'] || '').toLowerCase().includes(ONLY));
-  const matched = bySeller.length
-    ? bySeller
-    : rows.filter((r) => String(r['Property Address'] || '').toLowerCase().includes(ONLY));
-  if (bySeller.length) console.log(`\n--only "${ONLY}" → matched ${matched.length} on seller name`);
-  else console.log(`\n--only "${ONLY}" → no seller matched; matched ${matched.length} on address`);
+  /*
+   * A REI contact id or URL is tried between the two.
+   *
+   * Comparing the tracker against one specific REI contact is the natural way to check whether the
+   * automation is right, and a contact id is the one identifier that cannot match the wrong lead — unlike
+   * a name, where "Jose" also finds "San Jose". Without this there was no way to say "this contact":
+   * `--only "https://my.reiblackbook.com/contacts/20525007"` matched nothing at all, because the value is
+   * compared against the seller name and the address and never against the link.
+   */
+  const TIERS = [
+    ['seller name', (r) => String(r['Seller Name'] || '')],
+    ['REI contact id / link', (r) => `${r['REI BlackBook Link'] || ''} ${r['REI Record ID'] || ''}`],
+    ['property address', (r) => String(r['Property Address'] || '')]
+  ];
+  // A pasted URL is matched on its contact id, so the trailing slash or query string cannot spoil it.
+  const needle = (ONLY.match(/contacts\/(\d+)/) || [null, ONLY])[1];
+  let matched = [];
+  let matchedOn = '';
+  for (const [label, read] of TIERS) {
+    matched = rows.filter((r) => read(r).toLowerCase().includes(needle));
+    if (matched.length) { matchedOn = label; break; }
+  }
+  if (matched.length) {
+    console.log(`\n--only "${needle}" → matched ${matched.length} on ${matchedOn}`);
+  } else {
+    /*
+     * Say that the lead is not in the tracker, rather than "matched 0 on address".
+     *
+     * A contact id that matches nothing almost always means the lead was never logged — no booking email
+     * arrived, or it arrived and failed — which is a different problem from a lead being ineligible, and
+     * needs a different action.
+     */
+    console.log(`\n--only "${needle}" → NOT FOUND in the tracker.`);
+    console.log('  No row has this seller name, REI contact id, or address. If that is a REI contact you');
+    console.log('  expected to be tracked, it was never logged — the booking email never arrived or never');
+    console.log('  processed. Add it with:  node scripts/add-visit-from-rei.mjs "<the REI contact URL>"');
+  }
 
   const eligible = [];
   for (const row of matched) {

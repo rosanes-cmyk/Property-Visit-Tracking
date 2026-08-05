@@ -230,9 +230,13 @@ console.log('\n=== --only ignores the schedule, never the eligibility rules ==='
  * address, which is how a search for one seller returned five.
  */
 const RUNNER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
-check('seller names are tried first', /const bySeller = rows\.filter/.test(RUNNER), true);
-check('the address is only a fallback', /bySeller\.length\s*\?\s*bySeller/.test(RUNNER), true);
-check('it says which one matched', /matched \$\{matched\.length\} on seller name/.test(RUNNER), true);
+// Matching is tiered, most-specific first, and stops at the first tier that hits. The ordering itself is
+// asserted below; here it is enough that the tiers exist and that the address is not tried first.
+check('seller names are tried first', /\['seller name',/.test(RUNNER), true);
+check('the address is only a fallback', /\['property address',/.test(RUNNER), true);
+check('it says which tier matched', /matched \$\{matched\.length\} on \$\{matchedOn\}/.test(RUNNER), true);
+check('and it stops at the first tier that hits',
+  /if \(matched\.length\) \{ matchedOn = label; break; \}/.test(RUNNER), true);
 check('eligibility is still enforced', /const why = recheckSkipReason\(row\);/.test(RUNNER), true);
 check('...and it says what it dropped and why', /skipping \$\{row\['Seller Name'\]\} — \$\{why\}/.test(RUNNER), true);
 check('the coverage limit is stated, not buried in a tally',
@@ -240,6 +244,31 @@ check('the coverage limit is stated, not buried in a tally',
 // The whole point: a row with no REI link must never reach the browser.
 check('a linkless row is ineligible, so --only cannot reach it',
   recheckSkipReason({ ...JOSE, 'REI BlackBook Link': '' }), 'no REI link');
+
+console.log('\n--- and a REI contact id can be named directly ---');
+/*
+ * Comparing the tracker against one specific REI contact is the natural way to check whether the
+ * automation is right, and a contact id is the only identifier that cannot match the wrong lead — unlike
+ * a name, where "Jose" also finds "San Jose". Pasting a contact URL used to match nothing at all: the
+ * value was compared against the seller name and the address, never against the link.
+ */
+check('the REI id/link tier exists, between seller and address',
+  /\['REI contact id \/ link', \(r\) => `\$\{r\['REI BlackBook Link'\] \|\| ''\} \$\{r\['REI Record ID'\] \|\| ''\}`\]/.test(RUNNER), true);
+check('a pasted URL is reduced to its contact id',
+  /const needle = \(ONLY\.match\(\/contacts\\\/\(\\d\+\)\/\) \|\| \[null, ONLY\]\)\[1\]/.test(RUNNER), true);
+check('the tier that matched is named in the output', /matched \$\{matched\.length\} on \$\{matchedOn\}/.test(RUNNER), true);
+// "not in the tracker" is a different problem from "ineligible", and needs a different action.
+check('a contact that is not tracked at all says so',
+  /NOT FOUND in the tracker/.test(RUNNER), true);
+check('...and names the likely cause rather than leaving it a mystery',
+  /the booking email never arrived or never/.test(RUNNER), true);
+check('...and hands over the command that adds it',
+  /add-visit-from-rei\.mjs/.test(RUNNER), true);
+// Seller name still wins, so the "San Jose" fix cannot regress: the address tier is reached last.
+check('seller name is still the first tier tried',
+  RUNNER.indexOf("['seller name'") < RUNNER.indexOf("['REI contact id / link'"), true);
+check('the address is still the last tier tried',
+  RUNNER.indexOf("['property address'") > RUNNER.indexOf("['REI contact id / link'"), true);
 
 console.log('\n=== REI saying the visit is DONE has to reach the tracker ===');
 /*
