@@ -355,6 +355,9 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       deadLeadTags: deadTags,
       contactStage: normalize(contactStage),
       propertyDetails: normalize(amountOffer ? `Amount Offer: ${amountOffer}` : ''),
+      // Exposed separately as well: propertyDetails is a display string, and re-parsing a sentence to
+      // recover a number the scraper already had is how rounding and currency bugs get in.
+      amountOffer: normalize(amountOffer),
       notes: notes.join('\n\n'),
       latestActivity: '',
       nextAction: normalize(nextAction),

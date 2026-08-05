@@ -173,11 +173,25 @@ check('a BLANK from REI never wipes a value in the sheet',
   diffFromRei(JOSE, { Phone: '', 'Seller Name': '' }), []);
 check('...not even for the visit date', diffFromRei(JOSE, { 'Visit Date': '' }), []);
 check('an entirely empty scrape changes nothing', diffFromRei(JOSE, {}), []);
-// Rule 1: anything outside RECHECKABLE is ignored even if a scrape somehow offers it.
-check('a stage from REI is ignored',
-  diffFromRei(JOSE, { 'Current Stage': 'Offer Sent' }), []);
-check('offer money from REI is ignored',
-  diffFromRei(JOSE, { 'Approved Offer Amount': 999999 }), []);
+/*
+ * Rule 1 used to be "anything outside RECHECKABLE is ignored, full stop". The client overruled that after
+ * seeing REI hold Amelia Middel at "4 Offer Sent" with $930,000 out while the board said Visit Scheduled:
+ * "its automation right so what it gets in the rei should be update in the dashboard and data its
+ * important." So the stage and the offer amount DO come through now, each under its own guard — tested in
+ * full in tests/stage-map.test.mjs: the stage advances only forward and never off a closed lead, the money
+ * only ever fills an empty cell.
+ */
+check("REI's stage now advances the lead",
+  diffFromRei(JOSE, { 'Current Stage': 'Offer Sent' }).map((c) => `${c.field}=${c.to}`),
+  ['Current Stage=Offer Sent']);
+check('...but never backwards',
+  diffFromRei({ ...JOSE, 'Current Stage': 'Contract Sent' }, { 'Current Stage': 'Offer Sent' }), []);
+check('...and never off a lead somebody closed out',
+  diffFromRei({ ...JOSE, 'Current Stage': 'Lost / Closed Out' }, { 'Current Stage': 'Offer Sent' }), []);
+check('offer money fills an empty cell',
+  diffFromRei(JOSE, { 'Approved Offer Amount': 999999 }).map((c) => c.field), ['Approved Offer Amount']);
+check('...and never overwrites a figure somebody entered',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 999999 }), []);
 check('visit notes from REI are ignored',
   diffFromRei({ ...JOSE, 'Visit Notes': 'Seller was lovely' }, { 'Visit Notes': 'something else' }), []);
 
@@ -685,7 +699,7 @@ check('one filled and one named is handled per field',
   diffFromRei({ ...AMELIA, 'Assigned Owner': 'Kyle' }, FROM_REI).filter((c) => c.filledBlank).map((c) => c.field),
   ['Assigned Visitor']);
 check('a blank from REI fills nothing', diffFromRei(AMELIA, reiFieldsFromScrape({})).length, 0);
-check('these two are the only fillable fields', FILL_IF_BLANK, ['Assigned Owner', 'Assigned Visitor']);
+check('the fillable fields', FILL_IF_BLANK, ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount']);
 // They must stay OUT of RECHECKABLE, or the fill-only guarantee is gone.
 for (const f of FILL_IF_BLANK) check(`${f} is not overwritable`, RECHECKABLE.includes(f), false);
 check('a re-run after filling changes nothing',
@@ -720,8 +734,14 @@ check('"Appointment Assigned ToJuan" resolves to Juan with the live list',
 // So a blank owner means the PAIR was absent from the page dump, not that the label was wrong.
 check('an absent pair yields nothing, which is the real failure mode',
   valueForLabel(['Phone (Home)(650) 566-5268'], SELECTORS.listItemLabels.assignedOwner), '');
-// Money is on the same page and still untouched: an offer amount is a decision.
-check('Amount Offer is not a fillable field', FILL_IF_BLANK.includes('Approved Offer Amount'), false);
+/*
+ * Money from that same page IS pulled now, at the client's instruction — but fill-only. It reaches an empty
+ * Approved Offer Amount and can never change a figure somebody entered, which is the part that matters: an
+ * offer amount is a decision, and a wrong one is the most expensive cell on the row.
+ */
+check('Amount Offer fills an empty cell', FILL_IF_BLANK.includes('Approved Offer Amount'), true);
+check('...and fill-only means it cannot overwrite',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 930000 }), []);
 
 console.log('\n--- and the run says "filled", not "changed" ---');
 check('a fill is reported distinctly', /filled \$\{filled\.length\} empty field\(s\) from REI/.test(RUNNER), true);

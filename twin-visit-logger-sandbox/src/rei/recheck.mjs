@@ -18,6 +18,8 @@
  * tests run from anywhere. This one needs date maths and one timezone-aware format, and Intl does both
  * in the standard library — so the decisions stay testable without the sandbox's node_modules.
  */
+import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
+
 const ZONE = 'America/Los_Angeles';
 
 /** A Date as the sheet writes dates: 'MM/dd/yyyy' in the visit timezone. */
@@ -76,7 +78,7 @@ export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller 
  * Both columns, because that is what the email path already does (sheets.mjs sets Assigned Owner and
  * Assigned Visitor from the same REI field). Following it rather than inventing a second rule.
  */
-export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor'];
+export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount'];
 
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
@@ -282,8 +284,22 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   }
   // Whoever REI says the appointment belongs to. diffFromRei only lets this land on an EMPTY cell.
   if (text(scraped.assignedOwner)) {
-    for (const field of FILL_IF_BLANK) out[field] = text(scraped.assignedOwner);
+    out['Assigned Owner'] = text(scraped.assignedOwner);
+    out['Assigned Visitor'] = text(scraped.assignedOwner);
   }
+
+  /*
+   * REI's pipeline position, its offer amount and its next step.
+   *
+   * Added because REI had Amelia Middel at "4 Offer Sent" with $930,000 out, while the board said "Visit
+   * Scheduled" and told the team to go and visit her. Each is guarded differently in diffFromRei — the
+   * stage advances only forward, the money only fills an empty cell, the next action only replaces the
+   * automation's own boilerplate — so none of them can overwrite a person's work.
+   */
+  if (text(scraped.contactStage)) out['Current Stage'] = text(scraped.contactStage);
+  const money = parseReiMoney(scraped.amountOffer);
+  if (money) out['Approved Offer Amount'] = money;
+  if (text(scraped.nextAction)) out['Next Action'] = text(scraped.nextAction);
   return out;
 }
 
@@ -340,6 +356,30 @@ export function diffFromRei(row, reiFields) {
 
   if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
     changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: STAGE_ON_COMPLETION });
+  } else {
+    /*
+     * REI's own stage, but only FORWARD.
+     *
+     * stageAdvance refuses a move that is backwards, sideways, unmapped, or off the pipeline entirely —
+     * so a lead somebody closed out or moved to nurture is never dragged back in, and REI holding an
+     * older stage than the sheet changes nothing. Ambiguous REI wording ("Follow Up") maps to nothing.
+     */
+    const advanced = stageAdvance(row['Current Stage'], reiFields['Current Stage']);
+    if (advanced) {
+      changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: advanced, advanced: true });
+    }
+  }
+
+  /*
+   * REI's Next Step replaces the cell only when it is empty or still holds the automation's own wording.
+   *
+   * Amelia's row said "Conduct scheduled visit & log outcome" — typed by this project, not by a person —
+   * while REI said "Confirm that Amelia prepared and sent the formal offer". Replacing our own boilerplate
+   * is not overwriting anyone's work; replacing a commitment somebody made would be, so that is refused.
+   */
+  const nextFromRei = text(reiFields['Next Action']);
+  if (nextFromRei && nextFromRei !== text(row['Next Action']) && nextActionReplaceable(row['Next Action'])) {
+    changes.push({ field: 'Next Action', from: text(row['Next Action']), to: nextFromRei });
   }
 
   return changes;
