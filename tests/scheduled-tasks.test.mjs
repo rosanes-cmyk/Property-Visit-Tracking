@@ -34,6 +34,34 @@ for (const [task, runner] of [
     fs.existsSync(`twin-visit-logger-sandbox/scripts/${runner}`), true);
 }
 
+console.log('\n=== The notes audit runs on a timer too ===');
+/*
+ * It did not, and that was the biggest hole left. audit-notes.mjs is the only job here that needs no
+ * browser and no REI link, so it is the only one that can see all 378 rows rather than the 102 with a REI
+ * page — and it is how "Cancelled the property visit" (Lili) and "Pending reschedule" (Todd) reached the
+ * board at all. Until now it ran only when somebody typed it, so the NEXT outcome a colleague wrote down
+ * would have sat there unread.
+ */
+check('the notes audit task is installed', INSTALL.includes('-Name "Twin Visit Logger Notes Audit"'), true);
+check('  ...and runs audit-notes.cmd', INSTALL.includes('-Runner "audit-notes.cmd"'), true);
+check('  ...which is a real file', fs.existsSync('twin-visit-logger-sandbox/scripts/audit-notes.cmd'), true);
+/*
+ * Hourly, not every 20 minutes. It reads the whole tab in one API call so it is cheap, but notes do not
+ * change minute to minute and a wasted run is still a write path opened for nothing.
+ */
+check('it defaults to hourly', /\[int\]\$NotesIntervalMinutes = 60/.test(INSTALL), true);
+check('...with a 10-minute floor', /NotesIntervalMinutes -lt 10/.test(INSTALL), true);
+check('...and says why', /Each run reads the whole tab/.test(INSTALL), true);
+check('it can be skipped', /\$SkipNotes/.test(INSTALL), true);
+check('its log is listed', /logs\\audit-notes\.log/.test(INSTALL), true);
+
+const NOTES_CMD = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/audit-notes.cmd'), 'utf8');
+// A dry run on a timer would report the same drift every hour and correct none of it.
+check('the scheduled run APPLIES rather than reports', /audit-notes\.mjs --yes/.test(NOTES_CMD), true);
+check('the log is rotated, not grown forever', /GTR 5000000/.test(NOTES_CMD), true);
+check('it runs from the project root', /cd \/d "%~dp0\.\."/.test(NOTES_CMD), true);
+check('each run is date-stamped', /==== %DATE% %TIME% ====/.test(NOTES_CMD), true);
+
 console.log('\n=== The re-check interval ===');
 /*
  * 20 minutes, matching RECHECK_MINUTES in recheck.mjs — at the client's request, "why this is two hour?

@@ -33,6 +33,12 @@ param(
   # recheck.mjs for a visit whose date has passed while the row still says Scheduled — the case where the
   # board is actively wrong about today. Anything much tighter just opens browsers for no reason.
   [int]$RecheckIntervalMinutes = 20,
+  # How often to re-read the tracker's OWN notes for outcomes a colleague has written. Hourly, not every
+  # 20 minutes: this needs no browser and reads the whole sheet in one API call, but notes do not change
+  # minute to minute, and it is the only job here that can touch all 378 rows rather than the 102 with a
+  # REI link. It is how "Cancelled the property visit" and "Pending reschedule" reached the board at all.
+  [int]$NotesIntervalMinutes = 60,
+  [switch]$SkipNotes,
   [switch]$SkipRecheck,
   [switch]$SkipWhatsApp
 )
@@ -44,6 +50,9 @@ if ($IntervalMinutes -lt 1 -or $IntervalMinutes -gt 1439) {
 }
 if ($RecheckIntervalMinutes -lt 5 -or $RecheckIntervalMinutes -gt 1439) {
   throw "RecheckIntervalMinutes must be between 5 and 1439. Each run opens a REI browser page per lead."
+}
+if ($NotesIntervalMinutes -lt 10 -or $NotesIntervalMinutes -gt 1439) {
+  throw "NotesIntervalMinutes must be between 10 and 1439. Each run reads the whole tab."
 }
 if ($WhatsAppIntervalMinutes -lt 1 -or $WhatsAppIntervalMinutes -gt 1439) {
   throw "WhatsAppIntervalMinutes must be between 1 and 1439."
@@ -86,11 +95,19 @@ if (-not $SkipRecheck) {
   Write-Host "  (REI re-check task skipped: -SkipRecheck)"
 }
 
+if (-not $SkipNotes) {
+  New-VisitTask -Name "Twin Visit Logger Notes Audit" -Runner "audit-notes.cmd" `
+    -Every $NotesIntervalMinutes -What "read the tracker's own notes for visit outcomes"
+} else {
+  Write-Host "  (notes audit task skipped: -SkipNotes)"
+}
+
 Write-Host ""
 Write-Host "Logs:"
 Write-Host "  logs\scheduled-task.log     the REI runs"
 if (-not $SkipWhatsApp) { Write-Host "  logs\whatsapp-task.log      the WhatsApp runs" }
 if (-not $SkipRecheck) { Write-Host "  logs\recheck-task.log       the REI re-checks" }
+if (-not $SkipNotes) { Write-Host "  logs\audit-notes.log        the notes audit" }
 Write-Host ""
 Write-Host "Check them with:   Get-Content logs\scheduled-task.log -Tail 30"
 Write-Host "See the tasks:     schtasks /Query /TN `"Twin Visit Logger Sandbox`""
