@@ -53,6 +53,15 @@ function dayKey(d, zone = ZONE) {
  */
 export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller Name', 'Phone', 'Email'];
 
+/*
+ * Current Stage is not in RECHECKABLE and must not be. These two constants describe the single guarded
+ * transition a re-check may make to it — see the comment in diffFromRei for why it is unavoidable and
+ * why it is safe only in this one direction. Both strings are exact values of the workbook's own
+ * Current Stage dropdown; a value outside it fails the whole row write, not just its own cell.
+ */
+export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
+export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
+
 /** Stages worth revisiting. A finished lead is not going to change in REI in a way we care about. */
 export const ACTIVE_STAGES = [
   'Visit Scheduled',
@@ -96,15 +105,34 @@ export function recheckUrgency(row, lastCheckedIso, { now, hours = 24, staleHour
     ? (now.getTime() - last.getTime()) / 3600000
     : Infinity;
 
-  const visit = parseSheetDate(row['Visit Date']);
-  const passedButScheduled = Boolean(visit)
-    && dayKey(visit) < dayKey(now)
-    && text(row['Visit Status']) === 'Scheduled';
+  const visitKey = sheetDayKey(row['Visit Date']);
+  const todayKey = dayKey(now);
+  const stillScheduled = text(row['Visit Status']) === 'Scheduled';
+  const passedButScheduled = Boolean(visitKey) && stillScheduled && visitKey < todayKey;
 
-  const due = passedButScheduled ? staleHours : hours;
+  /*
+   * A visit happening TODAY or TOMORROW is on the short clock too.
+   *
+   * Only past-dated visits used to get it, which left the most consequential window uncovered: a seller
+   * who calls off a 2pm visit at 10am would not be looked at again for up to 24 hours — hours after Juan
+   * had already driven there. The point of a re-check is to catch that before the drive, not to file an
+   * accurate report afterwards.
+   */
+  const tomorrowKey = dayKey(new Date(now.getTime() + 86400000));
+  const imminent = Boolean(visitKey) && stillScheduled
+    && visitKey >= todayKey && visitKey <= tomorrowKey;
+
+  const due = passedButScheduled || imminent ? staleHours : hours;
   if (since < due) return 0;
-  // The bump keeps a passed-but-scheduled lead above every merely stale one, however long that has waited.
-  return (since === Infinity ? 1e5 : since - due) + (passedButScheduled ? 1e6 : 0);
+
+  /*
+   * Three strict tiers, so ordering never depends on how long something has been waiting:
+   *   past-but-still-Scheduled  >  happening today/tomorrow  >  merely stale
+   * The base term for a never-checked lead is 1e5, so both bumps sit above it.
+   */
+  const base = since === Infinity ? 1e5 : since - due;
+  const tier = passedButScheduled ? 2e6 : imminent ? 1e6 : 0;
+  return base + tier;
 }
 
 /**
@@ -147,6 +175,28 @@ export function parseSheetDate(value) {
 }
 
 /**
+ * The calendar day a sheet date cell refers to, as 'YYYY-MM-DD'. Never shifts.
+ *
+ * parseSheetDate builds a Date at the SERVER's local midnight, and dayKey then renders it in Pacific.
+ * On a UTC machine those disagree by one day, so '08/05/2026' came back as '2026-08-04' and a visit
+ * happening today was classified as already overdue. The scheduled re-check runs unattended on whatever
+ * timezone the machine happens to be set to, so "which day is this" cannot depend on that.
+ *
+ * A written date has no timezone to convert — '08/05/2026' means the 5th wherever it is read. So the
+ * text is used directly, and only a real Date object (which the Sheets API returns for a date-formatted
+ * cell) goes through the zone-aware path, where the conversion is genuinely needed.
+ */
+export function sheetDayKey(value, zone = ZONE) {
+  const s = text(value);
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const parsed = parseSheetDate(value);
+  return parsed ? dayKey(parsed, zone) : '';
+}
+
+/**
  * What REI now says, in the sheet's own shape — only the re-checkable fields.
  *
  * Deliberately mirrors visitToRecord's formats ('MM/dd/yyyy', 'h:mm a') so a diff compares like with
@@ -155,13 +205,34 @@ export function parseSheetDate(value) {
 export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   const startRaw = scraped.appointmentStartIso ? new Date(scraped.appointmentStartIso) : null;
   const start = startRaw && !Number.isNaN(startRaw.getTime()) ? startRaw : null;
-  const cancelled = /cancel/i.test(text(scraped.taskStatus));
+  const status = text(scraped.taskStatus);
+  const cancelled = /cancel/i.test(status);
+  const completed = /complet/i.test(status);
   const out = {};
 
   if (cancelled) {
     // REI says it is off. The date it WAS booked for stays: it is a record of the slot that was held,
     // and syncVisitCalendar_ in the workbook needs it to find the event it has to tag.
     out['Visit Status'] = 'Canceled';
+  } else if (completed) {
+    /*
+     * REI has the appointment task ticked off, so the visit happened.
+     *
+     * This is the case the whole re-check exists for. The client's example was a lead whose visit was
+     * four days in the past and still read "Scheduled" on the board; the only way that ever corrects
+     * itself is somebody noticing, and nobody was noticing.
+     *
+     * 'Completed' is a real value of the workbook's own Visit Status dropdown — checked, because a value
+     * outside the dropdown does not just fail its own cell, it fails the entire row write.
+     *
+     * The DATE is kept alongside: a completed visit still needs to say which day it happened, and REI
+     * may also have moved it before it took place.
+     */
+    out['Visit Status'] = 'Completed';
+    if (start) {
+      out['Visit Date'] = fmtSheetDate(start, zone);
+      out['Visit Time'] = fmtSheetTime(start, zone);
+    }
   } else if (start) {
     out['Visit Date'] = fmtSheetDate(start, zone);
     out['Visit Time'] = fmtSheetTime(start, zone);
@@ -194,6 +265,27 @@ export function diffFromRei(row, reiFields) {
     if (from === to) continue;               // rule 3
     changes.push({ field, from, to });
   }
+
+  /*
+   * The ONE exception to "a re-check never touches Current Stage".
+   *
+   * Setting Visit Status to Completed and stopping there would leave the lead reading "Visit Scheduled",
+   * which means the 3pm message keeps it under "Upcoming Visit — confirm the visit is going ahead" for a
+   * visit that already happened, and the dashboard card shows no flag at all. That is a worse lie than
+   * the stale "Scheduled" this feature was built to fix, because it looks tidy.
+   *
+   * The workbook itself makes exactly this move when a person sets Visit Status to Completed
+   * (onVisitStatus_ → Current Stage = 'Visit Completed — Needs Review'). A Sheets API write does not
+   * fire onEdit, so the re-check has to make the same move itself or the two halves disagree.
+   *
+   * It is narrowed hard: ONLY from 'Visit Scheduled'. If somebody has already moved the lead on to
+   * Offer Preparation, Offer Sent or anything further, that is human forward progress and rewinding it
+   * to "Needs Review" would undo a decision. In that case the stage is left exactly where it is.
+   */
+  if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
+    changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: STAGE_ON_COMPLETION });
+  }
+
   return changes;
 }
 

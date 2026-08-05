@@ -147,6 +147,36 @@ async function eventExists(calendar, eventId, calendarId) {
   }
 }
 
+export const CANCEL_TAG = '[CANCELED] ';
+
+/**
+ * Mark an existing event cancelled in place: keep the date, prefix the title, kill every reminder,
+ * stamp the description. Returns the event id, unchanged — the row keeps pointing at a real event.
+ *
+ * Reminders are the part that matters operationally. A cancelled visit that still pings an hour before
+ * "leave the office" sends somebody on a ninety-minute drive to a house nobody is expecting them at.
+ */
+export async function tagEventCancelled(calendar, calendarId, eventId) {
+  const existing = await calendar.events.get({ calendarId, eventId }).catch(() => null);
+  if (!existing) return '';                        // already gone; nothing to keep
+  const summary = String(existing.data.summary || '');
+  // Idempotent: re-running a re-check must not produce "[CANCELED] [CANCELED] Property Visit | …".
+  if (summary.startsWith(CANCEL_TAG)) return eventId;
+
+  const stamp = DateTime.now().setZone(config.calendarTimezone).toFormat('MMM d, yyyy');
+  await calendar.events.patch({
+    calendarId,
+    eventId,
+    sendUpdates: 'none',                           // never notify a seller; see CLAUDE.md
+    requestBody: {
+      summary: clip(CANCEL_TAG + summary, 500),
+      reminders: { useDefault: false, overrides: [] },
+      description: `${existing.data.description || ''}\n\nCANCELED in REI on ${stamp} — kept for the record.`.trim()
+    }
+  });
+  return eventId;
+}
+
 export async function syncCalendarEvent(auth, visit, existingEventId = '') {
   const calendar = google.calendar({ version: 'v3', auth });
   const calendarId = await resolveCalendarId(calendar);
@@ -155,11 +185,22 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
     eventId = await findEventByPrivateProperty(calendar, visit, calendarId);
   }
 
+  /*
+   * A cancelled visit is TAGGED and KEPT, never deleted.
+   *
+   * This used to delete the event, and the client's ops lead reversed that rule directly: "if the status
+   * of the calendar is cancelled it should not be removed in the calendar and this will notify as well."
+   * She is right about why. A visit vanishing off Juan's day is indistinguishable from it never having
+   * been booked, so nobody learns the seller cancelled and no record survives that the slot was held.
+   *
+   * The workbook side (markVisitEvents_ in WebApp.gs) was changed to tag months ago. This side was not,
+   * so the timed REI re-check — the one path that discovers a cancellation with nobody watching — would
+   * have quietly deleted the event and undone the behaviour she asked for. Both sides now do the same
+   * thing, and deliberately produce the same '[CANCELED] ' prefix so one event cannot be tagged twice.
+   */
   if (isCancelled(visit.taskStatus)) {
-    if (eventId) {
-      await calendar.events.delete({ calendarId, eventId });
-    }
-    return '';
+    if (!eventId) return '';
+    return tagEventCancelled(calendar, calendarId, eventId);
   }
 
   const start = DateTime.fromISO(visit.appointmentStartIso || '', { zone: config.calendarTimezone });

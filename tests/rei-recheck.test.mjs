@@ -13,7 +13,8 @@
  */
 import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
-  recheckKey, parseSheetDate, reiFieldsFromScrape, diffFromRei, calendarAffected, describeChanges
+  recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
+  describeChanges
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
@@ -208,6 +209,156 @@ check('the coverage limit is stated, not buried in a tally',
 // The whole point: a row with no REI link must never reach the browser.
 check('a linkless row is ineligible, so --only cannot reach it',
   recheckSkipReason({ ...JOSE, 'REI BlackBook Link': '' }), 'no REI link');
+
+console.log('\n=== REI saying the visit is DONE has to reach the tracker ===');
+/*
+ * The hole this closes, and it was the client's actual complaint rather than a hypothetical.
+ *
+ * taskStatus could only ever be 'Cancelled' or blank, so the only question a re-check knew how to ask
+ * was whether the visit had been called off. Somebody could tick the appointment task complete in REI
+ * and the run would report "REI agrees with the sheet" for a lead four days overdue.
+ */
+const DONE = reiFieldsFromScrape({
+  taskStatus: 'Completed', appointmentStartIso: '2026-08-01T10:30:00-07:00'
+}, { zone: 'America/Los_Angeles' });
+check('a completed REI task becomes Visit Status = Completed', DONE['Visit Status'], 'Completed');
+check("...spelled exactly as the workbook's dropdown spells it",
+  ['Scheduled', 'Completed', 'Canceled', 'Reschedule Needed'].includes(DONE['Visit Status']), true);
+check('the visit date is kept — a completed visit still says which day it happened',
+  DONE['Visit Date'], '08/01/2026');
+// Cancelled must still win: a visit cannot be both called off and carried out.
+check('cancelled outranks completed',
+  reiFieldsFromScrape({ taskStatus: 'Cancelled Appointment', appointmentStartIso: '2026-08-01T10:30:00-07:00' })['Visit Status'],
+  'Canceled');
+check('a blank task status still means neither',
+  reiFieldsFromScrape({ taskStatus: '', appointmentStartIso: '2026-08-01T10:30:00-07:00' })['Visit Status'],
+  undefined);
+
+console.log('\n--- and it drags the stage with it, in ONE direction only ---');
+/*
+ * Setting Visit Status = Completed and stopping there is a worse lie than the stale "Scheduled": the 3pm
+ * message would keep the lead under "Upcoming Visit — confirm the visit is going ahead" for a visit that
+ * already happened, and the card would show no flag at all. The workbook makes this exact move itself
+ * (onVisitStatus_) but a Sheets API write never fires onEdit, so the re-check must make it too.
+ */
+const doneChanges = diffFromRei(JOSE, DONE);
+check('the stage advances off Visit Scheduled',
+  doneChanges.find((c) => c.field === 'Current Stage')?.to, 'Visit Completed — Needs Review');
+check('the em dash matches the dropdown exactly',
+  doneChanges.find((c) => c.field === 'Current Stage')?.to.includes('—'), true);
+// The refusal that makes it safe: never rewind human forward progress.
+for (const stage of ['Offer Preparation', 'Offer Sent', 'Active Negotiation', 'Verbal Agreement',
+  'Contract Sent', 'Contract Signed', 'Lost / Closed Out']) {
+  check(`a lead already at "${stage}" keeps its stage`,
+    diffFromRei({ ...JOSE, 'Current Stage': stage }, DONE).some((c) => c.field === 'Current Stage'), false);
+}
+check('a cancellation never touches the stage — that stays a human decision',
+  diffFromRei(JOSE, { 'Visit Status': 'Canceled' }).some((c) => c.field === 'Current Stage'), false);
+check('Current Stage is still NOT in RECHECKABLE — the exception is guarded, not general',
+  RECHECKABLE.includes('Current Stage'), false);
+check('a re-run changes nothing once applied',
+  diffFromRei({ ...JOSE, 'Visit Status': 'Completed', 'Current Stage': 'Visit Completed — Needs Review',
+    'Visit Date': '08/01/2026', 'Visit Time': '10:30 AM' }, DONE), []);
+
+console.log('\n=== A visit happening today is on the SHORT clock ===');
+/*
+ * Only past-dated visits used to get the 2-hour clock, which left the window that matters uncovered: a
+ * seller calling off a 2pm visit at 10am would not be looked at again for up to 24 hours — hours after
+ * Juan had already driven there.
+ */
+const oneHourAgo = new Date(NOW.getTime() - 3600000).toISOString();
+const TODAY = { ...JOSE, 'Visit Date': '08/05/2026' };
+const TOMORROW = { ...JOSE, 'Visit Date': '08/06/2026' };
+const NEXT_WEEK = { ...JOSE, 'Visit Date': '08/12/2026' };
+check("today's visit is due after 2 hours", recheckUrgency(TODAY, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }) > 0, true);
+check("...but not after only 1", recheckUrgency(TODAY, oneHourAgo, { now: NOW }), 0);
+check("tomorrow's visit is on the short clock too",
+  recheckUrgency(TOMORROW, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }) > 0, true);
+check('next week is still on the 24-hour clock',
+  recheckUrgency(NEXT_WEEK, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }), 0);
+check('a visit already cancelled is not urgent just because it is today',
+  recheckUrgency({ ...TODAY, 'Visit Status': 'Canceled' }, oneHourAgo, { now: NOW }), 0);
+
+console.log('\n--- strict tiers: overdue beats imminent beats stale ---');
+const stale = { ...NEXT_WEEK };
+const fiveHoursAgo = new Date(NOW.getTime() - 5 * 3600000).toISOString();
+const uOverdue = recheckUrgency(JOSE, fiveHoursAgo, { now: NOW });        // Aug 1, passed
+const uImminent = recheckUrgency(TODAY, fiveHoursAgo, { now: NOW });
+const uStale = recheckUrgency(stale, new Date(NOW.getTime() - 100 * 3600000).toISOString(), { now: NOW });
+check('overdue is the most urgent', uOverdue > uImminent, true);
+check('imminent beats merely stale', uImminent > uStale, true);
+// A never-checked lead scores 1e5; both bumps must sit above it or the ordering collapses.
+check('an imminent visit outranks a never-checked one',
+  uImminent > recheckUrgency(stale, null, { now: NOW }), true);
+check('overdue still sorts first out of a mixed batch',
+  pickRecheckCandidates([stale, TODAY, JOSE], {}, { now: NOW, limit: 3 }).map((r) => r['Visit Date']),
+  ['08/01/2026', '08/05/2026', '08/12/2026']);
+
+console.log('\n--- which day a visit is on must not depend on the server timezone ---');
+/*
+ * Found by this suite: parseSheetDate builds a Date at the SERVER's local midnight and dayKey rendered
+ * it in Pacific, so on a UTC machine '08/05/2026' came back as '2026-08-04' and a visit happening TODAY
+ * was classified as already overdue. The scheduled task runs unattended on whatever timezone the machine
+ * is set to, so this had to stop depending on it.
+ */
+check("a written US date is the day it says", sheetDayKey('08/05/2026'), '2026-08-05');
+check('a single-digit month and day too', sheetDayKey('8/5/2026'), '2026-08-05');
+check('an ISO date cell is unchanged', sheetDayKey('2026-08-05'), '2026-08-05');
+check('a blank is blank, not epoch', sheetDayKey(''), '');
+check('the first of the month does not roll back a month', sheetDayKey('08/01/2026'), '2026-08-01');
+check('new year does not roll back a year', sheetDayKey('01/01/2026'), '2026-01-01');
+// The actual consequence, stated as the behaviour rather than the helper.
+check("a visit today is imminent, NOT overdue — it was overdue before this fix",
+  recheckUrgency(TODAY, fiveHoursAgo, { now: NOW }) < 2e6, true);
+check('...and a visit yesterday still is overdue',
+  recheckUrgency({ ...JOSE, 'Visit Date': '08/04/2026' }, fiveHoursAgo, { now: NOW }) > 2e6, true);
+
+console.log('\n=== A cancelled event is TAGGED and KEPT, on BOTH sides ===');
+/*
+ * Cherry reversed this rule directly: "if the status of the calendar is cancelled it should not be
+ * removed in the calendar and this will notify as well." The workbook side was changed to tag. The NODE
+ * side still deleted — and the node side is what the timed re-check calls, so the one path that finds a
+ * cancellation with nobody watching would have deleted the event and undone her rule.
+ */
+const CAL = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/google/calendar.mjs', import.meta.url), 'utf8');
+check('the cancel branch no longer deletes', /isCancelled\(visit\.taskStatus\)\)\s*\{\s*\n\s*if \(!eventId\) return '';\s*\n\s*return tagEventCancelled/.test(CAL), true);
+check('there is exactly one events.delete left in the file',
+  (CAL.match(/events\.delete/g) || []).length, 0);
+check('it tags with the same prefix the workbook uses', /CANCEL_TAG = '\[CANCELED\] '/.test(CAL), true);
+check('every reminder is removed — a cancelled visit must not send anyone driving',
+  /reminders: \{ useDefault: false, overrides: \[\] \}/.test(CAL), true);
+check('tagging twice is a no-op', /if \(summary\.startsWith\(CANCEL_TAG\)\) return eventId;/.test(CAL), true);
+check('the seller is never notified', /sendUpdates: 'none'/.test(CAL), true);
+check('the reason and date are stamped on the description', /kept for the record/.test(CAL), true);
+check('the row keeps pointing at a real event', /return eventId;\s*\n\}/.test(CAL), true);
+
+console.log('\n=== A status change found by the timer tells the team ===');
+/*
+ * A Sheets API write does not fire onEdit, so NONE of the workbook's own alerts run for anything the
+ * re-check changes. Without this the timer could correct a cancellation silently, and for a visit later
+ * the same day silent is exactly too late.
+ */
+check('the runner posts to Chat', /import \{ notifyChat \}/.test(RUNNER), true);
+check('only a status change is announced', /const statusChange = changes\.find\(\(c\) => c\.field === 'Visit Status'\)/.test(RUNNER), true);
+check('a cancellation is flagged as a warning', /kind: statusChange\.to === 'Canceled' \? 'warn' : 'ok'/.test(RUNNER), true);
+check('a cosmetic diff stays quiet', /if \(statusChange\) \{/.test(RUNNER), true);
+// Tagging needs no appointment time; requiring one skipped the calendar for the worst cancellations.
+check('a cancellation reaches the calendar even with no appointment time left',
+  /\(cancelling \|\| scraped\.appointmentStartIso\)/.test(RUNNER), true);
+
+console.log('\n=== The scraper can actually SEE a completed task ===');
+const SCRAPER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
+check('taskStatus is no longer only Cancelled-or-blank',
+  /taskStatus = cancelled \? 'Cancelled' : taskComplete \? 'Completed' : ''/.test(SCRAPER), true);
+check('it reads scoped task rows, not a page-wide regex', /readTasks\(page, selectorConfig/.test(SCRAPER), true);
+check('the task must match THIS visit on phone and date', /taskMatchesVisit\(t, thisVisit\)/.test(SCRAPER), true);
+// readTasks only. completeTask is the single REI write this project can make and must not be reachable
+// from a read path; the name appears in the scraper only in the comment saying so.
+check('it imports the read-only task lister', /^import \{ readTasks \} from '\.\/tasks\.mjs';$/m.test(SCRAPER), true);
+check('it never imports the one function that WRITES to REI',
+  /^import[^\n]*completeTask/m.test(SCRAPER), false);
+check('a failure to read tasks means unknown, not "not completed"',
+  /taskComplete = false;\s*\n\s*\}\s*\n\s*\}/.test(SCRAPER), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

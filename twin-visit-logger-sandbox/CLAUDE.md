@@ -108,7 +108,17 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
 - Match an existing row by REI record ID, then REI link, then normalized address with phone verification when available.
 - Store the Google Calendar Event ID in the tracker.
 - Keep Visit Status=`Scheduled` and Current Stage=`Visit Scheduled` for active appointments.
-- For cancelled tasks, set tracker status/stage to `Cancelled` and remove the linked Calendar event.
+- For cancelled tasks, set `Visit Status` to `Canceled` (ONE l — the workbook's dropdown spelling; a
+  value outside a dropdown fails the whole row write, not just its own cell). **Do not remove the
+  Calendar event.** The client's ops lead reversed that rule: *"if the status of the calendar is
+  cancelled it should not be removed in the calendar and this will notify as well."* The event is kept
+  on its date, its title prefixed `[CANCELED] `, and every reminder stripped — `tagEventCancelled` in
+  `src/google/calendar.mjs` and `markVisitEvents_` in `apps-script/WebApp.gs` do the same thing on
+  purpose. Deletion happens only when a row has no visit date left to sit on.
+- `Current Stage` is the team's, not the automation's. The one exception is `Visit Scheduled` →
+  `Visit Completed — Needs Review` when REI shows the appointment task complete, because the workbook
+  makes that same move itself and a Sheets API write does not fire `onEdit`. Never move a stage that a
+  person has already advanced past `Visit Scheduled`.
 
 ## Calendar behavior
 

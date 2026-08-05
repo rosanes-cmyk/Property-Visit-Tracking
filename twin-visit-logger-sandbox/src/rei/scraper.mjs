@@ -4,6 +4,10 @@ import crypto from 'node:crypto';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
 import { assertAuthenticated } from './browser.mjs';
+// readTasks is READ-ONLY — it lists task rows and clicks nothing. completeTask, the one REI write this
+// project can make, is deliberately not imported here.
+import { readTasks } from './tasks.mjs';
+import { taskMatchesVisit } from './task-gate.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -231,10 +235,49 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     // tag on the contact. We do NOT infer it from lead stage alone.
     const cancelText = `${emailFallback.rawTitle || ''} ${visibleText}`.toLowerCase();
     const cancelled = /cancel(?:l)?ed appointment/.test(cancelText) || /\bcancelled appointment\b/.test(cancelText);
-    const taskStatus = cancelled ? 'Cancelled' : '';
 
     const phoneFallback = firstRegex(visibleText, /(?:\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/);
     const emailPageFallback = firstRegex(visibleText, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+
+    /*
+     * Did REI record this visit as DONE?
+     *
+     * Without this, taskStatus could only ever be 'Cancelled' or blank, so the re-check had no way to
+     * learn that a visit had happened. That is the client's actual complaint: "Jose Anguiano · OVERDUE
+     * — visit was 2026-08-01 and is still marked Scheduled". Somebody could tick the appointment task
+     * complete in REI and a re-check would still report "REI agrees with the sheet", because the only
+     * question it knew how to ask was whether the visit had been cancelled.
+     *
+     * Two guards, because writing 'Completed' onto the wrong lead would move it out of Upcoming Visit
+     * and tell the team a visit happened that did not:
+     *
+     *   1. readTasks is scoped to the configured task ROWS and parseTaskTitle only parses rows titled
+     *      "Booked appointment". A page-wide /completed/ regex would fire on any completed task on the
+     *      contact — a call, an email, a mailer.
+     *   2. taskMatchesVisit requires the task's phone AND date to match this appointment. A seller with
+     *      two properties has two tasks, and the completed one may be the other property's.
+     *
+     * A cancellation still wins: an appointment cannot be both called off and carried out, and the
+     * cancelled signal comes from the notification itself, which is the more direct evidence.
+     */
+    let taskComplete = false;
+    if (!cancelled) {
+      try {
+        const apptDay = appointmentStartIso
+          ? DateTime.fromISO(appointmentStartIso, { zone: config.calendarTimezone }).toFormat('yyyy-MM-dd')
+          : '';
+        const thisVisit = { phone: normalize(phone || phoneFallback || emailFallback.phone || ''), date: apptDay };
+        const tasks = await readTasks(page, selectorConfig, { timezone: config.calendarTimezone });
+        const mine = tasks.find((t) => taskMatchesVisit(t, thisVisit));
+        taskComplete = Boolean(mine && mine.complete);
+      } catch (error) {
+        // Never fail a scrape over this. A missing task list means "unknown", and unknown must read as
+        // "no change" rather than as "not completed" — the diff already refuses to act on a blank.
+        taskComplete = false;
+      }
+    }
+
+    const taskStatus = cancelled ? 'Cancelled' : taskComplete ? 'Completed' : '';
 
     const result = {
       reiLink: effectiveLink,

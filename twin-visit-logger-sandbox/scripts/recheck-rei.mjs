@@ -31,6 +31,7 @@ import { config } from '../src/config.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
+import { notifyChat } from '../src/utils/notify.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE
@@ -192,7 +193,13 @@ try {
      * The calendar has to follow. Moving the date in the sheet and leaving the event where it was is the
      * worst possible half-job: the row would be right and Juan would still drive on the old day.
      */
-    if (calendarAffected(changes) && scraped.appointmentStartIso) {
+    /*
+     * Tagging a cancelled event does not need an appointment time — it keeps the date the event already
+     * has. Requiring appointmentStartIso here would skip the calendar for exactly the cancellations where
+     * REI has dropped the appointment fields, leaving a live, reminder-firing event on Juan's day.
+     */
+    const cancelling = changes.some((c) => c.field === 'Visit Status' && c.to === 'Canceled');
+    if (calendarAffected(changes) && (cancelling || scraped.appointmentStartIso)) {
       try {
         // Returns the event id — the SAME one when it updates in place, which is what must happen for a
         // moved visit. A second event on Juan's calendar for one property is the failure to avoid here.
@@ -202,6 +209,29 @@ try {
       } catch (error) {
         console.log(`    calendar NOT updated: ${error.message}`);
       }
+    }
+
+    /*
+     * Tell the team, at the moment it is found.
+     *
+     * A Sheets API write does NOT fire onEdit, so none of the workbook's own alerts run for anything this
+     * script changes. Without this, the timer could discover that a visit was cancelled, correct the row
+     * and the calendar, and nobody would know until somebody happened to look at the dashboard — which,
+     * for a visit later the same day, is exactly too late. The client's ops lead asked for a cancellation
+     * to "notify as well", and on this path that has to happen here.
+     *
+     * Only a STATUS change is announced. A corrected phone number or a tidied seller name is not news,
+     * and a message per cosmetic diff every two hours is how a Chat space gets muted.
+     */
+    const statusChange = changes.find((c) => c.field === 'Visit Status');
+    if (statusChange) {
+      const when = String(row['Visit Date'] || '').trim();
+      await notifyChat(
+        `REI re-check: ${row['Seller Name'] || '(no name)'} · ${row['Property Address']} — visit ` +
+        `${when ? `on ${when} ` : ''}is now ${statusChange.to} in REI (was "${statusChange.from || 'blank'}"). ` +
+        'Tracker, dashboard and calendar updated.',
+        { kind: statusChange.to === 'Canceled' ? 'warn' : 'ok' }
+      );
     }
   }
 } finally {

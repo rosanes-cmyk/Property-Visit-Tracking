@@ -2,12 +2,13 @@
 
 **Requested by:** Cherry · **Owner:** Jonathan Rosanes · **System:** Twin Visit Logger → Google Chat
 **Status:** `LIVE — AWAITING CHERRY'S SIGN-OFF ON THE FORMAT`. Deployed and posting; the 3:00 PM
-trigger is installed. One decision below is still open (§5.1). Everything Cherry asked for is built.
+trigger is installed. All decisions in §5 are answered. Everything Cherry asked for is built.
 
 Implemented in `apps-script/ChatNotify.gs` (`ATTENTION_BUCKETS`, `attentionBucket_`, `giftPending_`,
 `sendAttentionDigestToChat`), mirrored into `apps-script/Code.combined.gs`. Calendar behaviour in
 `apps-script/WebApp.gs` (`syncVisitCalendar_`, `markVisitEvents_`, `notifyVisitTagged_`). Covered by
-`tests/attention-digest.test.mjs` — 146 checks, and `tests/record-identity.test.mjs` — 24. 16 suites, 0 failing.
+`tests/attention-digest.test.mjs` — 147 checks, `tests/record-identity.test.mjs` — 36, and
+`tests/rei-recheck.test.mjs` — 118. 19 suites, 803 checks, 0 failing.
 
 > **History.** An earlier revision built eight buckets around *missing fields* — missing owner, missing
 > next action, missing seller motivation. Cherry replaced it: *"notification should be like this only"*,
@@ -126,7 +127,7 @@ Aug 5, 2026  ·  start with Upcoming Visit (3)
 
 ## 5. Open decisions
 
-Nothing below is decided. Cherry's five stages are built exactly as she named them.
+All four are answered. Cherry's five stages are built exactly as she named them.
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -195,19 +196,58 @@ Both the tag and delete paths share one `findVisitEvents_` matcher, which strips
 before matching. Without that, re-booking a cancelled visit would leave the tagged copy on the
 calendar permanently.
 
-## 7. Rollout
+## 7. Keeping it accurate — the REI re-check
 
-**Status: `READY FOR CHERRY APPROVAL`.** Not ready for rollout — decisions 1 and 4 are open, and no
-live output exists yet.
+The 3:00 PM message is only as good as the rows behind it, and the chain used to be **one-way**: a
+booking email arrived, REI was read once, and nothing ever looked again. So a visit completed,
+cancelled or moved *inside REI* never reached the tracker. That is what produced the line the client
+objected to — `OVERDUE — visit was Aug 1 and is still marked Scheduled` — on a lead nobody had touched.
 
-1. Cherry reviews the sample in §4 and answers the four decisions
-2. Apply only what she approves; update the tests to match
-3. Paste `apps-script/Code.combined.gs` into the workbook's script
-4. Menu → **post the attention digest now** — one card, immediately, outside the 3:00 PM schedule
-5. Screenshot for her sign-off, with confirmation that no lead data changed (the notification has no
-   write path at all — evidenced by a test, not by inspection)
-6. Only then install the 3:00 PM trigger
+A scheduled task (`Twin Visit Logger REI Recheck`, every **2 hours**) now goes back to REI for leads
+already in the tracker and corrects the sheet, the dashboard and the calendar. What it may change:
 
-**Note:** check **Extensions → Apps Script → Triggers** for `sendAttentionDigestToChat` first. If it
-is not listed, the 3:00 PM message has never run at all — in which case this is a new notification
-rather than a revision, and Cherry should be told so.
+| Field | Why REI is the authority |
+|---|---|
+| Visit Date / Visit Time | a reschedule happens in REI first |
+| Visit Status | `Canceled` when REI shows the appointment cancelled; `Completed` when the booked-appointment task is ticked off |
+| Seller Name / Phone / Email | REI is the contact record |
+| Current Stage | **only** `Visit Scheduled` → `Visit Completed — Needs Review`, and only on a completion |
+
+Everything else is refused by design — Visit Notes, Seller Motivation, Approved Offer Amount, Next
+Action, Assigned Owner. Those are what a person wrote after standing in the property or made a
+decision about, and REI has no better answer for them.
+
+Four refusals worth stating, because they are what makes this safe to leave running:
+
+1. **A blank from REI never overwrites a value.** A field missing from a scrape usually means the page
+   did not render, not that the seller has no phone number.
+2. **A stage a person has advanced is never rewound.** A lead at `Offer Sent` stays at `Offer Sent`.
+3. **REI is read-only on this path.** It opens the contact page and clicks nothing.
+4. **Bounded per run** — 5 leads, because each one opens a real browser page.
+
+Two limits stated plainly rather than left to be discovered:
+
+- **Only 4 of ~378 rows can ever be re-checked.** The other 374 are imported history with no REI link,
+  so there is no page to open. The run prints this every time.
+- **If REI itself is stale, the tracker stays stale.** Jose Anguiano's `OVERDUE` flag was *correct* —
+  REI also still said Aug 1, Scheduled, no outcome. The re-check cannot invent an outcome nobody
+  recorded; a person has to mark that visit Completed or Canceled.
+
+A status change found this way posts to Chat immediately, because a Sheets API write does not fire the
+workbook's own alerts — and for a visit later the same day, waiting until 3:00 PM is too late.
+
+## 8. Rollout
+
+**Status: `LIVE`.** All four decisions in §5 are answered, the 3:00 PM trigger is installed, and cards
+are posting. The one thing outstanding is Cherry looking at a live card and saying the format works.
+
+1. Paste `apps-script/Code.combined.gs` into the workbook's script, and `Dashboard.html`
+2. **Deploy → Manage deployments → pencil → New version** (this keeps the same `/exec` URL; "New
+   deployment" mints a different one and the old link goes stale)
+3. Menu → **post the attention digest now** — one card, immediately, outside the 3:00 PM schedule
+4. Screenshot for Cherry's sign-off, with confirmation that no lead data changed (the notification has
+   no write path at all — evidenced by a test, not by inspection)
+
+**Note:** check **Extensions → Apps Script → Triggers** for `sendAttentionDigestToChat`. If it is not
+listed, the 3:00 PM message has never run at all — in which case this is a new notification rather
+than a revision, and Cherry should be told so.
