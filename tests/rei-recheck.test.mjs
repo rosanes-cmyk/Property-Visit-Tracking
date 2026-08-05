@@ -564,7 +564,26 @@ check('it uses the tabs config that had never been read', /selectorConfig\.tabs\
 check('the doctor opens it too', /await openPanel\(page/.test(DOCTOR), true);
 check('...and says up front when it could not', /Everything below is therefore inconclusive/.test(DOCTOR), true);
 check('...and lists the real panel names so the guess can be replaced',
-  /Panels this contact page actually offers/.test(DOCTOR), true);
+  /Panels this contact page offers/.test(DOCTOR), true);
+/*
+ * The inventory must print even when there are NO tasks -- which is the only time it is needed. It was
+ * placed inside an `if (tasks.length)` block, so on the one contact that required it, it printed nothing.
+ */
+// The real statement, not the comment that mentions it — the comment sits above the inventory and made
+// this assertion pass-by-accident in reverse.
+const guardAt = DOCTOR.indexOf('if (tasks.length) {');
+check('the inventory prints before anything that depends on tasks existing',
+  DOCTOR.indexOf('Panels this contact page offers') < guardAt, true);
+check('the appointment word-search does too',
+  DOCTOR.indexOf('Does the page mention an appointment') < guardAt, true);
+// The distinction the whole evening turned on: words present means my selectors are wrong; words absent
+// means REI has no appointment and no selector will ever find one.
+check('words present is called a selector problem',
+  /the words ARE on the page and the selectors are wrong/.test(DOCTOR), true);
+check('words absent is called a real answer',
+  /REI holds no appointment for this contact, and no selector change/.test(DOCTOR), true);
+check('...and points at the person, not the code',
+  /has to be set by a person on the dashboard/.test(DOCTOR), true);
 
 console.log('\n--- and clicking is restricted to an allowlist ---');
 /*

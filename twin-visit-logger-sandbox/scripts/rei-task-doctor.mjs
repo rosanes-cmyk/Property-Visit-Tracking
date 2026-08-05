@@ -44,6 +44,45 @@ if (!panel.opened) {
   console.log('  and tell me its exact wording, so tabs.tasks in config/rei-selectors.json can name it.');
 }
 
+/*
+ * What panels the page actually offers, and whether it mentions an appointment at all.
+ *
+ * This ran inside an `if (tasks.length)` block, so on the one contact where it was needed -- zero tasks --
+ * it never printed. It belongs here, before anything that depends on the panel having opened, because
+ * tabs.tasks is a GUESS ("Tasks", "Appointments") and replacing a wrong guess is impossible without the
+ * real wording.
+ */
+console.log('\n=== Panels this contact page offers ===');
+let panelCount = 0;
+for (const role of ['tab', 'button', 'heading']) {
+  const names = await page.getByRole(role).evaluateAll(
+    (els) => els.map((e) => (e.innerText || e.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
+      .filter((t) => t && t.length < 40)
+  ).catch(() => []);
+  for (const name of [...new Set(names)]) { console.log(`  ${role.padEnd(8)} "${name}"`); panelCount += 1; }
+}
+if (!panelCount) console.log('  Nothing with an accessible name. The page may not have finished rendering.');
+
+/*
+ * Does this contact mention an appointment ANYWHERE?
+ *
+ * The difference that has been guessed at all evening: if the words are on the page, the selectors are
+ * wrong. If they are absent, REI genuinely holds no appointment for this contact and no selector will ever
+ * find one. One is my bug; the other is a job for a person. This settles which.
+ */
+console.log('\n=== Does the page mention an appointment or a task at all? ===');
+const body = (await page.locator('body').innerText().catch(() => '')) || '';
+const hits = [...new Set((body.match(/[^\n]*\b(?:appointment|task)s?\b[^\n]*/gi) || [])
+  .map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, 12);
+if (hits.length) {
+  console.log(`  ${hits.length} line(s) mention it — so the words ARE on the page and the selectors are wrong:`);
+  for (const line of hits) console.log(`    "${line.slice(0, 140)}"`);
+} else {
+  console.log('  NO mention of "appointment" or "task" anywhere in the visible text.');
+  console.log('  That is a real answer: REI holds no appointment for this contact, and no selector change');
+  console.log('  will produce one. The visit outcome has to be set by a person on the dashboard.');
+}
+
 console.log('\n=== Which task-row selector resolves ===');
 for (const selector of selectors.tasks?.taskRows || []) {
   const count = await page.locator(selector).count().catch(() => 0);
@@ -85,22 +124,7 @@ if (tasks.length) {
 if (tasks.length) {
   const row = page.locator(tasks[0].selector).nth(tasks[0].index);
 
-  /*
- * What panels the page actually offers, by name.
- *
- * tabs.tasks guesses "Tasks" and "Appointments". If neither exists the guess has to be replaced, and that
- * is impossible without knowing the real wording — so list every tab and accordion header on the page.
- */
-console.log('\n=== Panels this contact page actually offers ===');
-for (const role of ['tab', 'button']) {
-  const names = await page.getByRole(role).evaluateAll(
-    (els) => els.map((e) => (e.innerText || e.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim())
-      .filter((t) => t && t.length < 40)
-  ).catch(() => []);
-  for (const name of [...new Set(names)]) console.log(`  ${role.padEnd(7)} "${name}"`);
-}
-
-console.log('\n=== Everything identifiable INSIDE the first task row ===');
+  console.log('\n=== Everything identifiable INSIDE the first task row ===');
   const inside = await row.evaluate((el) => {
     const out = [];
     for (const node of el.querySelectorAll('*')) {
