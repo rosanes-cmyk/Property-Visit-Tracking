@@ -59,7 +59,8 @@ for (const row of matched) {
   console.log(`ROW ${row.__rowNumber}   ${row['Seller Name'] || '(no name)'}`);
   console.log(`  re-checkable: ${why ? `NO — ${why}` : 'yes'}`);
   console.log('  --- the owner columns, blanks marked ---');
-  for (const field of [...FILL_IF_BLANK, 'Assigned Visitor']) {
+  // FILL_IF_BLANK already contains both owner columns; listing one again printed it twice.
+  for (const field of FILL_IF_BLANK) {
     if (!headers.includes(field)) { console.log(`  ${field.padEnd(24)} (COLUMN DOES NOT EXIST)`); continue; }
     const raw = row[field];
     // A cell holding a space, or a formula returning "", looks filled to one reader and empty to another.
@@ -68,7 +69,7 @@ for (const row of matched) {
   }
   console.log('  --- everything else that has a value ---');
   for (const h of headers) {
-    if (!h || FILL_IF_BLANK.includes(h) || h === 'Assigned Visitor') continue;
+    if (!h || FILL_IF_BLANK.includes(h)) continue;
     const v = String(row[h] ?? '').trim();
     if (v) console.log(`  ${h.padEnd(24)} ${v.replace(/\s+/g, ' ').slice(0, 80)}`);
   }
