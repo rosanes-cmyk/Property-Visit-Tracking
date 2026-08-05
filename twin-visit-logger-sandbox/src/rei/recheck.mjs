@@ -99,6 +99,19 @@ export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
  */
 export const RECHECK_MINUTES = 20;
 
+/*
+ * How many leads one run may take.
+ *
+ * Was 5, chosen when only four rows had a REI link. With 102 linked, five per run spread a single pass over
+ * about seven hours, so a deal that moved in REI could sit wrong on the board most of a working day.
+ *
+ * 20 costs about five to eight minutes of browser time per run, which still finishes well inside the
+ * 20-minute window, and brings a full pass under two hours. The ceiling this sets on REI is 20 x 3 x 24 =
+ * 1440 page loads a day, and the ordering above means the leads that matter are read in the first minutes
+ * of it rather than the last hours.
+ */
+export const RECHECK_PER_RUN = 20;
+
 /** Stages worth revisiting. A finished lead is not going to change in REI in a way we care about. */
 export const ACTIVE_STAGES = [
   'Visit Scheduled',
@@ -109,6 +122,23 @@ export const ACTIVE_STAGES = [
   'Verbal Agreement',
   'Contract Sent'
 ];
+
+/*
+ * How much a stale row COSTS, by stage.
+ *
+ * Further along the pipeline means more at stake in being wrong: a Contract Sent lead drifting out of date
+ * is a deal in motion, a visit booked for next month is not. Only active stages appear — anything else is
+ * skipped before this is consulted.
+ */
+const STAGE_URGENCY = {
+  'Contract Sent': 6,
+  'Verbal Agreement': 5,
+  'Active Negotiation': 4,
+  'Offer Sent': 3,
+  'Offer Preparation': 2,
+  'Visit Completed — Needs Review': 1,
+  'Visit Scheduled': 0
+};
 
 const text = (v) => String(v == null ? '' : v).trim();
 
@@ -162,20 +192,36 @@ export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MIN
   if (since < minutes) return 0;
 
   /*
-   * One window for every active lead, and the tiers now only decide ORDER.
+   * WHICH lead first, when a hundred are due and a run takes five.
    *
-   * There used to be two windows — 24 hours normally, 2 for a visit that was imminent or already past. The
-   * client asked for 20 minutes flat, and a split window would have made "checked every 20 minutes" true
-   * of a handful of leads and false of the rest, which is the kind of half-truth this feature has already
-   * been corrected for three times. So there is one window, and it means what it says.
+   * The client: "i think it should be prio first the important". A flat queue ordered by staleness spread
+   * one pass over about seven hours and gave a Contract Sent deal the same place as a visit booked for next
+   * month. Four terms, in strictly separated magnitudes so the ordering is decidable by reading it:
    *
-   * The tiers survive because they still matter when more leads are due than a run may take:
-   *   past-but-still-Scheduled  >  happening today/tomorrow  >  everything else
-   * The base term for a never-checked lead is 1e5, so both bumps sit above it.
+   *   1. the board is WRONG ABOUT TODAY   past visit still marked Scheduled     20,000,000
+   *   2. it is about to matter            visit today or tomorrow               10,000,000
+   *   3. the team's own ranking           Opportunity Priority x 10,000         up to 1,000,000
+   *   4. money in play                    stage weight x 100                    up to 600
+   *   5. tie-break                        how long it has waited                up to 99
+   *
+   * Opportunity Priority ranks ABOVE the stage weight, and that ordering is not arbitrary. Amelia Middel's
+   * priority went 34 -> 74 the moment her stage advanced to Offer Sent, so the workbook's formula already
+   * accounts for the stage. Weighting stage above it would double-count the same fact and overrule the
+   * team's own scoring — an Offer Preparation lead the sheet scores 90 really is more worth checking than an
+   * Offer Sent one it scores 74. Stage survives only as a tie-break between equal scores.
+   *
+   * Using the sheet's own number means "important" means what the team decided it means, not what I would
+   * have invented here.
    */
-  const base = since === Infinity ? 1e5 : since - minutes;
-  const tier = passedButScheduled ? 2e6 : imminent ? 1e6 : 0;
-  return base + tier;
+  const stageWeight = STAGE_URGENCY[text(row['Current Stage'])] || 0;
+  const priority = Number(String(row['Opportunity Priority'] || '').replace(/[^\d.]/g, '')) || 0;
+  // Capped so a lead nobody has checked in a month cannot outrank a contract that went stale an hour ago.
+  const waited = since === Infinity ? 99 : Math.min(Math.round(since - minutes), 98);
+
+  return (passedButScheduled ? 20000000 : imminent ? 10000000 : 0)
+    + Math.min(priority, 100) * 10000
+    + stageWeight * 100
+    + waited;
 }
 
 /**
@@ -185,7 +231,7 @@ export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MIN
  * would sit there for an hour and hammer REI — the same shape of mistake that got a WhatsApp number
  * banned. Bounded and repeated is slower and survivable.
  */
-export function pickRecheckCandidates(rows, state = {}, { now, limit = 5, minutes = RECHECK_MINUTES } = {}) {
+export function pickRecheckCandidates(rows, state = {}, { now, limit = RECHECK_PER_RUN, minutes = RECHECK_MINUTES } = {}) {
   return rows
     .map((row) => ({
       row,

@@ -3,7 +3,7 @@
  *
  *   node scripts/recheck-rei.mjs                 <- dry run: says what it WOULD change
  *   node scripts/recheck-rei.mjs --yes           <- applies it
- *   node scripts/recheck-rei.mjs --limit 10      <- more per run (default 5)
+ *   node scripts/recheck-rei.mjs --limit 40      <- more per run (default 20)
  *   node scripts/recheck-rei.mjs --only "Jose"   <- one lead, matched on seller or address
  *
  * Why this exists: the chain was one-way. A booking email arrived, REI was read once, the row and the
@@ -35,7 +35,7 @@ import { notifyChat } from '../src/utils/notify.mjs';
 import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
-  diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK
+  diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK, RECHECK_PER_RUN
 } from '../src/rei/recheck.mjs';
 
 const args = process.argv.slice(2);
@@ -45,7 +45,7 @@ const numArg = (name, fallback) => {
   const n = i >= 0 ? Number.parseInt(args[i + 1] ?? '', 10) : NaN;
   return Number.isFinite(n) ? n : fallback;
 };
-const LIMIT = numArg('--limit', 5);
+const LIMIT = numArg('--limit', RECHECK_PER_RUN);
 const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? String(args[i + 1] || '').toLowerCase() : ''; })();
 
 const STATE_FILE = path.resolve('./data/rei-recheck.json');

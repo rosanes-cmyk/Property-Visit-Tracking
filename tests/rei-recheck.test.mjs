@@ -113,7 +113,11 @@ console.log('\n=== The run is capped, because each one opens a browser ===');
 const many = Array.from({ length: 40 }, (_, i) => ({
   ...JOSE, 'REI Record ID': String(1000 + i), 'Visit Date': '08/20/2026', 'Seller Name': `Seller ${i}`
 }));
-check('40 due rows produce 5 candidates', pickRecheckCandidates(many, {}, { now: NOW }).length, 5);
+/*
+ * 20 per run, not 5. Five was chosen when only four rows had a REI link; with 102 linked it spread one pass
+ * over about seven hours, so a deal that moved in REI could sit wrong on the board most of a working day.
+ */
+check('40 due rows produce 20 candidates', pickRecheckCandidates(many, {}, { now: NOW }).length, 20);
 check('the cap is adjustable', pickRecheckCandidates(many, {}, { now: NOW, limit: 2 }).length, 2);
 check('an accurate sheet produces none',
   pickRecheckCandidates(many, Object.fromEntries(many.map((r) => [recheckKey(r), { lastCheckedAt: NOW.toISOString() }])),
@@ -416,10 +420,17 @@ check('a blank is blank, not epoch', sheetDayKey(''), '');
 check('the first of the month does not roll back a month', sheetDayKey('08/01/2026'), '2026-08-01');
 check('new year does not roll back a year', sheetDayKey('01/01/2026'), '2026-01-01');
 // The actual consequence, stated as the behaviour rather than the helper.
+/*
+ * The tier magnitudes changed when importance ordering was added: 20,000,000 for a board that is wrong
+ * about today, 10,000,000 for a visit today or tomorrow. Compared against the boundary between them rather
+ * than a hard-coded number, so this keeps testing the BEHAVIOUR and not the arithmetic.
+ */
 check("a visit today is imminent, NOT overdue — it was overdue before this fix",
-  recheckUrgency(TODAY, fiveHoursAgo, { now: NOW }) < 2e6, true);
+  recheckUrgency(TODAY, fiveHoursAgo, { now: NOW }) < 20000000, true);
+check('...but is still ranked as imminent',
+  recheckUrgency(TODAY, fiveHoursAgo, { now: NOW }) >= 10000000, true);
 check('...and a visit yesterday still is overdue',
-  recheckUrgency({ ...JOSE, 'Visit Date': '08/04/2026' }, fiveHoursAgo, { now: NOW }) > 2e6, true);
+  recheckUrgency({ ...JOSE, 'Visit Date': '08/04/2026' }, fiveHoursAgo, { now: NOW }) >= 20000000, true);
 
 console.log('\n=== A cancelled event is TAGGED and KEPT, on BOTH sides ===');
 /*
@@ -756,6 +767,64 @@ check('...and fill-only means it cannot overwrite',
 console.log('\n--- and the run says "filled", not "changed" ---');
 check('a fill is reported distinctly', /filled \$\{filled\.length\} empty field\(s\) from REI/.test(RUNNER), true);
 check('...naming each field and value', /\$\{c\.field\} = "\$\{c\.to\}"/.test(RUNNER), true);
+
+console.log('\n=== The important leads are read first ===');
+/*
+ * The client: "i think it should be prio first the important."
+ *
+ * A flat queue ordered by staleness gave a Contract Sent deal the same place as a visit booked for next
+ * month. Ordering now runs: board wrong about today > visit today/tomorrow > the sheet's own Opportunity
+ * Priority > stage > how long it has waited.
+ */
+const lead = (stage, priority, visitDate, visitStatus = 'Scheduled') => ({
+  'REI BlackBook Link': 'x', 'Current Stage': stage, 'Opportunity Priority': priority,
+  'Visit Date': visitDate, 'Visit Status': visitStatus, 'Seller Name': `${stage}/${priority}`
+});
+const QUEUE = [
+  lead('Visit Scheduled', 20, '09/30/2026'),
+  lead('Contract Sent', 80, '07/01/2026', 'Completed'),
+  lead('Offer Sent', 74, '08/01/2026', 'Completed'),
+  lead('Visit Scheduled', 30, '08/01/2026'),
+  lead('Active Negotiation', 40, '07/01/2026', 'Completed'),
+  lead('Visit Scheduled', 10, '08/05/2026'),
+  lead('Offer Preparation', 90, '07/01/2026', 'Completed')
+];
+check('the whole queue, in order',
+  pickRecheckCandidates(QUEUE, {}, { now: NOW, limit: 9 }).map((r) => r['Seller Name']),
+  ['Visit Scheduled/30', 'Visit Scheduled/10', 'Offer Preparation/90', 'Contract Sent/80',
+    'Offer Sent/74', 'Active Negotiation/40', 'Visit Scheduled/20']);
+
+console.log('\n--- and the sheet\'s own score outranks the stage ---');
+/*
+ * Not arbitrary. Amelia Middel's Opportunity Priority went 34 -> 74 the moment her stage advanced to Offer
+ * Sent, so the workbook's formula already accounts for the stage. Weighting stage above it would
+ * double-count the same fact and overrule the team's own scoring.
+ */
+check('Offer Preparation scored 90 beats Offer Sent scored 74',
+  recheckUrgency(lead('Offer Preparation', 90, '07/01/2026', 'Completed'), null, { now: NOW })
+    > recheckUrgency(lead('Offer Sent', 74, '08/01/2026', 'Completed'), null, { now: NOW }), true);
+check('...and at EQUAL scores the later stage wins',
+  recheckUrgency(lead('Contract Sent', 50, '07/01/2026', 'Completed'), null, { now: NOW })
+    > recheckUrgency(lead('Offer Preparation', 50, '07/01/2026', 'Completed'), null, { now: NOW }), true);
+// A time-critical visit still jumps the entire queue, whatever the score says.
+check('a visit today outranks the highest-scoring deal',
+  recheckUrgency(lead('Visit Scheduled', 1, '08/05/2026'), null, { now: NOW })
+    > recheckUrgency(lead('Contract Sent', 100, '07/01/2026', 'Completed'), null, { now: NOW }), true);
+check('an overdue visit outranks even that',
+  recheckUrgency(lead('Visit Scheduled', 1, '08/01/2026'), null, { now: NOW })
+    > recheckUrgency(lead('Visit Scheduled', 100, '08/05/2026'), null, { now: NOW }), true);
+// A missing or junk priority must not throw or win.
+check('a blank priority scores as zero, not as a crash',
+  recheckUrgency({ ...lead('Offer Sent', '', '07/01/2026', 'Completed') }, null, { now: NOW }) > 0, true);
+check('a formatted priority is read', recheckUrgency(lead('Offer Sent', '74', '07/01/2026', 'Completed'), null, { now: NOW })
+  === recheckUrgency(lead('Offer Sent', 74, '07/01/2026', 'Completed'), null, { now: NOW }), true);
+check('an absurd priority is capped rather than swamping the tiers',
+  recheckUrgency(lead('Offer Sent', 99999, '07/01/2026', 'Completed'), null, { now: NOW }) < 10000000, true);
+// Staleness is the LAST word, so two identical leads still take turns.
+check('among identical leads, the one waiting longest goes first',
+  recheckUrgency(lead('Offer Sent', 50, '07/01/2026', 'Completed'), null, { now: NOW })
+    > recheckUrgency(lead('Offer Sent', 50, '07/01/2026', 'Completed'),
+      new Date(NOW.getTime() - 30 * 60000).toISOString(), { now: NOW }), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
