@@ -24,10 +24,20 @@
  *
  * Both spellings throughout: REI writes "cancelled", the workbook's dropdown says "Canceled".
  */
+/*
+ * "visit" counts, not only "appointment".
+ *
+ * The dashboard showed Lili at Visit Scheduled / OVERDUE while her own note in the tracker read
+ * "Cancelled the property visit - spoke to her first about the price range". The team writes "visit",
+ * "walkthrough" and "showing" as readily as "appointment", and matching only the last of those is why an
+ * outcome a colleague had already recorded never reached the status.
+ */
+const THING = '(?:appointment|visit|walk\\s?through|showing|meeting)';
+
 const CANCEL_PHRASES = [
-  /cancel(?:l)?ed\s+(?:\S+\s+){0,2}appointment/i,
-  /appointment\s+(?:\S+\s+){0,2}cancel(?:l)?ed/i,
-  /cancel(?:l)?ation\s+of\s+(?:\S+\s+){0,2}appointment/i
+  new RegExp(`cancel(?:l)?ed\\s+(?:\\S+\\s+){0,2}${THING}`, 'i'),
+  new RegExp(`${THING}\\s+(?:\\S+\\s+){0,2}cancel(?:l)?ed`, 'i'),
+  new RegExp(`cancel(?:l)?ation\\s+of\\s+(?:\\S+\\s+){0,2}${THING}`, 'i')
 ];
 
 /*
@@ -38,7 +48,37 @@ const CANCEL_PHRASES = [
  * matched span rather than the page, so an unrelated hypothetical elsewhere on a long contact page cannot
  * suppress a real cancellation.
  */
-const HYPOTHETICAL = /\b(?:may|might|could|would|if|will|going to|wants to|asked to|threatened to|risk of)\b/i;
+/*
+ * Words that turn a statement into a possibility, on EITHER side of the phrase.
+ *
+ * One list, checked before and after, because splitting it produced three false positives in a row that
+ * only this project's own tests caught:
+ *
+ *   "no show risk — she has cancelled on two other buyers"     the hedge TRAILS the phrase
+ *   "cancelled visit is a possibility if the tenant refuses"   the cancellation path had its own check
+ *   "possible no show, Juan will call ahead"                   "possible" was not on the list at all
+ *   "worried about a cancelled walkthrough"                    nor was "worried"
+ *
+ * Each would have marked a live visit Canceled and told the team not to drive to it. So the rule is one
+ * rule, and it errs towards suppression: missing a cancellation leaves the row as it was and the OVERDUE
+ * badge still flags it for a person, whereas inventing one sends nobody to a house where a seller is
+ * waiting. Those costs are not symmetric and the bias is deliberate.
+ *
+ * "wants to" and "risk of" stay as phrases rather than bare words — a note reading "seller wants 495k" is
+ * not a hedge, and neither is "high risk lead" three sentences away.
+ */
+const HEDGE = new RegExp('\\b(?:may|might|could|would|if|will|going to|wants to|asked to|threatened to'
+  + '|risk|risks|risk of|potential|potentially|chance|possibility|possible|possibly|likely|unlikely'
+  + '|concern|concerned|worry|worried|maybe|perhaps|expect|expecting|in case)\\b', 'i');
+
+/** Is this match hedged by the words immediately around it? */
+function isHedged(text, match) {
+  const at = match.index ?? 0;
+  const end = at + match[0].length;
+  return HEDGE.test(text.slice(Math.max(0, at - 40), at))
+    || HEDGE.test(match[0])
+    || HEDGE.test(text.slice(end, end + 24));
+}
 
 /**
  * What the page says about a cancellation: { cancelled, phrase, hypothetical }.
@@ -57,11 +97,7 @@ export function cancellationEvidence(pageText) {
     const at = match.index ?? 0;
     const phrase = text.slice(Math.max(0, at - 60), Math.min(text.length, at + match[0].length + 60)).trim();
 
-    // Look for a hedge in the words immediately before the match, not across the whole page.
-    const lead = text.slice(Math.max(0, at - 40), at);
-    if (HYPOTHETICAL.test(lead) || HYPOTHETICAL.test(match[0])) {
-      return { cancelled: false, phrase, hypothetical: true };
-    }
+    if (isHedged(text, match)) return { cancelled: false, phrase, hypothetical: true };
     return { cancelled: true, phrase, hypothetical: false };
   }
   return { cancelled: false, phrase: '', hypothetical: false };
@@ -88,4 +124,70 @@ const DEAD_TAGS = ['dead lead', 'lost deal', "we're passing", 'we are passing', 
 export function deadLeadTags(pageText) {
   const text = String(pageText == null ? '' : pageText).toLowerCase();
   return DEAD_TAGS.filter((tag) => text.includes(tag));
+}
+
+/*
+ * A visit that did not happen because nobody was there.
+ *
+ * "Lead is no show, continue to engage with him" was sitting in the tracker while the card read Visit
+ * Scheduled. A no-show is an outcome — the visit is over and it did not happen — but the workbook's Visit
+ * Status dropdown has no 'No Show' value, so it maps to Canceled and the report says which wording it
+ * came from, because "cancelled" and "they didn't turn up" mean different things to whoever reads it next.
+ */
+const NOSHOW_PHRASES = [
+  /\bno[\s-]?show(?:ed)?\b/i,
+  /\bdid\s?n[o']?t\s+show(?:\s+up)?\b/i,
+  /\bnobody\s+(?:was\s+)?(?:home|there)\b/i,
+  /\bno\s?one\s+(?:was\s+)?(?:home|there)\b/i
+];
+
+/*
+ * A visit that DID happen.
+ *
+ * Much tighter than the others, and deliberately so. "Visited" and "met" appear in notes written before a
+ * visit as easily as after one ("visited the area last week", "met her at the office"), and marking a
+ * visit Completed moves the lead into the section Cherry reads as "decide: offer or pass". So this wants
+ * the visit itself named, in the past tense.
+ */
+const DONE_PHRASES = [
+  new RegExp(`${THING}\\s+(?:was\\s+|has\\s+been\\s+)?(?:completed|done|finished)`, 'i'),
+  new RegExp(`(?:completed|finished)\\s+(?:the\\s+|his\\s+|her\\s+|their\\s+)?${THING}`, 'i'),
+  new RegExp(`${THING}\\s+went\\s+(?:well|ahead|fine|great)`, 'i')
+];
+
+/**
+ * What a free-text note says happened to the visit: { status, kind, phrase }.
+ *
+ * `status` is a real value of the workbook's Visit Status dropdown, or '' for "the note says nothing".
+ * `kind` is the finer reading — 'canceled', 'no-show' or 'completed' — because a no-show and a
+ * cancellation both become Canceled but a person should be told which was written.
+ *
+ * This reads the TRACKER'S OWN notes, so it needs no REI link and covers all 378 rows rather than the 4
+ * with a REI page. The team records outcomes in notes; nothing ever read them, which is why the dashboard
+ * disagreed with what colleagues had already written down.
+ */
+export function visitOutcomeFromNotes(notes) {
+  const text = String(notes == null ? '' : notes).replace(/\s+/g, ' ');
+  if (!text.trim()) return { status: '', kind: '', phrase: '' };
+
+  const near = (match) => {
+    const at = match.index ?? 0;
+    return text.slice(Math.max(0, at - 50), Math.min(text.length, at + match[0].length + 50)).trim();
+  };
+  const hedged = (match) => isHedged(text, match);
+
+  // Cancelled first: it is the most consequential and the most clearly worded of the three.
+  const cancel = cancellationEvidence(text);
+  if (cancel.cancelled) return { status: 'Canceled', kind: 'canceled', phrase: cancel.phrase };
+
+  for (const [patterns, status, kind] of [
+    [NOSHOW_PHRASES, 'Canceled', 'no-show'],
+    [DONE_PHRASES, 'Completed', 'completed']
+  ]) {
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && !hedged(match)) return { status, kind, phrase: near(match) };
+    }
+  }
+  return { status: '', kind: '', phrase: cancel.hypothetical ? cancel.phrase : '' };
 }

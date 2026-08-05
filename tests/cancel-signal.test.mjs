@@ -18,7 +18,8 @@
  * The risk in widening a regex over free page text is firing on the wrong sentence, so most of what
  * follows tests what must NOT match.
  */
-import { cancellationEvidence, deadLeadTags } from '../twin-visit-logger-sandbox/src/rei/cancel-signal.mjs';
+import { cancellationEvidence, deadLeadTags, visitOutcomeFromNotes } from '../twin-visit-logger-sandbox/src/rei/cancel-signal.mjs';
+import fs from 'node:fs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -133,6 +134,108 @@ check('"we are passing" is caught as well as the apostrophe form',
   deadLeadTags('we are passing on this one'), ['we are passing']);
 // The whole point of the split: tags never become a status.
 check('a dead tag is NOT a cancellation', cancellationEvidence(JOSE_TAGS).cancelled, false);
+
+console.log('\n=== The outcome a colleague already wrote in the notes ===');
+/*
+ * From one screenshot of the client's live dashboard, both cards reading "Visit Scheduled":
+ *
+ *   Lili          note: "Cancelled the property visit - spoke to her first about the price range |
+ *                        Cherry to call her back this afternoon to present preliminary offer"
+ *   Henry Watson  note: "Lead is no show, continue to engage with him"
+ *
+ * "as you see in the dashboard its not the same in the rei that already updated at all by my colleagues."
+ * The answer was not in REI at all. It was in his own sheet, and nothing read it.
+ */
+const LILI = 'Cancelled the property visit - spoke to her first about the price range | Cherry to call ' +
+  'her back this afternoon to present preliminary offer and negotiate';
+const HENRY = 'Lead is no show, continue to engage with him';
+
+check("Lili's note is a cancellation", visitOutcomeFromNotes(LILI).status, 'Canceled');
+check('...read as a cancellation, not a no-show', visitOutcomeFromNotes(LILI).kind, 'canceled');
+check('...and the sentence is quoted back', /Cancelled the property visit/.test(visitOutcomeFromNotes(LILI).phrase), true);
+// "visit" rather than "appointment" is exactly what the old rule could not see.
+check('the OLD appointment-only rule missed it', /appointment/i.test(LILI), false);
+
+check("Henry's no-show is an outcome", visitOutcomeFromNotes(HENRY).status, 'Canceled');
+check('...and is labelled a no-show, not a cancellation', visitOutcomeFromNotes(HENRY).kind, 'no-show');
+
+console.log('\n--- other wordings the team really uses ---');
+for (const [note, status, kind] of [
+  ['Visit completed, seller wants 495k', 'Completed', 'completed'],
+  ['visit went well, preparing offer', 'Completed', 'completed'],
+  ['Completed the walkthrough this morning', 'Completed', 'completed'],
+  ['Nobody was home when Juan arrived', 'Canceled', 'no-show'],
+  ['seller no-showed', 'Canceled', 'no-show'],
+  ["didn't show up", 'Canceled', 'no-show'],
+  ['cancelled the showing', 'Canceled', 'canceled'],
+  ['walkthrough cancelled by seller', 'Canceled', 'canceled']
+]) {
+  check(`"${note}" -> ${status}/${kind}`,
+    [visitOutcomeFromNotes(note).status, visitOutcomeFromNotes(note).kind], [status, kind]);
+}
+
+console.log('\n--- and the notes that must NOT move a status ---');
+/*
+ * These are the false positives that would tell the team a visit is over when it is still coming. The last
+ * two matter most: "Conduct scheduled visit & log outcome" is the Next Action text on EVERY scheduled lead,
+ * and it is read by this audit, so a loose rule would have cancelled the entire pipeline.
+ */
+for (const note of [
+  'Conduct scheduled visit & log outcome',
+  'Scheduled-visit reminder — conduct visit & log outcome',
+  'visited the area last week to check comps',
+  'she may cancel the visit if we cannot do 495',
+  'wants to cancel the visit unless we raise the offer',
+  'will cancel the walkthrough if the tenant objects',
+  'no show risk — she has cancelled on two other buyers',
+  'met her at the office to sign paperwork',
+  'Auto-logged from REI task email - source: PropertyLeads (PPL) - REI stage: 3 Appointment Booked',
+  ''
+]) {
+  check(`"${note.slice(0, 52)}" moves nothing`, visitOutcomeFromNotes(note).status, '');
+}
+check('null is safe', visitOutcomeFromNotes(null).status, '');
+
+console.log('\n--- a hedge AFTER the phrase counts too ---');
+/*
+ * Caught by this suite, not in production: "no show risk — she has cancelled on two other buyers" read as
+ * a no-show and would have marked a live visit Canceled. The qualifier trails the phrase, and the hedge
+ * check only looked at the words in front of it.
+ */
+for (const note of [
+  'no show risk — she has cancelled on two other buyers',
+  'cancelled visit is a possibility if the tenant refuses access',
+  'possible no show, Juan will call ahead',
+  'worried about a cancelled walkthrough'
+]) {
+  check(`"${note.slice(0, 50)}" moves nothing`, visitOutcomeFromNotes(note).status, '');
+}
+// It must not suppress the real thing: neither live note contains a trailing hedge.
+check("Lili's real note still fires", visitOutcomeFromNotes(LILI).status, 'Canceled');
+check("Henry's real note still fires", visitOutcomeFromNotes(HENRY).status, 'Canceled');
+check('a plain completion still fires', visitOutcomeFromNotes('Visit completed, offer at 450k').status, 'Completed');
+
+console.log('\n=== What the audit will and will not write ===');
+const AUDIT = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/audit-notes.mjs', import.meta.url), 'utf8');
+check('it is a dry run unless told otherwise', /const APPLY = args\.includes\('--yes'\)/.test(AUDIT), true);
+check('it reads every column a colleague might type into', /const NOTE_COLUMNS = \[/.test(AUDIT), true);
+check('...including the one REI notes land in', /'Automation Note'/.test(AUDIT), true);
+check('it writes Visit Status', /cell\('Visit Status', found\.status\)/.test(AUDIT), true);
+// The refusal that makes it safe to run over 378 rows of other people's work.
+check('a status a PERSON set is never overwritten',
+  /if \(current && current !== 'Scheduled'\) \{/.test(AUDIT), true);
+check('...it is reported as a conflict instead', /notes and a HUMAN-SET status disagree/.test(AUDIT), true);
+check('...and handed to a person', /The automation does not overrule a status somebody set/.test(AUDIT), true);
+check('the stage move is the same guarded one, reused not reinvented',
+  /STAGE_ADVANCE_FROM, STAGE_ON_COMPLETION/.test(AUDIT), true);
+check('every change quotes its evidence', /because: "\.\.\.\$\{found\.phrase\}\.\.\."/.test(AUDIT), true);
+check('it writes single cells, never whole rows', /values\.batchUpdate/.test(AUDIT), true);
+check('it never touches Visit Notes', /cell\('Visit Notes'/.test(AUDIT), false);
+check('it never sets money', /Approved Offer Amount/.test(AUDIT), false);
+// One Chat message for the whole run: a first pass over a backlog could touch dozens of rows.
+check('it posts ONE summary, not one per lead',
+  (AUDIT.match(/await notifyChat\(/g) || []).length, 1);
+check('...and caps how many it lists', /slice\(0, 8\)/.test(AUDIT), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
