@@ -9,6 +9,7 @@
  * no timer at all, because it looks like cover.
  */
 import fs from 'node:fs';
+import path from 'node:path';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -35,11 +36,18 @@ for (const [task, runner] of [
 
 console.log('\n=== The re-check interval ===');
 /*
- * Two hours matches the short clock in recheck.mjs for a visit whose date has passed while the row still
- * says Scheduled — the case where the board is actively wrong about today. Tighter than that just opens
- * browser pages for leads nothing has changed about.
+ * 20 minutes, matching RECHECK_MINUTES in recheck.mjs — at the client's request, "why this is two hour?
+ * should be every 20 mins check it". It was 120.
+ *
+ * The two numbers have to agree or the timer is theatre: with a 120-minute timer and a 20-minute per-lead
+ * window nothing is checked between firings, and with a 20-minute timer and the old 24-hour window every
+ * run would fire and skip every lead. What bounds the cost is the per-run CAP of 5 leads, not the interval
+ * — three runs an hour is at most 360 REI page loads a day however many leads are active.
  */
-check('defaults to 2 hours', /\[int\]\$RecheckIntervalMinutes = 120/.test(INSTALL), true);
+check('defaults to 20 minutes', /\[int\]\$RecheckIntervalMinutes = 20/.test(INSTALL), true);
+check('...and the per-lead window in recheck.mjs agrees with it',
+  /export const RECHECK_MINUTES = 20;/.test(
+    fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/recheck.mjs'), 'utf8')), true);
 check('refuses anything under 5 minutes', /RecheckIntervalMinutes -lt 5/.test(INSTALL), true);
 check('...and says why', /opens a REI browser page per lead/.test(INSTALL), true);
 check('can be skipped entirely', /\$SkipRecheck/.test(INSTALL), true);

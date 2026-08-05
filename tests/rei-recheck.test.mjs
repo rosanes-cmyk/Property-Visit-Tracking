@@ -81,19 +81,33 @@ console.log('\n=== A passed visit still marked Scheduled jumps the queue ===');
 const joseUrgency = recheckUrgency(JOSE, '2026-08-05T14:00:00-07:00', { now: NOW });
 const normal = { ...JOSE, 'Visit Date': '08/20/2026' };
 check('Jose is due after 3 hours', joseUrgency > 0, true);
-check('a future visit checked 3 hours ago is NOT due yet',
-  recheckUrgency(normal, '2026-08-05T14:00:00-07:00', { now: NOW }), 0);
-check('...and IS due after 25 hours',
-  recheckUrgency(normal, '2026-08-04T15:00:00-07:00', { now: NOW }) > 0, true);
+/*
+ * The window is 20 MINUTES for every active lead, at the client's request: "why this is two hour? should
+ * be every 20 mins check it." It used to be 24 hours, with 2 for anything imminent or overdue. A split
+ * window would make "checked every 20 minutes" true of a few leads and false of the rest.
+ */
+check('a lead checked 5 minutes ago is NOT due yet',
+  recheckUrgency(normal, new Date(NOW.getTime() - 5 * 60000).toISOString(), { now: NOW }), 0);
+check('...and IS due after 21 minutes',
+  recheckUrgency(normal, new Date(NOW.getTime() - 21 * 60000).toISOString(), { now: NOW }) > 0, true);
+check('the window is configurable, and read in minutes',
+  recheckUrgency(normal, new Date(NOW.getTime() - 30 * 60000).toISOString(), { now: NOW, minutes: 60 }), 0);
 check('Jose outranks an ordinary stale lead by a mile',
   joseUrgency > recheckUrgency(normal, '2026-08-01T15:00:00-07:00', { now: NOW }), true);
 check('never checked at all is due immediately',
   recheckUrgency(JOSE, '', { now: NOW }) > 0, true);
 check('a skipped row has no urgency however stale',
   recheckUrgency({ ...JOSE, 'REI BlackBook Link': '' }, '', { now: NOW }), 0);
-// A completed visit whose date has passed is normal, not urgent — that is what completed means.
-check('a passed visit marked Completed is not urgent',
-  recheckUrgency({ ...JOSE, 'Visit Status': 'Completed' }, '2026-08-05T14:00:00-07:00', { now: NOW }), 0);
+/*
+ * A completed visit is re-checked like any other active lead, but gets NO overdue bump — that is what
+ * completed means. With one window for everyone, the tiers are the only thing separating them, so this
+ * asserts the tier rather than the window.
+ */
+const completedUrgency = recheckUrgency({ ...JOSE, 'Visit Status': 'Completed' },
+  '2026-08-05T14:00:00-07:00', { now: NOW });
+check('a passed visit marked Completed is still due', completedUrgency > 0, true);
+check('...but carries no overdue bump', completedUrgency < 1e6, true);
+check('...and is outranked by one still claiming to be Scheduled', joseUrgency > completedUrgency, true);
 
 console.log('\n=== The run is capped, because each one opens a browser ===');
 const many = Array.from({ length: 40 }, (_, i) => ({
@@ -333,14 +347,21 @@ const oneHourAgo = new Date(NOW.getTime() - 3600000).toISOString();
 const TODAY = { ...JOSE, 'Visit Date': '08/05/2026' };
 const TOMORROW = { ...JOSE, 'Visit Date': '08/06/2026' };
 const NEXT_WEEK = { ...JOSE, 'Visit Date': '08/12/2026' };
-check("today's visit is due after 2 hours", recheckUrgency(TODAY, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }) > 0, true);
-check("...but not after only 1", recheckUrgency(TODAY, oneHourAgo, { now: NOW }), 0);
-check("tomorrow's visit is on the short clock too",
-  recheckUrgency(TOMORROW, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }) > 0, true);
-check('next week is still on the 24-hour clock',
-  recheckUrgency(NEXT_WEEK, new Date(NOW.getTime() - 3 * 3600000).toISOString(), { now: NOW }), 0);
-check('a visit already cancelled is not urgent just because it is today',
-  recheckUrgency({ ...TODAY, 'Visit Status': 'Canceled' }, oneHourAgo, { now: NOW }), 0);
+const fiveMinAgo = new Date(NOW.getTime() - 5 * 60000).toISOString();
+check("today's visit is due after 21 minutes",
+  recheckUrgency(TODAY, new Date(NOW.getTime() - 21 * 60000).toISOString(), { now: NOW }) > 0, true);
+check('...but not after only 5', recheckUrgency(TODAY, fiveMinAgo, { now: NOW }), 0);
+check("tomorrow's visit is on the same window", recheckUrgency(TOMORROW, oneHourAgo, { now: NOW }) > 0, true);
+check('so is next week — one window for every active lead',
+  recheckUrgency(NEXT_WEEK, oneHourAgo, { now: NOW }) > 0, true);
+// ...but they are not equally URGENT. The tiers decide who goes first when more are due than a run takes.
+check("today's visit outranks next week's",
+  recheckUrgency(TODAY, oneHourAgo, { now: NOW }) > recheckUrgency(NEXT_WEEK, oneHourAgo, { now: NOW }), true);
+check('a visit already cancelled gets no imminent bump',
+  recheckUrgency({ ...TODAY, 'Visit Status': 'Canceled' }, oneHourAgo, { now: NOW }) < 1e6, true);
+check('...and is outranked by one still marked Scheduled today',
+  recheckUrgency(TODAY, oneHourAgo, { now: NOW })
+    > recheckUrgency({ ...TODAY, 'Visit Status': 'Canceled' }, oneHourAgo, { now: NOW }), true);
 
 console.log('\n--- strict tiers: overdue beats imminent beats stale ---');
 const stale = { ...NEXT_WEEK };
@@ -404,6 +425,24 @@ console.log('\n=== A status change found by the timer tells the team ===');
 check('the runner posts to Chat', /import \{ notifyChat \}/.test(RUNNER), true);
 check('only a status change is announced', /const statusChange = changes\.find\(\(c\) => c\.field === 'Visit Status'\)/.test(RUNNER), true);
 check('a cancellation is flagged as a warning', /kind: statusChange\.to === 'Canceled' \? 'warn' : 'ok'/.test(RUNNER), true);
+
+console.log('\n--- a MOVED visit notifies too, not just a cancellation ---');
+/*
+ * This was cancel-and-complete only. If REI moves a visit from Friday to Monday, the row and the calendar
+ * are corrected silently and the person driving there finds out by turning up on the wrong day. The
+ * calendar reminder does move with it, but a reminder that quietly relocates itself is not being told.
+ */
+check('a date or time change notifies',
+  /const movedChange = changes\.find\(\(c\) => c\.field === 'Visit Date' \|\| c\.field === 'Visit Time'\)/.test(RUNNER), true);
+check('it says the visit MOVED, in those words', /the visit MOVED in REI/.test(RUNNER), true);
+check('it names the old and new value', /\$\{c\.from \|\| '\(blank\)'\} -> \$\{c\.to\}/.test(RUNNER), true);
+check('both fields are spelled out when both moved', /\.join\(' · '\)/.test(RUNNER), true);
+check('a move is a warning, not a routine ok', /`REI re-check: \$\{who\} — the visit MOVED[\s\S]*?kind: 'warn'/.test(RUNNER), true);
+// A status change still wins — "cancelled" matters more than "moved", and one message is enough.
+check('a status change takes precedence over a move', /\} else if \(movedChange\) \{/.test(RUNNER), true);
+// And a cosmetic diff still says nothing at all.
+check('a phone-number fix still notifies nobody',
+  /if \(statusChange\) \{[\s\S]*?\} else if \(movedChange\) \{[\s\S]*?\n    \}/.test(RUNNER), true);
 check('a cosmetic diff stays quiet', /if \(statusChange\) \{/.test(RUNNER), true);
 // Tagging needs no appointment time; requiring one skipped the calendar for the worst cancellations.
 check('a cancellation reaches the calendar even with no appointment time left',

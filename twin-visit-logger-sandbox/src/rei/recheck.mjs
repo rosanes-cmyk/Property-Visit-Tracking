@@ -62,6 +62,20 @@ export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller 
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
 
+/*
+ * How long before a lead is asked about again, in MINUTES.
+ *
+ * 20, at the client's request: "why this is two hour? should be every 20 mins check it."
+ *
+ * The cost is bounded by the per-run cap rather than by this number, which is what makes 20 safe. A run
+ * takes at most 5 leads, so three runs an hour is at most 360 REI page loads a day however many active
+ * leads there are. Lowering this does not increase that ceiling; it only means the ceiling is reached.
+ *
+ * It is expressed in minutes because it used to be hours, and "0.33 hours" in a config is how somebody
+ * later sets it to 20 by writing 20 and gets twenty hours.
+ */
+export const RECHECK_MINUTES = 20;
+
 /** Stages worth revisiting. A finished lead is not going to change in REI in a way we care about. */
 export const ACTIVE_STAGES = [
   'Visit Scheduled',
@@ -98,11 +112,11 @@ export function recheckSkipReason(row) {
  * shorter clock, because that is the case the client actually hit: the appointment is in the past, the
  * row still claims it is coming, and every hour that stays true the board is wrong about today.
  */
-export function recheckUrgency(row, lastCheckedIso, { now, hours = 24, staleHours = 2 } = {}) {
+export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MINUTES } = {}) {
   if (recheckSkipReason(row)) return 0;
   const last = lastCheckedIso ? new Date(lastCheckedIso) : null;
   const since = last && !Number.isNaN(last.getTime())
-    ? (now.getTime() - last.getTime()) / 3600000
+    ? (now.getTime() - last.getTime()) / 60000
     : Infinity;
 
   const visitKey = sheetDayKey(row['Visit Date']);
@@ -122,15 +136,21 @@ export function recheckUrgency(row, lastCheckedIso, { now, hours = 24, staleHour
   const imminent = Boolean(visitKey) && stillScheduled
     && visitKey >= todayKey && visitKey <= tomorrowKey;
 
-  const due = passedButScheduled || imminent ? staleHours : hours;
-  if (since < due) return 0;
+  if (since < minutes) return 0;
 
   /*
-   * Three strict tiers, so ordering never depends on how long something has been waiting:
-   *   past-but-still-Scheduled  >  happening today/tomorrow  >  merely stale
+   * One window for every active lead, and the tiers now only decide ORDER.
+   *
+   * There used to be two windows — 24 hours normally, 2 for a visit that was imminent or already past. The
+   * client asked for 20 minutes flat, and a split window would have made "checked every 20 minutes" true
+   * of a handful of leads and false of the rest, which is the kind of half-truth this feature has already
+   * been corrected for three times. So there is one window, and it means what it says.
+   *
+   * The tiers survive because they still matter when more leads are due than a run may take:
+   *   past-but-still-Scheduled  >  happening today/tomorrow  >  everything else
    * The base term for a never-checked lead is 1e5, so both bumps sit above it.
    */
-  const base = since === Infinity ? 1e5 : since - due;
+  const base = since === Infinity ? 1e5 : since - minutes;
   const tier = passedButScheduled ? 2e6 : imminent ? 1e6 : 0;
   return base + tier;
 }
@@ -142,11 +162,11 @@ export function recheckUrgency(row, lastCheckedIso, { now, hours = 24, staleHour
  * would sit there for an hour and hammer REI — the same shape of mistake that got a WhatsApp number
  * banned. Bounded and repeated is slower and survivable.
  */
-export function pickRecheckCandidates(rows, state = {}, { now, limit = 5, hours = 24, staleHours = 2 } = {}) {
+export function pickRecheckCandidates(rows, state = {}, { now, limit = 5, minutes = RECHECK_MINUTES } = {}) {
   return rows
     .map((row) => ({
       row,
-      urgency: recheckUrgency(row, state[recheckKey(row)]?.lastCheckedAt, { now, hours, staleHours })
+      urgency: recheckUrgency(row, state[recheckKey(row)]?.lastCheckedAt, { now, minutes })
     }))
     .filter((c) => c.urgency > 0)
     .sort((a, b) => b.urgency - a.urgency)

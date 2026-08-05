@@ -32,7 +32,7 @@ param(
   # How often to go back to REI for leads already in the tracker. Two hours matches the short clock in
   # recheck.mjs for a visit whose date has passed while the row still says Scheduled — the case where the
   # board is actively wrong about today. Anything much tighter just opens browsers for no reason.
-  [int]$RecheckIntervalMinutes = 120,
+  [int]$RecheckIntervalMinutes = 20,
   [switch]$SkipRecheck,
   [switch]$SkipWhatsApp
 )

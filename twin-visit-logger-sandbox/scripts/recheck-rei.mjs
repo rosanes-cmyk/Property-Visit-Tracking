@@ -287,13 +287,29 @@ try {
      * and a message per cosmetic diff every two hours is how a Chat space gets muted.
      */
     const statusChange = changes.find((c) => c.field === 'Visit Status');
+    /*
+     * A MOVED VISIT notifies too. This was cancel-and-complete only, and that was wrong: if REI moves a
+     * visit from Friday to Monday, the row and the calendar are corrected silently and the person driving
+     * there finds out by turning up on the wrong day. The calendar reminder moves with it, but a reminder
+     * that quietly relocates itself is not the same as being told.
+     */
+    const movedChange = changes.find((c) => c.field === 'Visit Date' || c.field === 'Visit Time');
+    const who = `${row['Seller Name'] || '(no name)'} · ${row['Property Address']}`;
     if (statusChange) {
       const when = String(row['Visit Date'] || '').trim();
       await notifyChat(
-        `REI re-check: ${row['Seller Name'] || '(no name)'} · ${row['Property Address']} — visit ` +
-        `${when ? `on ${when} ` : ''}is now ${statusChange.to} in REI (was "${statusChange.from || 'blank'}"). ` +
-        'Tracker, dashboard and calendar updated.',
+        `REI re-check: ${who} — visit ${when ? `on ${when} ` : ''}is now ${statusChange.to} in REI ` +
+        `(was "${statusChange.from || 'blank'}"). Tracker, dashboard and calendar updated.`,
         { kind: statusChange.to === 'Canceled' ? 'warn' : 'ok' }
+      );
+    } else if (movedChange) {
+      // Spell out both fields when both moved, so nobody has to infer the new time from the new date.
+      const moved = changes.filter((c) => c.field === 'Visit Date' || c.field === 'Visit Time')
+        .map((c) => `${c.field} ${c.from || '(blank)'} -> ${c.to}`).join(' · ');
+      await notifyChat(
+        `REI re-check: ${who} — the visit MOVED in REI. ${moved}. ` +
+        "Tracker, dashboard and Juan's calendar event updated to the new time.",
+        { kind: 'warn' }
       );
     }
   }
