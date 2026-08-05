@@ -1726,13 +1726,30 @@ function syncVisitCalendar_(sh, rowNum) {
     if (tag) {
       var marked = markVisitEvents_(addr, visitDate, tag, String(R.get('Updated By') || ''));
       logAuto_('CALENDAR', R.get('Property ID'), 'Visit event tagged ' + tag + ' (kept on the calendar) · ' + marked.detail);
-      // Alert once, on the transition. syncVisitCalendar_ runs after EVERY dashboard write, so
-      // notifying unconditionally would re-announce the same cancellation on every later edit.
-      if (marked.newlyTagged) {
-        notifyVisitTagged_(R, tag, visitDate);
+
+      /*
+       * Alert on the CANCELLATION, not on the tagging.
+       *
+       * This fired only when an event had just been tagged — so a lead with no calendar event produced
+       * no alert and no visible sign of anything at all. That is most cancelled leads: the old
+       * behaviour DELETED the event on cancel, and maybeCreateVisitEvent_ refuses to create one for a
+       * past date, so a visit cancelled after its date has no event to tag. The client cancelled a
+       * visit, nothing happened anywhere, and there was no way to tell why.
+       *
+       * A seller cancelling is news whether or not a calendar entry survived, so the alert now depends
+       * on the row, and the once-only marker moved from the event title to a note on the row itself.
+       * The tag is stored, not just a flag, so Canceled after Reschedule Needed alerts again — those
+       * are different pieces of news.
+       */
+      if (R.getNote('cancelAlert') !== tag) {
+        notifyVisitTagged_(R, tag, visitDate, marked);
+        R.setNote('cancelAlert', tag);
       }
       return marked.detail;
     }
+
+    // Re-booked: forget the alert marker, so if it is cancelled again that is fresh news.
+    if (R.getNote('cancelAlert')) R.setNote('cancelAlert', '');
 
     if (!visitDate) {
       var removed = deleteVisitEvents_(addr, visitDate);
@@ -1988,7 +2005,7 @@ function findVisitEvents_(cal, addr, visitDate) {
  * the wrong place for it — a cancellation is news, not a task sitting in a queue, and by 3pm Juan may
  * already have driven there. Silent when no webhook is configured.
  */
-function notifyVisitTagged_(R, tag, visitDate) {
+function notifyVisitTagged_(R, tag, visitDate, marked) {
   try {
     if (typeof chatWebhookUrl_ !== 'function' || !chatWebhookUrl_()) return;
     var when = visitDate ? fmt_(new Date(visitDate)) : 'date not recorded';
@@ -1997,7 +2014,11 @@ function notifyVisitTagged_(R, tag, visitDate) {
     var lines = [
       '<b>' + (R.get('Seller Name') || '(no name)') + '</b> · ' + R.get('Property Address'),
       'Was booked for ' + when + (time ? ' at ' + time : '') + ' · Owner: ' + owner,
-      '<i>The calendar event is still there, tagged [' + tag + '], with its reminders switched off.</i>'
+      // Say honestly what happened to the calendar. "No event was found" is useful information — it
+      // usually means the visit date had already passed, or an older version of this code deleted it.
+      (marked && marked.count)
+        ? '<i>The calendar event is still there, tagged [' + tag + '], with its reminders switched off.</i>'
+        : '<i>No calendar event was found for this visit, so there was nothing to tag.</i>'
     ];
     var widgets = [{ textParagraph: { text: lines.join('<br>') } }];
     var url = (typeof dashboardUrl_ === 'function') ? dashboardUrl_() : '';

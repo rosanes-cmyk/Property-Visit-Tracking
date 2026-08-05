@@ -271,9 +271,24 @@ check('the event is never moved or re-dated',
   /markVisitEvents_[\s\S]{0,1800}?setTime|markVisitEvents_[\s\S]{0,1800}?setAllDayDate/.test(WEB), false);
 check('an old tag is replaced rather than stacked', /replace\(\/\^\\\[\[A-Z \]\+\\\]/.test(WEB), true);
 
-console.log('\n--- the alert fires once, on the transition ---');
-check('it notifies only when newly tagged', /if \(marked\.newlyTagged\)/.test(WEB), true);
-check('an already-tagged event reports newlyTagged false', /newlyTagged: fresh > 0/.test(WEB), true);
+console.log('\n--- the alert fires once, and does NOT depend on finding an event ---');
+/*
+ * The bug behind "I cancelled it and nothing happened": the alert fired only when an event had just
+ * been tagged. Most cancelled leads have no event — the old behaviour deleted it on cancel, and
+ * maybeCreateVisitEvent_ refuses to create one for a past date — so there was no alert and no sign
+ * anything had happened. A seller cancelling is news whether or not a calendar entry survived.
+ */
+check('the alert is keyed to the ROW, not to a tagged event',
+  /if \(R\.getNote\('cancelAlert'\) !== tag\) \{/.test(WEB), true);
+check('it no longer requires a tagged event', /if \(marked\.newlyTagged\)/.test(WEB), false);
+check('the marker records WHICH tag, so Canceled after Reschedule alerts again',
+  /R\.setNote\('cancelAlert', tag\)/.test(WEB), true);
+check('re-booking clears the marker, so a later cancellation is fresh news',
+  /if \(R\.getNote\('cancelAlert'\)\) R\.setNote\('cancelAlert', ''\)/.test(WEB), true);
+check('the card says honestly when no event was found',
+  /No calendar event was found for this visit, so there was nothing to tag/.test(WEB), true);
+check('...and says it IS tagged when one was', /tagged \[' \+ tag \+ '\], with its reminders switched off/.test(WEB), true);
+check('an already-tagged event still reports newlyTagged false', /newlyTagged: fresh > 0/.test(WEB), true);
 check('the alert names the tag and says the event was kept',
   /tagged \[' \+ tag \+ '\], with its reminders switched off/.test(WEB), true);
 check('it is silent with no webhook configured', /typeof chatWebhookUrl_ !== 'function' \|\| !chatWebhookUrl_\(\)/.test(WEB), true);
