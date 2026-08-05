@@ -130,15 +130,26 @@ Nothing below is decided. Cherry's five stages are built exactly as she named th
 
 | # | Decision | Recommendation |
 |---|---|---|
-| 1 | **Verbal Agreement, Contract Sent and Long-Term Nurture appear nowhere.** Her five do not include them. | Add a section for Verbal Agreement + Contract Sent. A verbal agreement with no contract out is a deal being lost to silence. |
+| 1 | ~~Verbal Agreement, Contract Sent, Long-Term Nurture~~ **DECIDED — left out.** Asked twice; Cherry re-sent her list beside the full stage dropdown: *"notification should be like this only"*. See §5b for the consequence, recorded in writing. |
 | 2 | ~~Overdue visits have no section~~ **DONE.** Flagged `OVERDUE` inside Upcoming Visit and sorted to the top, above the visits merely coming up. Cancelled and reschedule-needed sort there too. |
 | 3 | ~~Gift Follow-Up lists a lead twice~~ **DONE, deliberately.** Leads and gifts are counted separately in the header so the headline number still means "leads that need something". |
 | 4 | ~~Legacy imported records~~ **DONE.** The first live run posted 103 leads, nearly all imported history. | Rows with `Source = 'Import'` are now excluded — the exact signature `importFromOldWorkbook` stamps, so no cutover date was invented. They stay in the sheet and on the dashboard. `CFG.DIGEST_INCLUDE_IMPORTED` puts them back. |
 
-**Only decision 1 remains.** A lead that reaches `Verbal Agreement` — the seller has said yes — or
-`Contract Sent` appears in no notification at all until somebody signs. Those are the two most valuable
-leads in the pipeline and the two the message is silent about. Adding two sections is a ten-minute
-change; leaving them out is a defensible choice; doing neither by default is not.
+**Nothing is open.** All four decisions are answered. What remains is Cherry looking at one live card
+and saying the format works.
+
+## 5b. The one accepted limitation, in writing
+
+`Verbal Agreement`, `Contract Sent` and `Long-Term Nurture` **do not appear in the 3:00 PM message.**
+Cherry's five sections stop at *Still negotiating*, and she confirmed "only" meant only.
+
+So a lead where the seller has already said yes, or where a contract is out for signature, is not in
+the daily work queue. Those leads are visible on the **dashboard** — the *Contracts Possible This Week*
+section covers Verbal Agreement, Contract Sent and Active Negotiation — and in the daily report. They
+are not lost, they are simply not in this message.
+
+This is asserted by three tests, so it cannot change by accident. Reversing it means editing those
+tests on purpose.
 
 ## 5a. Everything Cherry asked for, and where it is
 

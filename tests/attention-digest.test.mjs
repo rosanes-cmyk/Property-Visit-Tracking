@@ -206,18 +206,27 @@ check('the exclusion says which rule caught it',
   excludedFromDigest_({ ...BASE, 'Current Stage': 'Contract Signed' }), 'contract signed');
 check('...and nothing for a live lead', excludedFromDigest_(BASE), '');
 
-console.log('\n=== Stages Cherry\'s five do NOT cover ===');
+console.log('\n=== Stages deliberately left out — DECIDED, not pending ===');
 /*
- * Recorded as facts, not as desired behaviour. Her list is the five stages above, so these three now
- * appear nowhere — and a verbal agreement with no contract out is a real gap worth her deciding on
- * rather than discovering. Changing any of these means changing this test deliberately.
+ * Cherry, asked directly and twice, re-sent her list with the workbook's full stage dropdown beside it:
+ * "notification should be like this only" — the five stages, plus gifts. So Verbal Agreement, Contract
+ * Sent and Long-Term Nurture appear in the 3pm message nowhere, and that is the decision rather than an
+ * oversight.
+ *
+ * The consequence, in writing as the review asked: a lead where the seller has already said yes, or
+ * where a contract is out for signature, will not appear in the daily work queue at all. Those leads
+ * are visible on the dashboard (Contracts Possible This Week) and nowhere else. Reversing this means
+ * changing these three lines on purpose.
  */
-check('Verbal Agreement appears NOWHERE (awaiting decision)',
+check('Verbal Agreement appears NOWHERE — decided',
   bucket({ ...BASE, 'Current Stage': 'Verbal Agreement' }), null);
-check('Contract Sent appears NOWHERE (awaiting decision)',
+check('Contract Sent appears NOWHERE — decided',
   bucket({ ...BASE, 'Current Stage': 'Contract Sent' }), null);
-check('Long-Term Nurture appears NOWHERE (awaiting decision)',
+check('Long-Term Nurture appears NOWHERE — decided',
   bucket({ ...BASE, 'Current Stage': 'Long-Term Nurture' }), null);
+// The dashboard is where those leads live instead, so that claim had better be true.
+check('the dashboard still surfaces them',
+  /\['Verbal Agreement','Contract Sent','Active Negotiation'\]/.test(read('apps-script/Dashboard.html')), true);
 check('a blank stage appears nowhere', bucket({ ...BASE, 'Current Stage': '' }), null);
 check('an unrecognised stage appears nowhere', bucket({ ...BASE, 'Current Stage': 'Dead Lead' }), null);
 // But a gift is still chased at those stages, because the gift rule does not read the stage.
