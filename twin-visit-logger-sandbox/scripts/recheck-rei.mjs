@@ -146,6 +146,9 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
 // launchReiContext returns the context itself; callers close it. Matches add-visit-from-rei.
 const context = await launchReiContext();
 const changedRows = [];
+// Leads where REI never answered the question, collected so the closing summary cannot claim
+// agreement over the top of them.
+const unanswered = [];
 try {
   for (const row of candidates) {
     const link = String(row['REI BlackBook Link']).trim();
@@ -163,6 +166,8 @@ try {
     const reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
     const changes = diffFromRei(row, reiFields);
     console.log(`    ${describeChanges(row, changes, reiFields, scraped)}`);
+
+    if (scraped.visitTaskState === 'unknown') unanswered.push({ row, reason: scraped.visitTaskReason });
 
     const key = recheckKey(row);
     state[key] = { ...(state[key] || {}), lastCheckedAt: new Date().toISOString() };
@@ -242,8 +247,27 @@ try {
 }
 
 console.log(`\n${'='.repeat(60)}`);
-if (!changedRows.length) {
+/*
+ * The summary must not contradict the detail above it.
+ *
+ * The live run on Jose printed the per-lead line "REI could not tell us whether the visit happened" and
+ * then, four lines later, "REI agrees with the sheet on every lead checked. Nothing to change." The
+ * second is what a person skims and remembers, and it is the one that is wrong. A run that could not
+ * answer the question has to close by saying so.
+ */
+if (unanswered.length) {
+  console.log(`${unanswered.length} lead(s) could NOT be verified — REI did not say whether the visit happened:`);
+  for (const { row, reason } of unanswered) {
+    console.log(`  row ${row.__rowNumber}  ${row['Seller Name'] || '(no name)'} — ${reason}`);
+  }
+  console.log('These rows are UNCHANGED and may still be wrong. Settle one with:');
+  console.log(`  node scripts/rei-task-doctor.mjs "${unanswered[0].row['REI BlackBook Link']}"`);
+  if (!changedRows.length) console.log('\nNothing else differed: dates and contact details all matched.');
+}
+if (!changedRows.length && !unanswered.length) {
   console.log('REI agrees with the sheet on every lead checked. Nothing to change.');
+} else if (!changedRows.length) {
+  // nothing to add — the unanswered block above is the whole story
 } else if (APPLY) {
   console.log(`${changedRows.length} lead(s) updated from REI.`);
 } else {

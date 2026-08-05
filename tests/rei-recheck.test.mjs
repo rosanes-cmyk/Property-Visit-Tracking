@@ -412,5 +412,22 @@ check('the state and the reason both reach the caller',
 check('the runner passes the scrape in so it can say so',
   /describeChanges\(row, changes, reiFields, scraped\)/.test(RUNNER), true);
 
+console.log('\n--- and the closing summary cannot contradict it ---');
+/*
+ * The live run printed the honest per-lead line and then, four lines later, "REI agrees with the sheet on
+ * every lead checked. Nothing to change." The second is what a person skims and remembers, and it was the
+ * one that was wrong.
+ */
+check('unanswered leads are collected during the run',
+  /if \(scraped\.visitTaskState === 'unknown'\) unanswered\.push/.test(RUNNER), true);
+check('the summary leads with them', /could NOT be verified/.test(RUNNER), true);
+check('it says those rows are still possibly wrong',
+  /These rows are UNCHANGED and may still be wrong/.test(RUNNER), true);
+check('it hands over the command that settles it',
+  /rei-task-doctor\.mjs "\$\{unanswered\[0\]\.row\['REI BlackBook Link'\]\}"/.test(RUNNER), true);
+// The blanket all-clear is now reachable ONLY when nothing changed AND nothing went unanswered.
+check('"REI agrees on every lead" requires both conditions',
+  /if \(!changedRows\.length && !unanswered\.length\) \{\s*\n\s*console\.log\('REI agrees with the sheet on every lead checked/.test(RUNNER), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
