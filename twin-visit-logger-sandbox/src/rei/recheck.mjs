@@ -49,7 +49,8 @@ function dayKey(d, zone = ZONE) {
  *   Seller Motivation etc.   captured in conversation, not a REI field
  *   Approved Offer Amount    a decision, and money
  *   Next Action / Due Date   a commitment somebody made
- *   Assigned Owner/Visitor   REI fills these once at intake; a later reassignment is a human's call
+ *   Assigned Owner/Visitor   a reassignment is a human's call — but see FILL_IF_BLANK: REI may fill one
+ *                            that is EMPTY, because nobody chose blank
  */
 export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller Name', 'Phone', 'Email'];
 
@@ -59,6 +60,24 @@ export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller 
  * why it is safe only in this one direction. Both strings are exact values of the workbook's own
  * Current Stage dropdown; a value outside it fails the whole row write, not just its own cell.
  */
+/*
+ * Fields REI may FILL when the tracker's cell is empty — and never overwrite.
+ *
+ * A different rule from RECHECKABLE, for a different reason. The client: "im not only saying the note, look
+ * at amelia still unassigned but in the rei already assigned." REI had "Appointment Assigned To: Juan" and
+ * the row was blank, so the dashboard showed "Unassigned" and flagged "Missing: Assigned Owner" on a visit
+ * that had an owner all along.
+ *
+ * These were excluded from RECHECKABLE on the grounds that "a later reassignment is a human's call". That
+ * is right about a REASSIGNMENT and wrong about a BLANK. Nobody chose blank; it is missing data, and the
+ * workbook's own exception rules already call it a fault. So REI may fill an empty cell and may never touch
+ * one that has a name in it — if the team moved a lead from Juan to Kyle, REI's older value must not win.
+ *
+ * Both columns, because that is what the email path already does (sheets.mjs sets Assigned Owner and
+ * Assigned Visitor from the same REI field). Following it rather than inventing a second rule.
+ */
+export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor'];
+
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
 
@@ -261,6 +280,10 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   for (const [field, value] of [['Seller Name', scraped.sellerName], ['Phone', scraped.phone], ['Email', scraped.email]]) {
     if (text(value)) out[field] = text(value);
   }
+  // Whoever REI says the appointment belongs to. diffFromRei only lets this land on an EMPTY cell.
+  if (text(scraped.assignedOwner)) {
+    for (const field of FILL_IF_BLANK) out[field] = text(scraped.assignedOwner);
+  }
   return out;
 }
 
@@ -302,6 +325,19 @@ export function diffFromRei(row, reiFields) {
    * Offer Preparation, Offer Sent or anything further, that is human forward progress and rewinding it
    * to "Needs Review" would undo a decision. In that case the stage is left exactly where it is.
    */
+  /*
+   * Fill an empty owner, never replace a named one.
+   *
+   * The asymmetry is the whole point. A blank cell is missing data — the dashboard flags it as a fault, and
+   * REI knows the answer. A cell with "Kyle" in it is somebody's decision, possibly a reassignment made
+   * after REI was last touched, and REI's stale value must not win.
+   */
+  for (const field of FILL_IF_BLANK) {
+    const to = text(reiFields[field]);
+    if (!to || text(row[field])) continue;
+    changes.push({ field, from: '', to, filledBlank: true });
+  }
+
   if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
     changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: STAGE_ON_COMPLETION });
   }

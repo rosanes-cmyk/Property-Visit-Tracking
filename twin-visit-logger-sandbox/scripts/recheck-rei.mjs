@@ -286,6 +286,18 @@ try {
      * Only a STATUS change is announced. A corrected phone number or a tidied seller name is not news,
      * and a message per cosmetic diff every two hours is how a Chat space gets muted.
      */
+    /*
+     * Say plainly when a gap was FILLED rather than a value corrected.
+     *
+     * "REI confirms ... Assigned Owner '' -> 'Juan'" reads like an overwrite. It is the opposite: the cell
+     * was empty, the dashboard was flagging "Missing: Assigned Owner", and REI knew the answer all along.
+     */
+    const filled = changes.filter((c) => c.filledBlank);
+    if (filled.length) {
+      console.log(`    filled ${filled.length} empty field(s) from REI: ` +
+        filled.map((c) => `${c.field} = "${c.to}"`).join(', '));
+    }
+
     const statusChange = changes.find((c) => c.field === 'Visit Status');
     /*
      * A MOVED VISIT notifies too. This was cancel-and-complete only, and that was wrong: if REI moves a

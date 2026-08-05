@@ -155,7 +155,10 @@
       "Start"
     ],
     "assignedOwner": [
+      "Appointment Assigned To",
+      "Appointment Assigned",
       "Assigned To",
+      "Assigned User",
       "Owner",
       "Sales Agent"
     ],
@@ -180,7 +183,8 @@
     "nextAction": [
       "Next Action",
       "Next Step"
-    ]
+    ],
+    "_comment_assignedOwner": "REI's label is 'Appointment Assigned To', not 'Assigned To'. Labels are matched as a PREFIX of the leaf text ('Appointment Assigned ToJuan'), so 'Assigned To' never matched and every owner came back blank -- which is why the dashboard showed 'Unassigned' and 'Missing: Assigned Owner' on leads REI had assigned to Juan. Longest first, or 'Assigned To' would win and strip the wrong number of characters."
   },
   "tabs": {
     "notes": [

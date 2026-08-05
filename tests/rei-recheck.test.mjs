@@ -14,7 +14,7 @@
 import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
   recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
-  describeChanges
+  describeChanges, FILL_IF_BLANK
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
@@ -643,6 +643,78 @@ check('a label off the allowlist is skipped, not clicked',
 // It must remain a read path: the doctor and the scraper may open panels, never complete a task.
 check('openPanel does not touch the completion control', /completeControl/.test(
   TASKS.slice(TASKS.indexOf('export async function openPanel'), TASKS.indexOf('export async function readTasks'))), false);
+
+console.log('\n=== An EMPTY owner is missing data, not a decision ===');
+/*
+ * The client, looking at Amelia Middel's card: "im not only saying the note, look at amelia still
+ * unassigned but in the rei already assigned."
+ *
+ * REI's About tab read "Appointment Assigned To: Juan". The row was blank, so the dashboard showed
+ * "Unassigned" and its own exception rule flagged "Missing: Assigned Owner" — on a visit that had an owner
+ * the whole time. Two separate faults produced that:
+ *
+ *   1. REI's label is "Appointment Assigned To". Labels are matched as a PREFIX of the leaf text
+ *      ("Appointment Assigned ToJuan"), and the config only listed "Assigned To", so it never matched and
+ *      every owner came back blank — on the email path too, not just the re-check.
+ *   2. Assigned Owner was excluded from RECHECKABLE because "a later reassignment is a human's call".
+ *      True of a reassignment. Not true of a blank: nobody chose blank.
+ */
+const AMELIA = {
+  'Seller Name': 'Amelia Middel', 'Property Address': '460 5th Avenue, Redwood City, CA, 94063',
+  'Assigned Owner': '', 'Assigned Visitor': '', 'Visit Status': 'Scheduled',
+  'Current Stage': 'Visit Scheduled', 'Visit Date': '08/01/2026', 'Visit Time': '9:00 AM'
+};
+const FROM_REI = reiFieldsFromScrape({
+  assignedOwner: 'Juan', appointmentStartIso: '2026-08-01T09:00:00-07:00'
+}, { zone: 'America/Los_Angeles' });
+
+check('REI\'s owner reaches the sheet fields', FROM_REI['Assigned Owner'], 'Juan');
+check('...and the visitor column too, as the email path already does', FROM_REI['Assigned Visitor'], 'Juan');
+const filled = diffFromRei(AMELIA, FROM_REI);
+check('a blank owner is filled', filled.find((c) => c.field === 'Assigned Owner')?.to, 'Juan');
+check('...and is marked as a fill, not an overwrite',
+  filled.find((c) => c.field === 'Assigned Owner')?.filledBlank, true);
+check('...from an empty value', filled.find((c) => c.field === 'Assigned Owner')?.from, '');
+
+console.log('\n--- but a named owner is NEVER replaced ---');
+// If the team moved the lead from Juan to Kyle, REI's older value must not win.
+const REASSIGNED = { ...AMELIA, 'Assigned Owner': 'Kyle', 'Assigned Visitor': 'Kyle' };
+check('Kyle is kept', diffFromRei(REASSIGNED, FROM_REI).some((c) => c.field === 'Assigned Owner'), false);
+check('...and so is the visitor', diffFromRei(REASSIGNED, FROM_REI).some((c) => c.field === 'Assigned Visitor'), false);
+check('one filled and one named is handled per field',
+  diffFromRei({ ...AMELIA, 'Assigned Owner': 'Kyle' }, FROM_REI).filter((c) => c.filledBlank).map((c) => c.field),
+  ['Assigned Visitor']);
+check('a blank from REI fills nothing', diffFromRei(AMELIA, reiFieldsFromScrape({})).length, 0);
+check('these two are the only fillable fields', FILL_IF_BLANK, ['Assigned Owner', 'Assigned Visitor']);
+// They must stay OUT of RECHECKABLE, or the fill-only guarantee is gone.
+for (const f of FILL_IF_BLANK) check(`${f} is not overwritable`, RECHECKABLE.includes(f), false);
+check('a re-run after filling changes nothing',
+  diffFromRei({ ...AMELIA, 'Assigned Owner': 'Juan', 'Assigned Visitor': 'Juan' }, FROM_REI).length, 0);
+
+console.log('\n--- the label that never matched ---');
+const SELECTORS = JSON.parse(fs.readFileSync(
+  new URL('../twin-visit-logger-sandbox/config/rei-selectors.json', import.meta.url), 'utf8'));
+check("REI's real label is listed", SELECTORS.labels.assignedOwner.includes('Appointment Assigned To'), true);
+// Longest first, or "Assigned To" wins and slices the wrong number of characters off the value.
+check('...and comes before the shorter one',
+  SELECTORS.labels.assignedOwner.indexOf('Appointment Assigned To')
+    < SELECTORS.labels.assignedOwner.indexOf('Assigned To'), true);
+/* The shipped matcher, run against the real leaf text from Amelia's contact page. */
+const matcherSrc = SCRAPER.slice(SCRAPER.indexOf('function valueForLabel'), SCRAPER.indexOf('// Long-form leaf items'));
+const valueForLabel = new Function('normalize', `${matcherSrc}\nreturn valueForLabel;`)(
+  (v) => String(v || '').replace(/\s+/g, ' ').trim());
+const REAL_PAIRS = ['Appointment Assigned ToJuan', 'Appointment DateAug 01, 2026, 9:00 AM',
+  'Appointment TypeIn-Person Property Visit', 'Amount Offer$930,000'];
+check('the real page text now resolves to Juan',
+  valueForLabel(REAL_PAIRS, SELECTORS.labels.assignedOwner), 'Juan');
+check('the OLD label list returned nothing — this was the bug',
+  valueForLabel(REAL_PAIRS, ['Assigned To', 'Owner', 'Sales Agent']), '');
+// Money is visible on the same page and is still not touched: an offer amount is a decision.
+check('Amount Offer is not a fillable field', FILL_IF_BLANK.includes('Approved Offer Amount'), false);
+
+console.log('\n--- and the run says "filled", not "changed" ---');
+check('a fill is reported distinctly', /filled \$\{filled\.length\} empty field\(s\) from REI/.test(RUNNER), true);
+check('...naming each field and value', /\$\{c\.field\} = "\$\{c\.to\}"/.test(RUNNER), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
