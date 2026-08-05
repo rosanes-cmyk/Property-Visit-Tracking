@@ -149,6 +149,8 @@ const changedRows = [];
 // Leads where REI never answered the question, collected so the closing summary cannot claim
 // agreement over the top of them.
 const unanswered = [];
+// Leads REI has already written off. Reported to a person, never acted on.
+const deadFlagged = [];
 try {
   for (const row of candidates) {
     const link = String(row['REI BlackBook Link']).trim();
@@ -168,6 +170,31 @@ try {
     console.log(`    ${describeChanges(row, changes, reiFields, scraped)}`);
 
     if (scraped.visitTaskState === 'unknown') unanswered.push({ row, reason: scraped.visitTaskReason });
+
+    /*
+     * Print the sentence a Cancelled status came from.
+     *
+     * The status is read out of free page text by a regex, so it CAN be wrong — the phrase allows two
+     * words to intervene, which is what it takes to catch "cancelled booked appointment". Showing the
+     * matched sentence means a wrong call is visible in the log instead of just quietly true in the sheet.
+     */
+    if (scraped.cancelPhrase) {
+      console.log(`    REI says: "...${scraped.cancelPhrase}..."`);
+    }
+    /*
+     * Dead-lead tags are REPORTED, never acted on.
+     *
+     * Jose's contact carried "Dead Lead", "Lost Deal" and "We're Passing" from July 20 while the tracker
+     * had him at Visit Scheduled. Closing a deal out is a decision about somebody's property, the team has
+     * made that call by hand throughout, and the text available is an account-update note rather than the
+     * contact's live tag list — it says what was true the day it was written. So it goes to a person.
+     */
+    if (scraped.deadLeadTags?.length) {
+      console.log(`    ⚠ REI has this lead tagged: ${scraped.deadLeadTags.join(', ')} — ` +
+        `the tracker still says stage "${row['Current Stage'] || '(blank)'}". ` +
+        'Nothing was changed: closing a lead out is a human decision.');
+      deadFlagged.push({ row, tags: scraped.deadLeadTags });
+    }
 
     const key = recheckKey(row);
     state[key] = { ...(state[key] || {}), lastCheckedAt: new Date().toISOString() };
@@ -273,6 +300,14 @@ if (!changedRows.length && !unanswered.length) {
 } else {
   console.log(`${changedRows.length} lead(s) would change. Re-run with --yes to apply:`);
   for (const { row, changes } of changedRows) console.log(`  ${describeChanges(row, changes)}`);
+}
+if (deadFlagged.length) {
+  console.log(`\n${deadFlagged.length} lead(s) REI has tagged as dead while the tracker still shows them active:`);
+  for (const { row, tags } of deadFlagged) {
+    console.log(`  row ${row.__rowNumber}  ${row['Seller Name'] || '(no name)'} — ${tags.join(', ')} ` +
+      `(stage "${row['Current Stage'] || '(blank)'}")`);
+  }
+  console.log('Set these to "Lost / Closed Out" on the dashboard if that is right. Not done automatically.');
 }
 console.log(`Fields a re-check may ever touch: ${RECHECKABLE.join(', ')}`);
 

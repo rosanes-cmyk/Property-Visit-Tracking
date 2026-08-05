@@ -8,6 +8,7 @@ import { assertAuthenticated } from './browser.mjs';
 // project can make, is deliberately not imported here.
 import { readTasks } from './tasks.mjs';
 import { taskMatchesVisit } from './task-gate.mjs';
+import { cancellationEvidence, deadLeadTags } from './cancel-signal.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -233,8 +234,19 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
 
     // Cancellation is signalled by the notification (subject/title) or a "Canceled Appointment"
     // tag on the contact. We do NOT infer it from lead stage alone.
-    const cancelText = `${emailFallback.rawTitle || ''} ${visibleText}`.toLowerCase();
-    const cancelled = /cancel(?:l)?ed appointment/.test(cancelText) || /\bcancelled appointment\b/.test(cancelText);
+    /*
+     * The phrase rules moved to cancel-signal.mjs, and widened, because of one lead and one word.
+     *
+     * Jose Anguiano's contact carried the note "Equity Percentage: 22% |cancelled booked appointment".
+     * The old test required "cancelled appointment" to be ADJACENT, "booked" sat between them, and a
+     * cancellation written in plain English on the page stayed invisible for five days while the tracker
+     * showed the visit as still coming up. Now up to two words may intervene, hypotheticals are excluded,
+     * and the matched sentence is carried out so a run can print the evidence it acted on.
+     */
+    const cancelText = `${emailFallback.rawTitle || ''} ${visibleText}`;
+    const cancelEvidence = cancellationEvidence(cancelText);
+    const cancelled = cancelEvidence.cancelled;
+    const deadTags = deadLeadTags(cancelText);
 
     const phoneFallback = firstRegex(visibleText, /(?:\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/);
     const emailPageFallback = firstRegex(visibleText, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
@@ -321,6 +333,9 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       taskStatus,
       visitTaskState,
       visitTaskReason,
+      // The sentence that caused a Cancelled status, so a write from free text is never silent.
+      cancelPhrase: cancelEvidence.phrase,
+      deadLeadTags: deadTags,
       contactStage: normalize(contactStage),
       propertyDetails: normalize(amountOffer ? `Amount Offer: ${amountOffer}` : ''),
       notes: notes.join('\n\n'),

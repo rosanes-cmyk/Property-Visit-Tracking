@@ -429,5 +429,32 @@ check('it hands over the command that settles it',
 check('"REI agrees on every lead" requires both conditions',
   /if \(!changedRows\.length && !unanswered\.length\) \{\s*\n\s*console\.log\('REI agrees with the sheet on every lead checked/.test(RUNNER), true);
 
+console.log('\n=== A status read out of free text is never written silently ===');
+/*
+ * Visit Status = Canceled can now come from a regex over page prose, which means it CAN be wrong. The
+ * sentence that caused it has to appear in the log, or a false positive is indistinguishable from a real
+ * cancellation after the fact.
+ */
+check('the scraper carries the matched sentence out', /cancelPhrase: cancelEvidence\.phrase/.test(SCRAPER), true);
+check('the phrase rules live in their own tested module',
+  /from '\.\/cancel-signal\.mjs'/.test(SCRAPER), true);
+check('the runner prints the evidence', /REI says: "\.\.\.\$\{scraped\.cancelPhrase\}\.\.\."/.test(RUNNER), true);
+
+console.log('\n--- dead-lead tags are reported, never acted on ---');
+/*
+ * Jose's contact was tagged Dead Lead / Lost Deal / We're Passing on July 20 while the tracker had him at
+ * Visit Scheduled. Closing a lead out is a decision about somebody's property, and the same rule already
+ * holds on the workbook side — cancelling records the fact and leaves the stage for a person.
+ */
+check('the tags reach the runner', /deadLeadTags: deadTags/.test(SCRAPER), true);
+check('the run warns when REI has written a lead off',
+  /REI has this lead tagged/.test(RUNNER), true);
+check('...and says explicitly that nothing was changed',
+  /Nothing was changed: closing a lead out is a human decision/.test(RUNNER), true);
+check('...and the summary repeats it with the row numbers',
+  /Set these to "Lost \/ Closed Out" on the dashboard if that is right\. Not done automatically\./.test(RUNNER), true);
+// A tag must never become a Current Stage write. RECHECKABLE plus the one guarded transition is the lot.
+check('no tag-driven stage write exists', /Lost \/ Closed Out'\s*\}\)/.test(RUNNER), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
