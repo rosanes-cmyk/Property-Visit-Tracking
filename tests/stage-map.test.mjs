@@ -62,6 +62,7 @@ const REI_DROPDOWN = [
   ['2 Follow Up', '', false],
   ['3 Appointment Booked', 'Visit Scheduled', false],
   ['4 Offer Sent', 'Offer Sent', false],
+  ['5 Under Contract', 'Contract Signed', false],
   ['6 Cancelled Contract', '', false],
   ['7 Reinstated', '', false],
   ['8 Clear to Close', 'Contract Signed', false],
@@ -90,12 +91,19 @@ check('...but is still refused at contract stage, like any close-out',
 check('...and that refusal is reported',
   /too far along to close out/.test(closeOutRefusal('Contract Signed', '0 Invalid Leads')), true);
 /*
- * 5 IS MISSING from the screenshots and no guess is made about it. It sits between "4 Offer Sent" and
- * "6 Cancelled Contract", so it is probably a contract stage — and "probably" is how a lead ends up in the
- * wrong section being told to do the wrong thing. It maps to nothing until somebody says what it is.
+ * 5 is "Under Contract", and it needed no new code — the under\s*contract pattern, written as a guess before the
+ * real list existed, was already right. Worth asserting rather than assuming, and worth asserting the
+ * DISTINCTION: it means both parties have signed, not that a contract has gone out for signature. Sent and
+ * executed are different weeks of work and different sections of the board.
  */
-check('an unknown numbered stage maps to nothing', mapReiStage('5 Something Unknown'), '');
-check('...and closes nothing out', reiSaysLost('5 Something Unknown'), false);
+check('"5 Under Contract" means SIGNED, not sent', mapReiStage('5 Under Contract'), 'Contract Signed');
+check('...and is not confused with Contract Sent',
+  mapReiStage('5 Under Contract') === 'Contract Sent', false);
+/* A value nobody has named still maps to nothing — the list can grow, and a guess is worse than a gap. */
+check('an unnamed numbered stage maps to nothing', mapReiStage('11 Something New'), '');
+check('...and closes nothing out', reiSaysLost('11 Something New'), false);
+/* All eleven values are now accounted for, which is the point of having asked for the list. */
+check('every value in the dropdown is covered by this suite', REI_DROPDOWN.length, 11);
 /* Acquired is the end of the pipeline, so it can only ever be a forward move or no move. */
 check('Acquired advances a live deal to Contract Signed',
   stageAdvance('Offer Sent', '10 Acquired'), 'Contract Signed');

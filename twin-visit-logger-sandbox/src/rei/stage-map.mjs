@@ -45,21 +45,22 @@ export const STAGE_ORDER = [
  *   2 Follow Up          -> (nothing)           ambiguous; REI uses it before a visit AND after an offer
  *   3 Appointment Booked -> Visit Scheduled
  *   4 Offer Sent         -> Offer Sent
- *   5 ...                -> unknown, not in the screenshots — see the note below
+ *   5 Under Contract     -> Contract Signed     both parties have signed; the deal is executed
  *   6 Cancelled Contract -> (nothing)           REPORTED, see stageBehindTracker
  *   7 Reinstated         -> (nothing)           reinstated to WHAT? the tracker cannot tell
  *   8 Clear to Close     -> Contract Signed     unambiguously past signing
  *   9 Lost / Dead Lead   -> handled by stageCloseOut
  *  10 Acquired           -> Contract Signed     the deal completed; the furthest stage the tracker has
  *
- * Before this list arrived only three of the eleven mapped — 3, 4 and 9 — and the patterns were guesses at
- * wordings REI does not use ("Verbal Agreement", "Under Contract", "Negotiating"). Those guesses are kept
- * because they cost nothing and cover a stage list that may grow, but the numbered entries above are the ones
- * that actually fire on this account.
+ * Before this list arrived only three of the eleven mapped — 3, 4 and 9. The other patterns were guesses at
+ * wordings, and one of them turned out to be exactly right: "5 Under Contract" was already handled by the
+ * under\s*contract pattern, so that value needed no new code, only confirming. The rest of the guesses
+ * ("Verbal Agreement", "Negotiating", "Offer Preparation") fire on nothing in this account and are kept only
+ * because a dropdown can grow.
  *
- * 5 IS MISSING and no guess is being made about it. It sits between "4 Offer Sent" and "6 Cancelled Contract",
- * so it is almost certainly a contract stage — but "almost certainly" is how a lead ends up in the wrong
- * section of the work queue being told to do the wrong thing.
+ * Under Contract maps to Contract Signed rather than Contract Sent on purpose: in this trade "under contract"
+ * means both parties have signed, while the tracker's Contract Sent means it has gone out for signature. Sent
+ * and executed are different weeks of work and different sections of the board.
  *
  * Deliberately unmapped, each for a reason:
  *   "6 Cancelled Contract"  a contract that fell through could be back in negotiation, dead, or being
