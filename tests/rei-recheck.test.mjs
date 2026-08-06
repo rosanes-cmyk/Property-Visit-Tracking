@@ -620,8 +620,21 @@ console.log('\n--- dead-lead tags are reported, never acted on ---');
 check('the tags reach the runner', /deadLeadTags: deadTags/.test(SCRAPER), true);
 check('the run warns when REI has written a lead off',
   /REI has this lead tagged/.test(RUNNER), true);
-check('...and says explicitly that nothing was changed',
-  /Nothing was changed: closing a lead out is a human decision/.test(RUNNER), true);
+/*
+ * The wording had to change when REI's STAGE field started closing leads out. "Nothing was changed: closing a
+ * lead out is a human decision" was no longer true in general, and somebody reading the log would conclude
+ * the automation had refused when in fact it had not looked at the stage. Tags still never close a lead —
+ * David Jackowitz carries Dead Lead, Lost Deal, We're Passing AND Follow up at once.
+ */
+check('...and says tags alone are not enough, naming what would be',
+  /Tags alone do not close a lead out; REI's Lead Stage field would/.test(RUNNER), true);
+check('...and the audit line says the stage does NOT say dead',
+  /REI's Lead Stage does NOT say lost or dead/.test(RUNNER), true);
+/*
+ * And it does not fire on a lead that was just closed out, where it would contradict the line above it.
+ */
+check('a lead just closed out is not also reported as unactioned',
+  /deadLeadTags\?\.length && !changes\.some\(\(c\) => c\.closedOut\)/.test(RUNNER), true);
 check('...and the summary repeats it with the row numbers',
   /Set these to "Lost \/ Closed Out" on the dashboard if that is right\. Not done automatically\./.test(RUNNER), true);
 // A tag must never become a Current Stage write. RECHECKABLE plus the one guarded transition is the lot.

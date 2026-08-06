@@ -294,15 +294,26 @@ try {
      * made that call by hand throughout, and the text available is an account-update note rather than the
      * contact's live tag list — it says what was true the day it was written. So it goes to a person.
      */
-    if (scraped.deadLeadTags?.length) {
+    if (scraped.deadLeadTags?.length && !changes.some((c) => c.closedOut)) {
+      /*
+       * The wording matters, because "closing a lead out is a human decision" is no longer the whole truth.
+       *
+       * REI's STAGE field now does close a lead out — see stageCloseOut. Tags still do not, and David
+       * Jackowitz is why: he carries Dead Lead, Lost Deal, We're Passing AND Follow up simultaneously, so his
+       * tags cannot settle anything. This message was left saying nothing would ever change, which would have
+       * had somebody reading the log conclude the automation had refused when in fact it had never looked at
+       * the stage. It also no longer fires at all on a lead that WAS just closed out, where it would
+       * contradict the line directly above it.
+       */
       console.log(`    ⚠ REI has this lead tagged: ${scraped.deadLeadTags.join(', ')} — ` +
         `the tracker still says stage "${row['Current Stage'] || '(blank)'}". ` +
-        'Nothing was changed: closing a lead out is a human decision.');
+        "Tags alone do not close a lead out; REI's Lead Stage field would.");
       deadFlagged.push({ row, tags: scraped.deadLeadTags });
       auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
-        message: `REI has row ${row.__rowNumber} — ${row['Seller Name'] || '(no name)'} — tagged ` +
-          `${scraped.deadLeadTags.join(', ')} while the tracker says stage ` +
-          `"${row['Current Stage'] || '(blank)'}". Not changed: closing a lead out is a human decision.` });
+        message: `REI has row ${row.__rowNumber} — ${row['Seller Name'] || '(no name)'} — tagged `
+          + `${scraped.deadLeadTags.join(', ')} while the tracker says stage `
+          + `"${row['Current Stage'] || '(blank)'}", and REI's Lead Stage does NOT say lost or dead. `
+          + 'Tags alone are not acted on — a person decides.' });
     }
 
     const key = recheckKey(row);
