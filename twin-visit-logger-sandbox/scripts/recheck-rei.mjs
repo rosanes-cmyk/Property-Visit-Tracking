@@ -4,6 +4,7 @@
  *   node scripts/recheck-rei.mjs                 <- dry run: says what it WOULD change
  *   node scripts/recheck-rei.mjs --yes           <- applies it
  *   node scripts/recheck-rei.mjs --limit 40      <- more per run (default 20)
+ *   node scripts/recheck-rei.mjs --limit 200 --wait --yes   <- sweep everything due, queueing for REI
  *   node scripts/recheck-rei.mjs --only "Jose"   <- one lead, matched on seller or address
  *
  * Why this exists: the chain was one-way. A booking email arrived, REI was read once, the row and the
@@ -50,6 +51,15 @@ const numArg = (name, fallback) => {
 };
 const LIMIT = numArg('--limit', RECHECK_PER_RUN);
 const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? String(args[i + 1] || '').toLowerCase() : ''; })();
+/*
+ * --wait, for a sweep somebody is sitting in front of.
+ *
+ * The client: "all of them should be checked." A whole-list sweep is `--limit 200`, and without this it stands
+ * down the moment the scheduled run has the lock — which for a command you have just typed means it does
+ * nothing and says so. --only already waits because it is by definition a hand-typed run; a big --limit is
+ * the same situation and now says so explicitly rather than being inferred.
+ */
+const WAIT = args.includes('--wait');
 
 const STATE_FILE = path.resolve('./data/rei-recheck.json');
 
@@ -199,7 +209,7 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
  * losing the race three times in a row is how this actually went. Waiting is chosen by --only, which is
  * already the flag that means "I am doing this by hand, now".
  */
-const release = ONLY
+const release = (ONLY || WAIT)
   ? await acquireLockWaiting('run', {
     onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
   })

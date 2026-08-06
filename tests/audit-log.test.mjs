@@ -133,7 +133,7 @@ console.log('\n=== One browser at a time, or REI logs the client out ===');
  */
 check('the re-check takes the lock', /await acquireLock(Waiting)?\(/.test(RUNNER), true);
 check('...and waits for it when a lead was named by hand',
-  /const release = ONLY\s*\?\s*await acquireLockWaiting/.test(RUNNER), true);
+  /const release = \(ONLY \|\| WAIT\)\s*\n?\s*\?\s*await acquireLockWaiting/.test(RUNNER), true);
 check('...but a scheduled run still stands down instead of queueing',
   /:\s*await acquireLock\(\);/.test(RUNNER), true);
 check('...the same unnamed one run-once uses',

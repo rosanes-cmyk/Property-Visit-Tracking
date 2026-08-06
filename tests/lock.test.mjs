@@ -123,7 +123,7 @@ try {
    */
   const RECHECK = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/scripts/recheck-rei.mjs'), 'utf8');
   check('the re-check waits only when --only was passed',
-    /const release = ONLY\s*\?\s*await acquireLockWaiting/.test(RECHECK), true);
+    /const release = \(ONLY \|\| WAIT\)\s*\n?\s*\?\s*await acquireLockWaiting/.test(RECHECK), true);
   check('...and stands down otherwise', /:\s*await acquireLock\(\);/.test(RECHECK), true);
   const DOCTOR = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/scripts/pagedoctor.mjs'), 'utf8');
   check('the doctor always waits — it is only ever run by hand',
