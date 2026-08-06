@@ -92,5 +92,55 @@ check('it creates the tab if the workbook has none', /addSheet: \{ properties: \
 // Hidden, like the Apps Script creates it — this is an audit trail, not a tab the team works in.
 check('...hidden, as the Apps Script also does', /sh\.hideSheet\(\)/.test(COMBINED), true);
 
+console.log('\n=== A lead that could not be READ is not a lead that agreed ===');
+/*
+ * A live run reported "REI agrees with the sheet on every lead checked. Nothing to change." immediately
+ * after all TWENTY leads failed with a login redirect. Nothing had been checked at all.
+ *
+ * That is the fourth time a summary in this feature has claimed agreement it never verified, after "REI
+ * agrees with the sheet", "dates and contact details agree", and "REI agrees on every lead checked" printed
+ * over an unverified lead. So a failed scrape now vetoes the all-clear outright rather than being invisible
+ * to it.
+ */
+check('scrape failures are collected', /failures\.push\(\{ row, reason: error\.message \}\)/.test(RUNNER), true);
+check('the all-clear requires no failures',
+  /if \(!changedRows\.length && !unanswered\.length && !failures\.length\)/.test(RUNNER), true);
+check('failures are reported before anything else', /COULD NOT BE READ/.test(RUNNER), true);
+check('...and say nothing can be concluded', /nothing about them can be concluded from this run/.test(RUNNER), true);
+/*
+ * Twenty identical login errors is noise; the fix is one command for all of them. So the login case is
+ * counted and stated once.
+ */
+check('a logged-out REI is summarised once, not per lead', /failed because REI is LOGGED OUT/.test(RUNNER), true);
+check('...with the command that fixes it', /npm run login:rei/.test(RUNNER), true);
+check('...and reassurance that nothing is corrupted', /a failed lead is not recorded as checked/.test(RUNNER), true);
+check('the audit row counts them too', /\$\{failures\.length\} unreadable/.test(RUNNER), true);
+
+console.log('\n=== One browser at a time, or REI logs the client out ===');
+/*
+ * This was the cause of the repeated logouts, and it is worth stating precisely. run-once.mjs takes
+ * acquireLock(); the re-check took none. Both call chromium.launchPersistentContext on the SAME profile
+ * directory, the one holding REI's session cookies, and two Chromium processes on one profile corrupt it.
+ *
+ * The schedules guarantee the collision: the email task fires at :00 :05 :10 :15 :20, this at :00 :20 :40.
+ * They land on the same minute every twenty, and a 20-lead run takes five to eight minutes.
+ */
+check('the re-check takes the lock', /const release = await acquireLock\(\);/.test(RUNNER), true);
+check('...the same unnamed one run-once uses',
+  /acquireLock\(\);/.test(fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/run-once.mjs', import.meta.url), 'utf8')), true);
+check('it exits cleanly when another run holds it', /Another REI run is active — skipped/.test(RUNNER), true);
+check('...and names the reason, so the skip is not read as a fault',
+  /That is what was logging REI out/.test(RUNNER), true);
+check('the lock is released in finally, even on a crash',
+  /\} finally \{\s*\n\s*await context\.close\(\);\s*\n\s*await release\(\);/.test(RUNNER), true);
+/*
+ * The manual login is the likeliest collision of all, because somebody only runs it WHEN the session has
+ * already broken — which is often while a scheduled run is mid-flight.
+ */
+const LOGIN = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/rei-login.mjs', import.meta.url), 'utf8');
+check('logging in takes the lock too', /const releaseLogin = await acquireLock\(\);/.test(LOGIN), true);
+check('...and refuses rather than corrupting the profile', /A scheduled REI run is active/.test(LOGIN), true);
+check('...releasing it on exit', /process\.on\('exit'/.test(LOGIN), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

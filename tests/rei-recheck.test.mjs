@@ -565,9 +565,12 @@ check('it says those rows are still possibly wrong',
   /These rows are UNCHANGED and may still be wrong/.test(RUNNER), true);
 check('it hands over the command that settles it',
   /rei-task-doctor\.mjs "\$\{unanswered\[0\]\.row\['REI BlackBook Link'\]\}"/.test(RUNNER), true);
-// The blanket all-clear is now reachable ONLY when nothing changed AND nothing went unanswered.
-check('"REI agrees on every lead" requires both conditions',
-  /if \(!changedRows\.length && !unanswered\.length\) \{\s*\n\s*console\.log\('REI agrees with the sheet on every lead checked/.test(RUNNER), true);
+/*
+ * The blanket all-clear needs THREE conditions now, not two. A live run printed it after all twenty leads
+ * failed with a login redirect — nothing had been checked at all — so an unreadable lead vetoes it as well.
+ */
+check('"REI agrees on every lead" requires all three conditions',
+  /if \(!changedRows\.length && !unanswered\.length && !failures\.length\) \{\s*\n\s*console\.log\('REI agrees with the sheet on every lead checked/.test(RUNNER), true);
 
 console.log('\n=== A status read out of free text is never written silently ===');
 /*

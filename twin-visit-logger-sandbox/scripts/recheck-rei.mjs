@@ -34,6 +34,7 @@ import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
+import { acquireLock } from '../src/utils/lock.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK, RECHECK_PER_RUN
@@ -176,6 +177,26 @@ if (!candidates.length) {
 console.log(`\n${candidates.length} lead(s) to re-check:`);
 for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Seller Name']} · ${row['Property Address']}`);
 
+/*
+ * The SAME lock run-once.mjs takes, and for a concrete reason: REI kept logging the client out.
+ *
+ * Both this script and the 5-minute booking-email run open chromium.launchPersistentContext on the same
+ * profile directory — the one holding REI's session cookies. Two Chromium processes on one profile corrupt
+ * it, and the schedules guarantee a collision: the email task fires at :00 :05 :10 :15 :20 and this at :00
+ * :20 :40, so they land on the same minute every twenty. Now that a run reads 20 leads and takes five to
+ * eight minutes, it overlaps several.
+ *
+ * The cost is that the email task skips maybe a third of its runs while this holds the lock. That is
+ * cheap: it runs every five minutes and the next one picks up whatever accumulated. A logged-out REI
+ * stops everything until somebody notices.
+ */
+const release = await acquireLock();
+if (!release) {
+  console.log('\nAnother REI run is active — skipped, to avoid two browsers on one profile.');
+  console.log('That is what was logging REI out. This run will be picked up by the next one.');
+  process.exit(0);
+}
+
 // launchReiContext returns the context itself; callers close it. Matches add-visit-from-rei.
 const context = await launchReiContext();
 const changedRows = [];
@@ -189,6 +210,12 @@ const deadFlagged = [];
  * be answered while looking at the lead rather than by opening a log file on one particular laptop.
  */
 const auditRows = [];
+/*
+ * Leads whose page could not be read at all. Tracked separately from `unanswered`, because a failed scrape
+ * is not a lead REI declined to answer about — it is a lead nothing looked at, and the run must not be
+ * able to close by claiming agreement over the top of it.
+ */
+const failures = [];
 try {
   for (const row of candidates) {
     const link = String(row['REI BlackBook Link']).trim();
@@ -200,6 +227,7 @@ try {
       // A login expiry or a slow page must not be recorded as "checked", or the lead would go to the
       // back of the queue having been looked at not at all.
       console.log(`    could not read REI: ${error.message}`);
+      failures.push({ row, reason: error.message });
       continue;
     }
 
@@ -361,10 +389,11 @@ try {
    */
   auditRows.push({ level: 'INFO', id: '',
     message: `REI re-check ${APPLY ? 'run' : 'DRY RUN'}: ${candidates.length} lead(s) read, ` +
-      `${changedRows.length} updated, ${unanswered.length} unverified, ${deadFlagged.length} tagged dead ` +
-      `in REI. ${eligibleCount} of ${rows.length} rows are re-checkable.` });
+      `${changedRows.length} updated, ${unanswered.length} unverified, ${failures.length} unreadable, ` +
+      `${deadFlagged.length} tagged dead in REI. ${eligibleCount} of ${rows.length} rows are re-checkable.` });
 } finally {
   await context.close();
+  await release();
   // State is written even when a lead threw, so a crash mid-run does not re-check the same three leads
   // forever while the fourth is never reached.
   await writeState(state);
@@ -388,7 +417,31 @@ if (unanswered.length) {
   console.log(`  node scripts/rei-task-doctor.mjs "${unanswered[0].row['REI BlackBook Link']}"`);
   if (!changedRows.length) console.log('\nNothing else differed: dates and contact details all matched.');
 }
-if (!changedRows.length && !unanswered.length) {
+/*
+ * Failures first, and they veto the all-clear.
+ *
+ * This run reported "REI agrees with the sheet on every lead checked. Nothing to change." after all twenty
+ * leads failed with a login redirect. Nothing had been checked at all. It is the fourth time a summary in
+ * this feature has claimed agreement it never verified, so a failed scrape now blocks that sentence
+ * outright rather than being invisible to it.
+ */
+if (failures.length) {
+  const loggedOut = failures.filter((f) => /login/i.test(f.reason)).length;
+  console.log(`${failures.length} of ${candidates.length} lead(s) COULD NOT BE READ. Nothing was checked ` +
+    'on them, and nothing about them can be concluded from this run.');
+  if (loggedOut) {
+    // One line, not twenty identical ones: the fix is the same for all of them.
+    console.log(`\n  ${loggedOut} failed because REI is LOGGED OUT. Fix it with:`);
+    console.log('      npm run login:rei');
+    console.log('  Sign in, close the window, and the timers pick the session up. Nothing is corrupted —');
+    console.log('  a failed lead is not recorded as checked, so it goes straight back to the front.');
+  }
+  for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
+    console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);
+  }
+}
+
+if (!changedRows.length && !unanswered.length && !failures.length) {
   console.log('REI agrees with the sheet on every lead checked. Nothing to change.');
 } else if (!changedRows.length) {
   // nothing to add — the unanswered block above is the whole story

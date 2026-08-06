@@ -2,6 +2,22 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config } from '../src/config.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
+import { acquireLock } from '../src/utils/lock.mjs';
+
+/*
+ * Logging in takes the same lock as the scrapes.
+ *
+ * It opens the same persistent Chromium profile, so a manual login landing on top of a scheduled run
+ * is exactly the collision that was logging REI out — and it is the likeliest one to happen, because
+ * somebody only runs this WHEN the session has already broken.
+ */
+const releaseLogin = await acquireLock();
+if (!releaseLogin) {
+  console.error('A scheduled REI run is active. Wait a minute and try again —');
+  console.error('logging in while it runs is what corrupts the browser profile.');
+  process.exit(1);
+}
+process.on('exit', () => { releaseLogin(); });
 
 // Keep the sandbox browser OPEN until the user is logged in. The window must never close on its
 // own: navigation errors are caught, and if there is no interactive terminal we simply wait for
