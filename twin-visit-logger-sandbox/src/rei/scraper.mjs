@@ -195,6 +195,18 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     const contactStage = valueForLabel(pairs, L.contactStage || ['Lead Stage', 'Category']);
     const nextAction = valueForLabel(pairs, L.nextAction || ['Next Step']);
     const callDisposition = valueForLabel(pairs, L.callDisposition || ['Call Disposition']);
+    /*
+     * Follow-Up Reason, from the team's own CRM cheat sheet: "ONLY for Stage 2 — Follow Up. WHY is the lead
+     * still active?" — PRICE, TIMING, DECISION, CONDITION, COMMUNICATION.
+     *
+     * It is one of the four fields that sheet says every lead must have, and the one that carries its most
+     * important distinction: SOFT NO (keep in follow up) against HARD NO (move to lost). Nothing here read it.
+     *
+     * The label wordings are candidates. A label that matches nothing yields '', and '' never overwrites
+     * anything, so guessing wrong here costs nothing — unlike guessing a VALUE, which is how a lead ends up in
+     * the wrong section of the work queue.
+     */
+    const followUpReason = valueForLabel(pairs, L.followUpReason || ['Follow-Up Reason', 'Follow Up Reason']);
     const amountOffer = valueForLabel(pairs, L.amountOffer || ['Amount Offer']);
 
     /*
@@ -385,6 +397,13 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       // Exposed separately as well: propertyDetails is a display string, and re-parsing a sentence to
       // recover a number the scraper already had is how rounding and currency bugs get in.
       amountOffer: normalize(amountOffer),
+      /*
+       * Both of these were being READ and then discarded — callDisposition since the config was written.
+       * "Call Disposition: what happened last?" is one of the four core fields on the client's cheat sheet, and
+       * it was reaching this function and going no further.
+       */
+      callDisposition: normalize(callDisposition),
+      followUpReason: normalize(followUpReason),
       notes: notes.join('\n\n'),
       latestActivity: '',
       nextAction: normalize(nextAction),

@@ -48,6 +48,12 @@
     "callDisposition": [
       "Call Disposition"
     ],
+    "followUpReason": [
+      "Follow-Up Reason",
+      "Follow Up Reason",
+      "Follow-up Reason",
+      "FollowUp Reason"
+    ],
     "amountOffer": [
       "Amount Offer"
     ],

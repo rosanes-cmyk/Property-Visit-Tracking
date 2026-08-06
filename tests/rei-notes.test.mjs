@@ -109,8 +109,13 @@ check('a note merely mentioning REI is not our line',
  * The predicate stays exported and tested above, because it is the record of what the rule was and the
  * distinction it drew is still a real one. Nothing calls it now.
  */
+/*
+ * Matched on the list ENTRY rather than on the closing bracket: 'Blocker' was appended to REI_WINS afterwards
+ * for the Follow-Up Reason, and an assertion anchored to whatever happens to be last in a list breaks every
+ * time the list grows.
+ */
 check('Last Contact Result is a REI-wins field',
-  /'Next Action', 'Last Contact Result'\]/.test(RECHECK), true);
+  /'Next Action', 'Last Contact Result',/.test(RECHECK), true);
 check('...so the guard is no longer consulted',
   /contactResultReplaceable\(row\['Last Contact Result'\]\)/.test(RECHECK), false);
 /*

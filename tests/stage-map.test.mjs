@@ -24,7 +24,8 @@ import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseO
   reiSaysLost, nextActionReplaceable, parseReiMoney,
   AUTOMATION_NEXT_ACTIONS }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
-import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS, followUpBlocker }
+  from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -232,6 +233,59 @@ const completed = diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Visit Scheduled
   { ...FROM_REI, 'Visit Status': 'Completed' });
 check('a completed visit goes to Needs Review, not Offer Sent',
   completed.find((c) => c.field === 'Current Stage')?.to, 'Visit Completed — Needs Review');
+
+console.log('\n=== Follow-Up Reason and Call Disposition: two of the four core fields ===');
+/*
+ * The cheat sheet's final operating rule: "Every ACTIVE lead MUST have: Category, Lead Stage, Follow-Up Reason
+ * (if in Follow Up), Call Disposition, Next Step + Next Action Date + Assigned Sales Agent."
+ *
+ * Two of those four were being lost. callDisposition was read off the REI page and never reached the returned
+ * object — every run today read it and discarded it. Follow-Up Reason was not read at all.
+ *
+ * Together they are what the sheet calls "the most important distinction in acquisitions": SOFT NO against
+ * HARD NO. They go into one cell because the sheet itself nests them — the dispositions are listed UNDER their
+ * follow-up reason.
+ */
+check('reason and disposition are combined',
+  followUpBlocker('2 Follow Up', 'COMMUNICATION', 'Unresponsive'), 'COMMUNICATION — Unresponsive');
+check('...for each of the five reasons', [
+  followUpBlocker('2 Follow Up', 'PRICE', 'Wants Higher Offer/ Retail'),
+  followUpBlocker('2 Follow Up', 'TIMING', 'Not Ready Yet'),
+  followUpBlocker('2 Follow Up', 'DECISION', 'Family Decision Pending'),
+  followUpBlocker('2 Follow Up', 'CONDITION', 'Probate'),
+  followUpBlocker('2 Follow Up', 'COMMUNICATION', 'Unresponsive')
+], ['PRICE — Wants Higher Offer/ Retail', 'TIMING — Not Ready Yet', 'DECISION — Family Decision Pending',
+  'CONDITION — Probate', 'COMMUNICATION — Unresponsive']);
+check('the reason is upper-cased, as the sheet writes it',
+  followUpBlocker('2 Follow Up', 'price', 'Not Ready Yet'), 'PRICE — Not Ready Yet');
+check('a reason with no disposition still lands', followUpBlocker('2 Follow Up', 'TIMING', ''), 'TIMING');
+check('a disposition with no reason still lands',
+  followUpBlocker('2 Follow Up', '', 'Reviewing Options'), 'Reviewing Options');
+check('neither yields nothing', followUpBlocker('2 Follow Up', '', ''), '');
+/*
+ * ONLY for a Follow Up lead, and the restraint is the point. For stages 3 to 8 the disposition is PROGRESS —
+ * "Opened Escrow", "Appointment Completed", "Awaiting Signature" — and writing those into a column called
+ * Blocker would say a deal is stuck when it is moving.
+ */
+for (const [stage, disp] of [['5 Under Contract', 'Opened Escrow'], ['3 Appointment Booked', 'Seller No Show'],
+  ['4 Offer Sent', 'Awaiting Signature'], ['8 Clear to Close', 'Wholesale'], ['10 Acquired', 'Deal Closed'],
+  ['9 Lost / Dead Lead', 'We Passed']]) {
+  check(`"${stage}" / "${disp}" is progress, not a blocker`, followUpBlocker(stage, '', disp), '');
+}
+check('null is safe', followUpBlocker(null, null, null), '');
+/*
+ * It goes to Blocker: an existing column, empty on every row of the live sheet, whose meaning already is "what
+ * is holding this up". Using it avoids touching HEADERS, which this project has recorded as the one change
+ * guaranteed to break something else.
+ */
+check('it reaches the sheet as Blocker',
+  reiFieldsFromScrape({ contactStage: '2 Follow Up', followUpReason: 'TIMING', callDisposition: 'Not Ready Yet' })
+    .Blocker, 'TIMING — Not Ready Yet');
+check('...and Blocker is a REI-wins field so a stale reason is corrected', REI_WINS.includes('Blocker'), true);
+/* A blank from REI still clears nothing — the protection that survives everywhere. */
+check('a lead REI says nothing about keeps its Blocker',
+  diffFromRei({ 'Seller Name': 'X', 'Property Address': '1 A St', 'Current Stage': 'Visit Scheduled',
+    Blocker: 'PRICE — Wants Higher Offer/ Retail' }, {}).some((c) => c.field === 'Blocker'), false);
 
 console.log('\n=== The CRM cheat sheet: ACTIVE is stages 1-8, and 6 is one of them ===');
 /*

@@ -122,7 +122,42 @@ export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Of
 export const REI_WINS = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
   'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason',
   'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date',
-  'Next Action', 'Last Contact Result'];
+  'Next Action', 'Last Contact Result',
+  /*
+   * Blocker carries WHY a Follow Up lead is still open — see followUpBlocker below.
+   *
+   * It is an existing column that was empty on every row, and its meaning is already "what is holding this
+   * up", which is exactly what the client's cheat sheet calls Follow-Up Reason. Using it avoids touching
+   * HEADERS, which this project has recorded as the one change guaranteed to break something else.
+   */
+  'Blocker'];
+
+/*
+ * "Every ACTIVE lead MUST have: Category, Lead Stage, Follow-Up Reason (if in Follow Up), Call Disposition..."
+ *
+ * From the team's own CRM cheat sheet. Two of those four were being read off the REI page and thrown away:
+ * callDisposition never reached the returned object at all, and Follow-Up Reason was not read.
+ *
+ * Together they are the SOFT NO / HARD NO distinction the sheet calls "the most important distinction in
+ * acquisitions" — COMMUNICATION/Unresponsive is a lead to keep chasing, and the disposition says which kind.
+ * They are combined into one cell because the sheet itself nests them that way: the dispositions are listed
+ * under their follow-up reason.
+ *
+ * ONLY for a Follow Up lead, and that restraint matters. For stages 3 to 8 the disposition is PROGRESS —
+ * "Opened Escrow", "Appointment Completed", "Awaiting Signature" — and writing those into a column called
+ * Blocker would say a deal is stuck when it is moving.
+ */
+const REI_FOLLOW_UP_STAGE = /follow\s*-?\s*up/i;
+
+/** "COMMUNICATION — Unresponsive" for a Follow Up lead, or '' when that is not what REI shows. */
+export function followUpBlocker(reiStage, reason, disposition) {
+  if (!REI_FOLLOW_UP_STAGE.test(text(reiStage))) return '';
+  const why = text(reason).toUpperCase();
+  const what = text(disposition);
+  if (!why && !what) return '';
+  if (!why) return what;
+  return what ? `${why} — ${what}` : why;
+}
 
 /*
  * The sentence the automation writes for a gift, and the only one it is allowed to replace.
@@ -528,6 +563,8 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   const money = parseReiMoney(scraped.amountOffer);
   if (money) out['Approved Offer Amount'] = money;
   if (text(scraped.nextAction)) out['Next Action'] = text(scraped.nextAction);
+  const blocker = followUpBlocker(scraped.contactStage, scraped.followUpReason, scraped.callDisposition);
+  if (blocker) out.Blocker = blocker;
 
   /*
    * REI's most recent note, so the board shows what actually happened last.
