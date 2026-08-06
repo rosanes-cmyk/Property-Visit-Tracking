@@ -143,8 +143,21 @@ check('...and so does one still to come', bucket(BASE), 'upcomingVisit');
 check('...and is marked so it can be sorted to the top',
   attentionBucket_({ ...BASE, 'Visit Date': day(2026, 8, 1) }, TODAY).attention, true);
 check('a future visit needs no attention flag', !!attentionBucket_(BASE, TODAY).attention, false);
+/*
+ * A lead with NO DATE is not an upcoming visit either, and the live board is what settled it: "UPCOMING VISITS
+ * (SCHEDULED) 8" where all eight read NO DATE. A heading saying Scheduled over eight leads with nothing
+ * scheduled is untrue, and the count is the part people act on.
+ *
+ * I had left these in Upcoming when the Follow Up section went in, arguing a missing date is a booking gap
+ * rather than an unknown outcome. On the board that distinction does not survive: no date, no owner, no visit.
+ */
 check('no visit date at all is still surfaced',
-  reason({ ...BASE, 'Visit Date': '' }), 'no visit date set — nothing to confirm against');
+  reason({ ...BASE, 'Visit Date': '' }), 'no visit date set — nothing is actually booked');
+check('...and it goes to Follow Up, not Upcoming',
+  bucket({ ...BASE, 'Visit Date': '' }), 'pendingFollowUp');
+check('...so Upcoming Visit only ever holds a lead with a real future date',
+  ['', null, undefined].map((v) => bucket({ ...BASE, 'Visit Date': v })),
+  ['pendingFollowUp', 'pendingFollowUp', 'pendingFollowUp']);
 // A Sheets serial must behave exactly like a real Date — the API writes serials.
 check('a date serial works too', reason({ ...BASE, 'Visit Date': 46235 }).startsWith('OVERDUE'), true);
 
@@ -604,8 +617,10 @@ console.log('\n--- and the dashboard moves it the same way ---');
 const DASH_C = fs.readFileSync(new URL('../apps-script/Dashboard.html', import.meta.url), 'utf8');
 check('Upcoming Visits excludes cancelled',
   /r\.stage==='Visit Scheduled' && r\.visitStatus!=='Canceled' && r\.visitStatus!=='Reschedule Needed'/.test(DASH_C), true);
-check('...and excludes a visit whose date has passed',
-  /&& !\(r\.visitDate && r\.visitDate < todayISO\(\)\)/.test(DASH_C), true);
+check('...and requires a real date that has not passed',
+  /&& !!r\.visitDate && r\.visitDate >= todayISO\(\)/.test(DASH_C), true);
+check('...while Follow Up takes both the undated and the passed',
+  /\(!r\.visitDate \|\| r\.visitDate < todayISO\(\)\)/.test(DASH_C), true);
 check('...and there is a section to receive the cancelled',
   /\['Cancelled — Close Out or Rebook',function\(r\)\{/.test(DASH_C), true);
 check('...and one for the unknowns', /\['Follow Up — Outcome Not Known Yet',function\(r\)\{/.test(DASH_C), true);

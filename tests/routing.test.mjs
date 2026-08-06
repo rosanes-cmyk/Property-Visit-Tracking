@@ -52,8 +52,17 @@ const lacks = (s) => (got) => !got.some((t) => t.includes(s));
 const both = (...fns) => (got) => fns.every((f) => f(got));
 
 console.log('=== A. Visit Scheduled, complete date+time ===');
-check('A routes to Upcoming Visits', route({ stage: 'Visit Scheduled', dq: 'OK' }),
+/*
+ * This record called itself "complete date+time" and carried no date at all — it passed only because Upcoming
+ * Visits did not look. Once undated leads moved to Follow Up it failed, which is the fixture being wrong rather
+ * than the rule: a section named Scheduled should never have claimed a lead with nothing scheduled.
+ */
+check('A routes to Upcoming Visits',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitStatus: 'Scheduled', visitDate: '2026-08-20', visitTime: '2:00 PM' }),
   both(has('Upcoming Visits'), lacks('Unrouted')));
+check('...and A with NO date goes to Follow Up instead',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitStatus: 'Scheduled' }),
+  both(has('Follow Up'), lacks('Upcoming Visits')));
 
 console.log('\n=== B. Date but NO time -> not actionable ===');
 // Scraper writes neither Visit Status nor Current Stage, so the sheet flags it Incomplete.
@@ -69,7 +78,10 @@ check('D routes to Long-Term Nurture', route({ stage: 'Long-Term Nurture', dq: '
   both(has('Long-Term Nurture'), lacks('Unrouted')));
 
 console.log('\n=== E. Rescheduled (still scheduled, new date) ===');
-check('E stays in Upcoming Visits', route({ stage: 'Visit Scheduled', dq: 'OK' }), has('Upcoming Visits'));
+/* Same under-specification as A: "new date" with no date on the record. The new date is now actually given. */
+check('E stays in Upcoming Visits',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitStatus: 'Scheduled', visitDate: '2026-08-25' }),
+  has('Upcoming Visits'));
 
 console.log('\n=== F. Cancelled appointment ===');
 // Cancellation clears Current Stage, so the sheet flags the row for review.
@@ -143,6 +155,14 @@ check('a cancelled visit is in Cancelled only',
  */
 check('a cancelled PAST visit is in Cancelled only',
   route(visit('Canceled', '2026-08-01')), both(has(CANCELLED), lacks(FOLLOW)));
+/*
+ * And a lead with NO DATE. This is the one the live board caught: "UPCOMING VISITS (SCHEDULED) 8" with all
+ * eight reading NO DATE. Nothing is booked, so there is nothing upcoming about it.
+ */
+check('an undated visit is in Follow Up, never Upcoming',
+  route(visit('Scheduled', '')), both(has(FOLLOW), lacks(UPCOMING)));
+check('...and the same with the field missing entirely',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitStatus: 'Scheduled' }), both(has(FOLLOW), lacks(UPCOMING)));
 
 // The three visit sections must be mutually exclusive for every combination that can occur.
 for (const status of ['Scheduled', 'Canceled', 'Reschedule Needed']) {

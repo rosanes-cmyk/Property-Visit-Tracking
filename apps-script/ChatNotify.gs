@@ -607,7 +607,20 @@ function attentionBucket_(rec, today) {
           reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
       }
 
-      if (!on) return { key: b.key, attention: true, sort: at, reason: 'no visit date set — nothing to confirm against' };
+      /*
+       * No date is not an upcoming visit either. It goes to Follow Up with the rest of the unknowns.
+       *
+       * The client, looking at the live board: "UPCOMING VISITS (SCHEDULED) 8" where every one of the eight
+       * read NO DATE — "some is not in the upcoming visit, some of them is dead lead and follow up." A heading
+       * that says Scheduled over eight leads with nothing scheduled is simply untrue, and the count is the part
+       * people act on.
+       *
+       * Leaving them there was my call when the Follow Up section went in, on the grounds that a missing date is
+       * a booking gap rather than an unknown outcome. Seen on the board that distinction does not survive: there
+       * is no date, no owner and no visit, so the job is the same as the rest of this section — find out where
+       * the lead actually stands, then book it or close it out.
+       */
+      if (!on) return { key: 'pendingFollowUp', attention: true, sort: at, reason: 'no visit date set — nothing is actually booked' };
       /*
        * An overdue visit moves to Follow Up too, and this is the change Cherry asked for by name.
        *

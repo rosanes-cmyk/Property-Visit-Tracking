@@ -340,13 +340,20 @@ var SECTIONS=[
    * off but still wanted, and a visit whose date has passed while still marked Scheduled. Upcoming Visits is
    * left holding only visits that really are still upcoming.
    */
+  /*
+   * A visit with NO DATE is not upcoming. The client, on the live board: "UPCOMING VISITS (SCHEDULED) 8" with
+   * every one of the eight reading NO DATE — "some is not in the upcoming visit, some of them is dead lead and
+   * follow up." A heading saying Scheduled over eight leads with nothing scheduled is untrue, and the count is
+   * the part people act on. So a date is now REQUIRED here, and the undated go to Follow Up.
+   */
   ['Upcoming Visits (Scheduled)',function(r){
     return r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitStatus!=='Reschedule Needed'
-      && !(r.visitDate && r.visitDate < todayISO());
+      && !!r.visitDate && r.visitDate >= todayISO();
   }],
   ['Follow Up — Outcome Not Known Yet',function(r){
     return r.visitStatus==='Reschedule Needed'
-      || (r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitDate && r.visitDate < todayISO());
+      || (r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled'
+          && (!r.visitDate || r.visitDate < todayISO()));
   }],
   ['Cancelled — Close Out or Rebook',function(r){
     return r.visitStatus==='Canceled';
