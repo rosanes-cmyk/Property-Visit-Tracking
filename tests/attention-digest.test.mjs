@@ -460,5 +460,36 @@ check('the heading counts every lead, not just the listed ones',
 check('the preview uses the same cap',
   /arr\.slice\(0, DIGEST_LINES_PER_SECTION\)/.test(read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs')), true);
 
+console.log('\n=== The work queue posts TWICE a day ===');
+/*
+ * The client: "we will update start from shift before lunch and then few hours before we go home the
+ * notif." It posted once, at 3pm.
+ *
+ * 11am and 3pm. The first lands while there is still a morning left to act in -- a visit confirmed at 11
+ * can still be rearranged, the same news at 3 cannot. The second is late enough to reflect the day's work
+ * and early enough that somebody can still make a call before leaving.
+ */
+const COMBINED_H = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
+check('the two hours are declared in one place', /var DIGEST_HOURS = \[11, 15\];/.test(COMBINED_H), true);
+check('a trigger is created for each', /DIGEST_HOURS\.forEach\(function \(h\) \{[\s\S]*?\.atHour\(h\)\.create\(\);/.test(COMBINED_H), true);
+// Installing twice must not leave four triggers behind: the old ones are cleared first.
+check('existing triggers are cleared before installing',
+  COMBINED_H.indexOf("if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);")
+    < COMBINED_H.indexOf('DIGEST_HOURS.forEach'), true);
+check('the toast names both times, not one', /posts daily in the ' \+ when \+ ' hours/.test(COMBINED_H), true);
+check('the menu says both times', /Turn ON work-queue digest \(11am \+ 3pm\)/.test(COMBINED_H), true);
+check('turning it off still removes every one of them',
+  /function removeChatAttentionTrigger\(\)[\s\S]*?getProjectTriggers\(\)\.forEach/.test(COMBINED_H), true);
+/*
+ * Apps Script fires a daily trigger somewhere inside the named hour, not on the minute. Saying so in the
+ * code stops the next person treating an 11:40 arrival as a bug.
+ */
+check('the hour-not-minute behaviour is written down',
+  /somewhere inside the named hour/.test(COMBINED_H), true);
+check('...and so is whose timezone applies', /SPREADSHEET'S timezone/.test(COMBINED_H), true);
+// Both firings run the same function, so neither can drift into a different format.
+check('both times run the same digest function',
+  (COMBINED_H.match(/newTrigger\('sendAttentionDigestToChat'\)/g) || []).length, 1);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

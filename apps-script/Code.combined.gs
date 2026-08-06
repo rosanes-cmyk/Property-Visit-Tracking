@@ -29,7 +29,7 @@ function onOpen() {
     .addItem('💬 Send "needs attention" digest now', 'sendAttentionDigestNow')
     .addItem('💬 Turn ON morning visit digest (9am)', 'installChatDigestTrigger')
     .addItem('💬 Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
-    .addItem('💬 Turn ON afternoon attention digest (3pm)', 'installChatAttentionTrigger')
+    .addItem('💬 Turn ON work-queue digest (11am + 3pm)', 'installChatAttentionTrigger')
     .addItem('💬 Turn OFF morning visit digest', 'removeChatDigestTrigger')
     .addItem('💬 Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
     .addItem('💬 Turn OFF attention digest', 'removeChatAttentionTrigger')
@@ -3678,12 +3678,34 @@ function sendAttentionDigestNow() {
 }
 
 /** Menu: post the attention digest daily at 3pm. */
+/*
+ * Two posts a day, at the client's request: "we will update start from shift before lunch and then few
+ * hours before we go home the notif."
+ *
+ * 11am and 3pm. The first lands while there is still a morning left to act in — a visit confirmed at 11
+ * can still be rearranged; the same news at 3 cannot. The second is late enough that the day's work is
+ * reflected in it and early enough that somebody can still make a call before leaving.
+ *
+ * Change DIGEST_HOURS to move them. Hours are in the SPREADSHEET'S timezone (File > Settings), not the
+ * reader's, so a team spread across timezones sees one schedule rather than each their own.
+ *
+ * Apps Script fires a daily trigger somewhere inside the named hour rather than on the minute. So the
+ * message arrives between 11:00 and 12:00, not at 11:00 exactly, and that cannot be tightened from here.
+ */
+var DIGEST_HOURS = [11, 15];
+
 function installChatAttentionTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(15).create();
-  SpreadsheetApp.getActive().toast('Attention digest ON — posts daily in the 3pm hour.', 'Google Chat', 8);
+  DIGEST_HOURS.forEach(function (h) {
+    ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(h).create();
+  });
+  var when = DIGEST_HOURS.map(function (h) {
+    return (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? 'am' : 'pm');
+  }).join(' and ');
+  SpreadsheetApp.getActive().toast('Attention digest ON — posts daily in the ' + when + ' hours.',
+    'Google Chat', 8);
 }
 
 function removeChatAttentionTrigger() {
