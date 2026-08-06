@@ -258,7 +258,15 @@ const release = (ONLY || WAIT)
   })
   : await acquireLock();
 if (!release) {
-  if (ONLY) {
+  /*
+   * The TIMEOUT message belongs to anything that waited, not only to --only.
+   *
+   * This was gated on ONLY, so a --wait sweep that queued for the full twelve minutes ended with "Another REI
+   * run is active — skipped ... this run will be picked up by the next one" — which reads as though it never
+   * tried, and points at the wrong remedy. It had tried for twelve minutes, and the real cause was a lock file
+   * left behind by a run that had been Ctrl+C'd.
+   */
+  if (ONLY || WAIT) {
     console.log('\nREI stayed busy for 12 minutes, which is longer than any single run should take.');
     console.log('A run may have died holding the lock:');
     console.log('  type data\\run.lock        <- shows the pid that claimed it');

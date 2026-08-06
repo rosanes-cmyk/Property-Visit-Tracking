@@ -116,6 +116,39 @@ try {
   await noted();
   check('releasing deletes the file', await fs.stat(path.resolve('./data/t7.lock')).catch(() => null), null);
 
+  console.log('\n=== Ctrl+C releases the lock ===');
+  /*
+   * This cost the client twelve minutes of waiting for a run that was already dead.
+   *
+   * A killed process never runs its finally block, so the lock file survived, and removeStaleLock does not
+   * touch it for thirty minutes — every command typed in that window queued behind a run that no longer
+   * existed. I had told him to Ctrl+C a sweep three times that day, so it was not an edge case.
+   */
+  const SRC = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/src/utils/lock.mjs'), 'utf8');
+  check('an interrupt is handled', /for \(const signal of \['SIGINT', 'SIGTERM', 'SIGHUP'\]\)/.test(SRC), true);
+  check('...and a clean exit too', /process\.once\('exit', releaseSync\)/.test(SRC), true);
+  check('...unlinking synchronously, because the process is on its way out',
+    /fsSync\.unlinkSync\(LOCK_PATH\)/.test(SRC), true);
+  check('...and exiting with the conventional 128 + signal',
+    /process\.exit\(signal === 'SIGINT' \? 130 : 143\)/.test(SRC), true);
+  /*
+   * The guard that makes the cleanup safe rather than dangerous: without it, this process releases the lock,
+   * another takes it, this one later exits — and deletes the OTHER run's lock file. Two browsers on one REI
+   * profile is the exact failure the lock exists to prevent.
+   */
+  check('a released lock is never deleted twice',
+    /const releaseSync = \(\) => \{\s*\n\s*if \(released\) return;/.test(SRC), true);
+  /* Behaviourally: release, let somebody else take it, and the first holder's cleanup must not remove theirs. */
+  const mine = await acquireLock('handoff');
+  await mine();
+  const theirs = await acquireLock('handoff');
+  check('after a handoff the second holder still has its file',
+    !!(await fs.stat(path.resolve('./data/handoff.lock')).catch(() => null)), true);
+  await mine();                       // calling the first release again must be a no-op
+  check('...even when the first release is called again',
+    !!(await fs.stat(path.resolve('./data/handoff.lock')).catch(() => null)), true);
+  await theirs();
+
   console.log('\n=== the callers use the right one ===');
   /*
    * The distinction only matters if the scripts honour it. A scheduled re-check must NOT wait — waiting would

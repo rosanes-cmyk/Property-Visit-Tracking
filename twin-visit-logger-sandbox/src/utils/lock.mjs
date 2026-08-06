@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
@@ -53,10 +54,50 @@ export async function acquireLock(name = 'run') {
   try {
     const handle = await fs.open(LOCK_PATH, 'wx');
     await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
-    return async () => {
+
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
       await handle.close().catch(() => {});
       await fs.unlink(LOCK_PATH).catch(() => {});
     };
+
+    /*
+     * Ctrl+C must release the lock. This cost the client twelve minutes of waiting for a run that was
+     * already dead.
+     *
+     * A killed process never runs its finally block, so the lock file survives, and removeStaleLock does not
+     * touch it for thirty minutes. Every command typed in that window queues behind a run that no longer
+     * exists. I told him to Ctrl+C a sweep three times today, so this is my omission rather than an edge case.
+     *
+     * Synchronous unlink on purpose: the process is on its way out and an await here may never resolve.
+     * signal:false so a second Ctrl+C still kills it outright, and the exit code is the conventional
+     * 128 + signal so a wrapper script can still tell it was interrupted.
+     */
+    /*
+     * `released` guards both handlers, and it is not a nicety.
+     *
+     * Without it: this process releases the lock, another process takes it, this one later exits — and its
+     * exit handler deletes the OTHER run's lock file. Two browsers on one REI profile is the exact failure
+     * the lock exists to prevent, so a cleanup that can delete somebody else's lock is worse than no cleanup.
+     */
+    const releaseSync = () => {
+      if (released) return;
+      released = true;
+      try { fsSync.unlinkSync(LOCK_PATH); } catch { /* already gone */ }
+    };
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+      process.once(signal, () => {
+        releaseSync();
+        // 128 + signal, the conventional code, so a wrapper can still tell this was interrupted.
+        process.exit(signal === 'SIGINT' ? 130 : 143);
+      });
+    }
+    /* A clean exit — including an uncaught throw — leaves nothing behind either. */
+    process.once('exit', releaseSync);
+
+    return release;
   } catch (error) {
     if (error.code === 'EEXIST') return null;
     throw error;
