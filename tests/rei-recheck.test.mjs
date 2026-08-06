@@ -675,6 +675,37 @@ check('...and is not blamed on the scraper', /SCRAPER problem/.test(lookedAndEmp
 console.log('\n--- the panel is opened before the tasks are read ---');
 const TASKS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/tasks.mjs', import.meta.url), 'utf8');
 const DOCTOR = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/rei-task-doctor.mjs', import.meta.url), 'utf8');
+/*
+ * The role list, which is the whole reason this never worked.
+ *
+ * "no Tasks / Appointments tab or accordion could be found on the page" was reported for every lead, for
+ * weeks, and I read it as REI calling the tab something else — and asked the client for the wording four
+ * times. The client's screenshot settles it: the strip is About · Chat · Activities · Notes · Tasks · Files ·
+ * Workflows · Properties. The label was right the whole time.
+ *
+ * The ROLE was wrong. getByRole('tab') needs role="tab" and getByRole('button') needs a <button> or
+ * role="button". A tab strip built from anchors is role "link"; one built from <div>s has no role at all. REI's
+ * class names are scrambled (css-0), so there is no class to fall back on either.
+ */
+check('a link is tried, not only a tab and a button', /'tab', 'button', 'link', 'menuitem'/.test(TASKS), true);
+check('...and there is a text fallback for an element with no role at all',
+  /filter\(\{ hasText: exact \}\)/.test(TASKS), true);
+check('the fallback takes the innermost match, not the wrapper',
+  /filter\(\{ hasText: exact \}\)\.last\(\)/.test(TASKS), true);
+/*
+ * The fallback is the one place this clicks something with no role, so the allowlist must still gate it. `name`
+ * is checked against OPENABLE before either loop, so Delete and Send are unreachable however the page is built.
+ */
+check('the allowlist still gates every path',
+  TASKS.indexOf('if (!OPENABLE.test(name)) continue;') < TASKS.indexOf('filter({ hasText: exact })'), true);
+check('the label is anchored at both ends, so "Tasks (3)" cannot match',
+  /\^\\\\s\*\$\{escapeRegex\(name\)\}\\\\s\*\$/.test(TASKS), true);
+/* A single-page app needs time to render a panel; 1.5s with no network wait was optimistic. */
+check('it waits for the network after clicking',
+  /waitForLoadState\('networkidle'/.test(TASKS), true);
+check('the failure message admits a link was looked for too',
+  /tab, link or accordion could be found/.test(TASKS), true);
+
 check('openPanel exists', /export async function openPanel/.test(TASKS), true);
 check('the scraper opens it BEFORE reading',
   SCRAPER.indexOf('openPanel(page') < SCRAPER.indexOf('readTasks(page'), true);

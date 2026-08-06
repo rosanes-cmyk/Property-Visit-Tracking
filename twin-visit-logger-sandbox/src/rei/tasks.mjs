@@ -67,20 +67,50 @@ export async function openPanel(page, labels = [], { timeout = 4000 } = {}) {
     const name = String(label).trim();
     if (!OPENABLE.test(name)) continue;
     const exact = new RegExp(`^\\s*${escapeRegex(name)}\\s*$`, 'i');
-    // A real tab first, then an accordion header — REI uses both, and its class names are scrambled
-    // (css-0), so the accessible name is the only stable handle.
-    for (const role of ['tab', 'button']) {
+    /*
+     * FOUR roles, not two — and a text fallback after them.
+     *
+     * This reported "no Tasks / Appointments tab or accordion could be found on the page" for every lead, for
+     * weeks, and I read that as REI calling the tab something else. It does not: the client's screenshot of
+     * David Jackowitz shows the strip as About · Chat · Activities · Notes · Tasks · Files · Workflows ·
+     * Properties. The label was right all along and I asked for it four times.
+     *
+     * What was wrong is the ROLE. getByRole('tab') needs role="tab", and getByRole('button') needs a <button>
+     * or role="button". A tab strip built from anchors has role "link", and one built from plain <div>s has no
+     * role at all — and REI's class names are scrambled (css-0), so there is no class to fall back on either.
+     * Either shape is invisible to the two roles this tried.
+     */
+    for (const role of ['tab', 'button', 'link', 'menuitem']) {
       const target = page.getByRole(role, { name: exact }).first();
       if (!(await target.count().catch(() => 0))) continue;
       if ((await target.getAttribute('aria-expanded').catch(() => null)) === 'true') {
         return { opened: true, how: `${role} "${name}" was already open` };
       }
       await target.click({ timeout }).catch(() => {});
-      await page.waitForTimeout(1500);
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(2000);
       return { opened: true, how: `clicked ${role} "${name}"` };
     }
+
+    /*
+     * Last resort: an element whose ENTIRE text is the label, whatever it is made of.
+     *
+     * Still safe, and for the same reason expand.mjs is: `name` has already passed the OPENABLE allowlist —
+     * tasks, appointments, notes, activity, timeline, property — so this cannot reach Delete or Send however
+     * the page is built. The text is anchored at both ends, so "Tasks (3)" or "Task settings" will not match.
+     *
+     * .last() rather than .first() because nesting puts the outer wrapper first in DOM order; the deepest
+     * element whose whole text is "Tasks" is the one a person would actually click.
+     */
+    const byText = page.locator('a, button, li, span, div, p, h1, h2, h3, h4, [role]').filter({ hasText: exact }).last();
+    if (await byText.count().catch(() => 0)) {
+      await byText.click({ timeout }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+      return { opened: true, how: `clicked an element whose text is exactly "${name}"` };
+    }
   }
-  return { opened: false, how: `no ${labels.join(' / ')} tab or accordion could be found on the page` };
+  return { opened: false, how: `no ${labels.join(' / ')} tab, link or accordion could be found on the page` };
 }
 
 /**
