@@ -33,6 +33,7 @@ import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
+import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK, RECHECK_PER_RUN
@@ -183,6 +184,11 @@ const changedRows = [];
 const unanswered = [];
 // Leads REI has already written off. Reported to a person, never acted on.
 const deadFlagged = [];
+/*
+ * What to record in the workbook's Automation Log, so "when was this last checked, and what changed?" can
+ * be answered while looking at the lead rather than by opening a log file on one particular laptop.
+ */
+const auditRows = [];
 try {
   for (const row of candidates) {
     const link = String(row['REI BlackBook Link']).trim();
@@ -226,6 +232,10 @@ try {
         `the tracker still says stage "${row['Current Stage'] || '(blank)'}". ` +
         'Nothing was changed: closing a lead out is a human decision.');
       deadFlagged.push({ row, tags: scraped.deadLeadTags });
+      auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
+        message: `REI has row ${row.__rowNumber} — ${row['Seller Name'] || '(no name)'} — tagged ` +
+          `${scraped.deadLeadTags.join(', ')} while the tracker says stage ` +
+          `"${row['Current Stage'] || '(blank)'}". Not changed: closing a lead out is a human decision.` });
     }
 
     const key = recheckKey(row);
@@ -267,6 +277,7 @@ try {
         requestBody: { valueInputOption: 'USER_ENTERED', data }
       });
       console.log(`    wrote ${data.length} cell(s)`);
+      auditRows.push({ level: 'INFO', id: String(row['Property ID'] || ''), message: auditLine(row, legal) });
     }
 
     /*
@@ -342,6 +353,16 @@ try {
       );
     }
   }
+  /*
+   * A summary row every run, even a run that changed nothing.
+   *
+   * Without it, silence in the log is ambiguous: it reads the same whether the automation checked twenty
+   * leads and found them all correct, or stopped running three days ago. Those need opposite reactions.
+   */
+  auditRows.push({ level: 'INFO', id: '',
+    message: `REI re-check ${APPLY ? 'run' : 'DRY RUN'}: ${candidates.length} lead(s) read, ` +
+      `${changedRows.length} updated, ${unanswered.length} unverified, ${deadFlagged.length} tagged dead ` +
+      `in REI. ${eligibleCount} of ${rows.length} rows are re-checkable.` });
 } finally {
   await context.close();
   // State is written even when a lead threw, so a crash mid-run does not re-check the same three leads
@@ -397,6 +418,15 @@ console.log(`Fields it may fill only when empty: ${FILL_IF_BLANK.join(', ')}`);
 console.log('Current Stage: advanced FORWARD only, never off a closed-out or nurture lead.');
 console.log("Next Action: replaced only when blank or still holding the automation's own wording.");
 console.log('Never touched: Visit Notes, Seller Motivation, Assigned Owner/Visitor once named.');
+
+/*
+ * Written last, and only when applying. A dry run logging "here is what I would have done" would fill the
+ * team's audit trail with things that never happened.
+ */
+if (APPLY && auditRows.length) {
+  const n = await appendAuditLog(sheets, config.spreadsheetId, auditRows);
+  if (n) console.log(`\nLogged ${n} line(s) to the workbook's "Automation Log" tab.`);
+}
 
 /** 1-based column index to an A1 letter. */
 function columnLetter(n) {
