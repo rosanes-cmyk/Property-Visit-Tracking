@@ -24,7 +24,7 @@ import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseO
   reiSaysLost, nextActionReplaceable, parseReiMoney,
   AUTOMATION_NEXT_ACTIONS }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
-import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS, followUpBlocker }
+import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS, followUpBlocker, blockerFromRei }
   from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
@@ -272,6 +272,42 @@ for (const [stage, disp] of [['5 Under Contract', 'Opened Escrow'], ['3 Appointm
   ['9 Lost / Dead Lead', 'We Passed']]) {
   check(`"${stage}" / "${disp}" is progress, not a blocker`, followUpBlocker(stage, '', disp), '');
 }
+
+console.log('\n--- and a CANCELLED CONTRACT says so on the card ---');
+/*
+ * Carol Parkinson. REI has her Active at "6 Cancelled Contract", tagged Interested and Negotiating, with a
+ * live $675,000 offer — so she IS active and the board is right to keep her. But the card read
+ *
+ *   Carol Parkinson · Active Negotiation · $675,000 · CONTRACTS POSSIBLE THIS WEEK
+ *
+ * with nothing saying her contract had fallen through. The client: "for carol its already dead but showed on
+ * possible this week?" She is not dead — but he had no way to tell a deal heading for signature from one being
+ * rebuilt after collapsing, and that is a fair thing to want to know before picking the lead up.
+ *
+ * The stage cannot carry it: the tracker has one Active Negotiation and no finer distinction. So it goes in
+ * Blocker, which the card already shows.
+ */
+check('a cancelled contract is named, with REI\'s reason',
+  blockerFromRei('6 Cancelled Contract', '', 'Seller Backed Out'), 'CANCELLED CONTRACT — Seller Backed Out');
+check('...whatever the disposition',
+  blockerFromRei('6 Cancelled Contract', '', 'Price Disagreement'), 'CANCELLED CONTRACT — Price Disagreement');
+check('...and with no disposition at all', blockerFromRei('6 Cancelled Contract', '', ''), 'CANCELLED CONTRACT');
+check('a reinstated one says that instead',
+  blockerFromRei('7 Reinstated', '', 'Re-Negotiating'), 'REINSTATED — Re-Negotiating');
+check('...and its other disposition',
+  blockerFromRei('7 Reinstated', '', 'Revised Offer Sent'), 'REINSTATED — Revised Offer Sent');
+/* It must reach the sheet, not just the function. */
+check('it reaches the sheet as Blocker',
+  reiFieldsFromScrape({ contactStage: '6 Cancelled Contract', callDisposition: 'Seller Backed Out' }).Blocker,
+  'CANCELLED CONTRACT — Seller Backed Out');
+/*
+ * And the stage still moves to Active Negotiation, which is what keeps her on the board at all. The Blocker is
+ * the explanation, not a substitute for the stage.
+ */
+check('...while the stage still moves to Active Negotiation',
+  stageContractCancelled('Contract Signed', '6 Cancelled Contract'), 'Active Negotiation');
+/* The old name still works: nothing that called it needed to change. */
+check('followUpBlocker is the same function', followUpBlocker === blockerFromRei, true);
 check('null is safe', followUpBlocker(null, null, null), '');
 /*
  * It goes to Blocker: an existing column, empty on every row of the live sheet, whose meaning already is "what

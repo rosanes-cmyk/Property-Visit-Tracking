@@ -149,15 +149,53 @@ export const REI_WINS = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer A
  */
 const REI_FOLLOW_UP_STAGE = /follow\s*-?\s*up/i;
 
-/** "COMMUNICATION — Unresponsive" for a Follow Up lead, or '' when that is not what REI shows. */
-export function followUpBlocker(reiStage, reason, disposition) {
-  if (!REI_FOLLOW_UP_STAGE.test(text(reiStage))) return '';
-  const why = text(reason).toUpperCase();
+/*
+ * A CANCELLED CONTRACT belongs here too, and the client found the reason on the board.
+ *
+ * Carol Parkinson: REI has her Active at "6 Cancelled Contract", tagged Interested and Negotiating, with a
+ * live $675,000 offer. So she IS active and the board is right to keep her — but the card read
+ *
+ *   Carol Parkinson · Active Negotiation · $675,000 · CONTRACTS POSSIBLE THIS WEEK
+ *
+ * with nothing anywhere saying her contract had fallen through. "for carol its already dead but showed on
+ * possible this week?" — she is not dead, and the card gave him no way to tell the difference between a deal
+ * heading for signature and one being rebuilt after collapsing.
+ *
+ * The stage cannot carry it: the tracker has one Active Negotiation and no finer distinction. So the fact goes
+ * in Blocker, where the card already shows it, alongside REI's own disposition — "Seller Backed Out",
+ * "Price Disagreement" — which is exactly what somebody needs to know before picking that lead up.
+ */
+const REI_CONTRACT_TROUBLE = [
+  [/cancell?ed\s*contract/i, 'CANCELLED CONTRACT'],
+  [/\breinstated\b/i, 'REINSTATED']
+];
+
+/**
+ * What is holding this lead up, for the Blocker column — or '' when REI shows nothing of the sort.
+ *
+ * Two shapes, both from the client's CRM cheat sheet:
+ *   Stage 2 Follow Up          "COMMUNICATION — Unresponsive"      why the lead is still open
+ *   Stage 6/7 contract trouble "CANCELLED CONTRACT — Seller Backed Out"
+ *
+ * Nothing for stages 3, 4, 5, 8 or 10: there the disposition is PROGRESS — "Opened Escrow", "Awaiting
+ * Signature" — and writing those into a column called Blocker would say a deal is stuck when it is moving.
+ */
+export function blockerFromRei(reiStage, reason, disposition) {
+  const stage = text(reiStage);
   const what = text(disposition);
+
+  const trouble = REI_CONTRACT_TROUBLE.find(([pattern]) => pattern.test(stage));
+  if (trouble) return what ? `${trouble[1]} — ${what}` : trouble[1];
+
+  if (!REI_FOLLOW_UP_STAGE.test(stage)) return '';
+  const why = text(reason).toUpperCase();
   if (!why && !what) return '';
   if (!why) return what;
   return what ? `${why} — ${what}` : why;
 }
+
+/** Kept as the old name, because that is what the follow-up tests and any caller of it still say. */
+export const followUpBlocker = blockerFromRei;
 
 /*
  * The sentence the automation writes for a gift, and the only one it is allowed to replace.
@@ -573,7 +611,7 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   const money = parseReiMoney(scraped.amountOffer);
   if (money) out['Approved Offer Amount'] = money;
   if (text(scraped.nextAction)) out['Next Action'] = text(scraped.nextAction);
-  const blocker = followUpBlocker(scraped.contactStage, scraped.followUpReason, scraped.callDisposition);
+  const blocker = blockerFromRei(scraped.contactStage, scraped.followUpReason, scraped.callDisposition);
   if (blocker) out.Blocker = blocker;
 
   /*
