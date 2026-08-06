@@ -67,10 +67,18 @@ check('no REI link, nothing to open — this is every imported row',
 check('a test row is skipped', recheckSkipReason({ ...JOSE, Source: 'TEST' }), 'test row');
 check('a closed-out lead is not going to change usefully',
   recheckSkipReason({ ...JOSE, 'Current Stage': 'Lost / Closed Out' }), 'stage "Lost / Closed Out" is not active');
-check('nor is a signed contract',
-  recheckSkipReason({ ...JOSE, 'Current Stage': 'Contract Signed' }), 'stage "Contract Signed" is not active');
+/*
+ * Contract Signed IS active now, and Rob Walker is why. He is Contract Signed and REI holds a gift ordered
+ * for him after signing — gifts are follow-up, and follow-up happens once the deal closes, which is exactly
+ * when this used to stop looking. See tests/gift.test.mjs.
+ */
+check('a signed contract IS still worth checking — gifts come after it',
+  recheckSkipReason({ ...JOSE, 'Current Stage': 'Contract Signed' }), '');
+// The two that stay out: plausible, but a guess, and 206 more rows of browser traffic.
+check('Long-Term Nurture is still skipped',
+  recheckSkipReason({ ...JOSE, 'Current Stage': 'Long-Term Nurture' }), 'stage "Long-Term Nurture" is not active');
 check('a blank stage is skipped', recheckSkipReason({ ...JOSE, 'Current Stage': '' }), 'no stage');
-check('every active stage is a real dropdown value', ACTIVE_STAGES.length, 7);
+check('every active stage is a real dropdown value', ACTIVE_STAGES.length, 8);
 
 console.log('\n=== A passed visit still marked Scheduled jumps the queue ===');
 /*
@@ -723,7 +731,11 @@ check('one filled and one named is handled per field',
   diffFromRei({ ...AMELIA, 'Assigned Owner': 'Kyle' }, FROM_REI).filter((c) => c.filledBlank).map((c) => c.field),
   ['Assigned Visitor']);
 check('a blank from REI fills nothing', diffFromRei(AMELIA, reiFieldsFromScrape({})).length, 0);
-check('the fillable fields', FILL_IF_BLANK, ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount']);
+check('the fillable fields', FILL_IF_BLANK,
+  ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
+    'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason']);
+// Who approved a gift is a workflow fact REI does not hold. See tests/gift.test.mjs.
+check('who approved the gift is NOT fillable', FILL_IF_BLANK.includes('Gift Approved By'), false);
 // They must stay OUT of RECHECKABLE, or the fill-only guarantee is gone.
 for (const f of FILL_IF_BLANK) check(`${f} is not overwritable`, RECHECKABLE.includes(f), false);
 check('a re-run after filling changes nothing',
