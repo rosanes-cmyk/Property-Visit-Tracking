@@ -442,6 +442,14 @@ function removeChatNewBookingTrigger() {
  */
 var DIGEST_LINES_PER_SECTION = 5;
 
+/*
+ * How long a gift stays visible after it has been sent.
+ *
+ * Three days: long enough that it appears on at least one 11am and one 3pm card, short enough that the
+ * section still means "needs attention" rather than becoming a gift ledger.
+ */
+var GIFT_SENT_VISIBLE_DAYS = 3;
+
 var ATTENTION_BUCKETS = [
   { key: 'upcomingVisit', icon: '📅', title: 'Upcoming Visit', stage: 'Visit Scheduled',
     action: 'Confirm the visit is going ahead. Afterwards mark it Completed or Canceled.' },
@@ -631,7 +639,31 @@ function attentionBucket_(rec, today) {
  * 'Sent' and 'Not Appropriate' are finished, and 'Not Reviewed' is not a commitment anyone has made.
  */
 function giftPending_(rec) {
-  if (excludedFromDigest_(rec)) return '';
+  /*
+   * A gift can surface on a lead the STAGE sections have finished with.
+   *
+   * "THE GIFT IS NOT INCLUDED?" — no, and this was a bug I introduced today. Rob Walker is Contract Signed,
+   * excludedFromDigest_ drops that stage, and giftPending_ deferred to it wholesale. So the moment Contract
+   * Signed leads became re-checkable and their gifts started reaching the sheet, the one section that exists
+   * to track those gifts could not show them.
+   *
+   * Gifts follow a deal PAST its stage — Rob's is a post-signing apology basket — so the stage-based
+   * exclusions do not apply here. The Gift Follow-Up section is already the one place a lead may appear
+   * twice, which is why letting it ignore stage is consistent rather than a special case.
+   *
+   * Contract Signed is allowed through; Lost / Closed Out is NOT. A won deal earns follow-up, and Rob's
+   * basket is exactly that. A dead lead should not generate a to-do — dropping the whole stage check was an
+   * over-correction that had a closed-out lead asking Cherry to approve a gift for a seller nobody is
+   * pursuing. If the team does want apology gifts on lost leads, that is a decision to make deliberately.
+   *
+   * The rest are about the ROW rather than its stage: no address to send anything to, a test row, and
+   * imported history the whole queue keeps out on volume grounds.
+   */
+  if (!rec['Property Address']) return '';
+  if (String(rec['Source'] || '').trim() === 'TEST') return '';
+  if (String(rec['Source'] || '').trim() === 'Import' && !CFG.DIGEST_INCLUDE_IMPORTED) return '';
+  if (String(rec['Current Stage'] || '').trim() === 'Lost / Closed Out') return '';
+
   var status = String(rec['Gift Status'] || '').trim();
   if (status === 'Recommended') {
     var why = String(rec['Gift Recommendation Reason'] || '').trim();
@@ -645,6 +677,28 @@ function giftPending_(rec) {
     var on = dateCell_(rec['Gift Approval Date']);
     return 'gift approved' + (by ? ' by ' + by : '') + (on ? ' on ' + fmt_(on) : '') +
       ' — not sent yet';
+  }
+  /*
+   * A gift SENT in the last few days is shown as confirmation, then drops off by itself.
+   *
+   * The section is a work queue and a sent gift needs no action, so listing every gift ever sent would grow
+   * it forever and bury the ones still waiting on somebody. But a gift that went out yesterday is the team's
+   * own follow-up landing, and Cherry asked to "track sending gifts to them as part of follow up" — tracking
+   * that only ever shows what has NOT happened is half a tracker.
+   *
+   * GIFT_SENT_VISIBLE_DAYS is the whole compromise: long enough to be seen at the next digest, short enough
+   * that the section still means "needs attention" a week later.
+   */
+  if (status === 'Sent') {
+    var sentOn = dateCell_(rec['Gift Sent Date']);
+    if (!sentOn) return 'gift marked Sent but no Gift Sent Date recorded';
+    var age = Math.round((today_().getTime() - sentOn.getTime()) / 86400000);
+    if (age < 0) return 'gift out for delivery on ' + fmt_(sentOn);
+    if (age <= GIFT_SENT_VISIBLE_DAYS) {
+      var what = String(rec['Gift Recommendation Reason'] || '').trim();
+      return 'gift SENT ' + fmt_(sentOn) + (what ? ' — ' + what : '') + ' — nothing to do, for your awareness';
+    }
+    return '';
   }
   return '';
 }

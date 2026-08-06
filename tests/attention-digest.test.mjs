@@ -29,14 +29,22 @@ function check(name, got, want) {
 
 const CHAT = read('apps-script/ChatNotify.gs');
 const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
-const source = slice('var ATTENTION_BUCKETS = [', '/**\n * Post the 3pm work queue');
+// From GIFT_SENT_VISIBLE_DAYS, so the constant is lifted with the rules that read it rather than injected.
+const source = slice('var GIFT_SENT_VISIBLE_DAYS', '/**\n * Post the 3pm work queue');
+
+/*
+ * A FIXED today, so a gift's visibility window is tested rather than the wall clock. Without this, "sent
+ * three days ago" quietly becomes "sent four days ago" overnight and the suite starts failing on its own.
+ */
+const TODAY_FIXED = new Date(2026, 7, 7);
 
 const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS } = new Function(
-  'fmt_', 'CFG',
+  'fmt_', 'CFG', 'today_',
   `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS };`
 )(
   (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-  { DIGEST_INCLUDE_IMPORTED: false }
+  { DIGEST_INCLUDE_IMPORTED: false },
+  () => TODAY_FIXED
 );
 
 const TODAY = new Date(2026, 7, 5);              // Aug 5 2026, local midnight
@@ -206,8 +214,13 @@ check('an approved gift still needs sending',
   'gift approved by Cherry on Aug 2, 2026 — not sent yet');
 check('approved AND sent is finished',
   giftPending_({ ...sent, 'Gift Status': 'Approved', 'Gift Sent Date': day(2026, 8, 3) }), '');
-check('"Sent" is finished', giftPending_({ ...sent, 'Gift Status': 'Sent' }), '');
-check('"Not Appropriate" is finished', giftPending_({ ...sent, 'Gift Status': 'Not Appropriate' }), '');
+/*
+ * 'Sent' used to be silent unconditionally. It now shows for GIFT_SENT_VISIBLE_DAYS as confirmation and then
+ * drops off, and a Sent with no date is flagged as a data fault — the row claims the gift went out and cannot
+ * say when, so nobody can tell whether it is overdue. Both are asserted in full further down.
+ */
+check('"Sent" long ago is finished',
+  giftPending_({ ...sent, 'Gift Status': 'Sent', 'Gift Sent Date': day(2026, 1, 1) }), '');
 check('"Not Reviewed" is not a commitment anyone made',
   giftPending_({ ...sent, 'Gift Status': 'Not Reviewed' }), '');
 check('no gift status at all is silent', giftPending_(sent), '');
@@ -559,6 +572,72 @@ check('...and there is a section to receive them',
   /\['Cancelled — Rebook or Close Out',function\(r\)\{/.test(DASH_C), true);
 check('the two views use the same section name',
   /Cancelled — Rebook or Close Out/.test(CHAT_C) && /Cancelled — Rebook or Close Out/.test(DASH_C), true);
+
+console.log('\n=== A gift shows even on a lead the stage sections have finished with ===');
+/*
+ * "THE GIFT IS NOT INCLUDED?" — no, and it was a bug introduced the same day.
+ *
+ * Rob Walker is Contract Signed. excludedFromDigest_ drops that stage, and giftPending_ deferred to it
+ * wholesale. So the moment Contract Signed leads became re-checkable and their gifts started reaching the
+ * sheet, the one section that exists to track gifts could not show them.
+ *
+ * Gifts follow a deal PAST its stage — Rob's is a post-signing apology basket — so the stage exclusions do
+ * not apply here. Gift Follow-Up is already the one section where a lead may appear twice, which makes
+ * ignoring stage consistent rather than a special case.
+ */
+const giftSrc = CHAT.slice(CHAT.indexOf('function giftPending_'), CHAT.indexOf('\n}\n', CHAT.indexOf('function giftPending_')) + 3);
+const giftPending = new Function('CFG', 'dateCell_', 'fmt_', 'today_', 'GIFT_SENT_VISIBLE_DAYS',
+  `${giftSrc}\nreturn giftPending_;`)(
+  { DIGEST_INCLUDE_IMPORTED: false },
+  (v) => { if (!v) return null; const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d; },
+  (d) => new Date(d).toISOString().slice(0, 10),
+  () => new Date('2026-08-07T00:00:00Z'),
+  3
+);
+const SIGNED = { 'Property Address': '492 Umland Dr', Source: 'Intake', 'Current Stage': 'Contract Signed' };
+check('a gift awaiting approval shows on a SIGNED contract',
+  giftPending({ ...SIGNED, 'Gift Status': 'Recommended', 'Gift Approval Owner': 'Cherry' }),
+  'gift recommended — awaiting approval from Cherry');
+check('so does one approved but not sent',
+  giftPending({ ...SIGNED, 'Gift Status': 'Approved', 'Gift Approved By': 'Cherry', 'Gift Approval Date': '2026-08-05' }),
+  'gift approved by Cherry on 2026-08-05 — not sent yet');
+/* The exclusions that DO still hold are about the row, not its stage. */
+check('a test row is still excluded', giftPending({ ...SIGNED, Source: 'TEST', 'Gift Status': 'Recommended' }), '');
+check('imported history is still excluded',
+  giftPending({ ...SIGNED, Source: 'Import', 'Gift Status': 'Recommended' }), '');
+check('a row with no address is still excluded — nowhere to send it',
+  giftPending({ 'Gift Status': 'Recommended' }), '');
+
+console.log('\n--- a gift SENT is shown briefly, then drops off by itself ---');
+/*
+ * The section is a work queue and a sent gift needs no action, so listing every gift ever sent would grow it
+ * forever and bury the ones still waiting on somebody. But Cherry asked to "track sending gifts to them as
+ * part of follow up", and a tracker that only ever shows what has NOT happened is half a tracker. Three days
+ * is the compromise: seen on at least one 11am and one 3pm card, gone before it becomes a ledger.
+ */
+check("Rob's gift, sent yesterday, is shown",
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+    'Gift Recommendation Reason': 'Gourmet Get-Together Gift Basket' }),
+  'gift SENT 2026-08-06 — Gourmet Get-Together Gift Basket — nothing to do, for your awareness');
+check('...and says plainly that nothing is needed',
+  /nothing to do, for your awareness/.test(giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06' })), true);
+check('a gift sent ten days ago has dropped off',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-07-28' }), '');
+// A future date is a delivery still to happen, not a lapse.
+check('a gift out for delivery reads as such',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-09' }),
+  'gift out for delivery on 2026-08-09');
+/*
+ * Sent with no date is a data fault worth surfacing: the row claims the gift went out and cannot say when,
+ * so nobody can tell whether it is overdue.
+ */
+check('Sent with no date is flagged rather than hidden',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '' }),
+  'gift marked Sent but no Gift Sent Date recorded');
+check('Not Reviewed is not a to-do', giftPending({ ...SIGNED, 'Gift Status': 'Not Reviewed' }), '');
+check('no gift status at all is silent', giftPending({ ...SIGNED }), '');
+check('the visibility window is one named constant',
+  /var GIFT_SENT_VISIBLE_DAYS = 3;/.test(CHAT), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
