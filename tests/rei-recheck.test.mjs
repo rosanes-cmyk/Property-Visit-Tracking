@@ -249,12 +249,12 @@ check('Visit Status is never listed as unchecked',
 // taskPanelOpened is required: without it the run cannot know whether an empty task list means the
 // appointment is gone or that the panel never rendered. Asserted properly further down.
 check('no appointment on the page is called out as unsettleable — once we have actually looked',
-  /no future re-check will settle it/.test(describeChanges(JOSE, [],
+  /no OPEN booked-appointment task/.test(describeChanges(JOSE, [],
     { 'Seller Name': 'Jose Anguiano', Phone: '(650) 771-7814' },
     { visitTaskState: 'unknown', visitTaskReason: 'the Tasks panel was opened and holds no booked-appointment task',
       taskPanelOpened: true })), true);
 check('...but a lead REI still holds an appointment for is not',
-  /no future re-check will settle it/.test(describeChanges(JOSE, [],
+  /no OPEN booked-appointment task/.test(describeChanges(JOSE, [],
     { 'Visit Date': '08/12/2026', 'Visit Time': '2:00 PM' },
     { visitTaskState: 'unknown', visitTaskReason: 'x', taskPanelOpened: true })), false);
 check('silence from REI says something different',
@@ -666,10 +666,20 @@ check('...and does NOT send somebody off to mark a visit',
 
 const lookedAndEmpty = describeChanges(noAppt, [], contactOnly,
   { visitTaskState: 'unknown', visitTaskReason: 'the Tasks panel was opened (clicked tab "Tasks") and holds no booked-appointment task', taskPanelOpened: true });
-check('an OPENED but empty panel does claim REI has no appointment',
-  /REI holds no appointment/.test(lookedAndEmpty), true);
-check('...and says a future re-check will not help',
-  /no future re-check will settle it/.test(lookedAndEmpty), true);
+check('an OPENED but empty panel reports what was actually seen',
+  /REI has no OPEN booked-appointment task for this contact/.test(lookedAndEmpty), true);
+check('...and still sends somebody to settle it',
+  /Somebody has to mark the visit Completed or Canceled/.test(lookedAndEmpty), true);
+/*
+ * And it must NOT pick a reading it cannot see. Many CRMs list only open tasks and hide completed ones behind
+ * a filter; on that reading an empty panel means the visit HAPPENED, which is the opposite conclusion. This
+ * project has already published one confident, wrong "REI holds no appointment for this contact any more", so
+ * the sentence names both readings rather than choosing.
+ */
+check('...and admits the task may simply have been ticked off',
+  /REI lists only open tasks and this one was already ticked off/.test(lookedAndEmpty), true);
+check('...and no longer asserts the appointment is gone',
+  /holds no appointment for this contact any more/.test(lookedAndEmpty), false);
 check('...and is not blamed on the scraper', /SCRAPER problem/.test(lookedAndEmpty), false);
 
 console.log('\n--- the panel is opened before the tasks are read ---');

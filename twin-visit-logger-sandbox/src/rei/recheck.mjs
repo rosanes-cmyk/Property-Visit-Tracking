@@ -742,8 +742,22 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
         'tasks were never read. Nothing can be concluded about the visit from this run. ' +
         'Run scripts/rei-task-doctor.mjs against the lead to see what the page offers.'
       : noAppointment
-        ? ' REI holds no appointment for this contact any more, so no future re-check will settle it ' +
-          'either. Somebody has to mark the visit Completed or Canceled.'
+        /*
+         * Opened AND empty. Careful with what that licenses us to say.
+         *
+         * This project has already published one confident, wrong "REI holds no appointment for this contact
+         * any more" — made when the panel had never been opened at all. The panel opens now, so the finding is
+         * real, but there is a second reading it does not exclude: many CRMs list only OPEN tasks and hide
+         * completed ones behind a filter. On that reading an empty panel means the visit HAPPENED and the task
+         * was ticked off, which is the opposite conclusion.
+         *
+         * So the sentence says what was seen — no open task — and names the other reading instead of picking
+         * one. Until somebody confirms whether REI's Tasks panel hides completed tasks, asserting either is
+         * guessing, and this is the field that decides whether a seller gets followed up.
+         */
+        ? ' REI has no OPEN booked-appointment task for this contact. That means either the appointment was ' +
+          'removed, or REI lists only open tasks and this one was already ticked off — the panel does not say ' +
+          'which. Somebody has to mark the visit Completed or Canceled.'
         : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.';
     return head + `${confirmed}${notChecked}. REI could not tell us whether the visit happened — ` +
       `${scraped.visitTaskReason}.${tail}`;
