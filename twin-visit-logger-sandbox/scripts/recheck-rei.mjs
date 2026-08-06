@@ -5,6 +5,7 @@
  *   node scripts/recheck-rei.mjs --yes           <- applies it
  *   node scripts/recheck-rei.mjs --limit 40      <- more per run (default 20)
  *   node scripts/recheck-rei.mjs --limit 200 --wait --yes   <- sweep everything due, queueing for REI
+ *   node scripts/recheck-rei.mjs --limit 400 --wait --include-closed --yes   <- the WHOLE sheet, closed leads too
  *   node scripts/recheck-rei.mjs --only "Jose"   <- one lead, matched on seller or address
  *   node scripts/recheck-rei.mjs --only "Schatz,Thatcher,Toledo" --yes   <- several, one queue for REI
  *
@@ -61,6 +62,14 @@ const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? String(a
  * the same situation and now says so explicitly rather than being inferred.
  */
 const WAIT = args.includes('--wait');
+/*
+ * --include-closed: sweep the leads somebody parked, too.
+ *
+ * "its 378 leads … okay okay so start now, we need now all that updated." Off by default, because a closed-out
+ * lead is a decision and re-reading 214 of them every twenty minutes buys nothing. Worth having as a one-off:
+ * an offer made and never followed up would be sitting in exactly that pile.
+ */
+const INCLUDE_CLOSED = args.includes('--include-closed');
 
 const STATE_FILE = path.resolve('./data/rei-recheck.json');
 
@@ -105,7 +114,7 @@ console.log(`${rows.length} live row(s) in the tab.`);
 // Why the rest were left alone — otherwise "4 of 380" looks like a bug.
 const skipTally = {};
 for (const row of rows) {
-  const why = recheckSkipReason(row);
+  const why = recheckSkipReason(row, { includeClosed: INCLUDE_CLOSED });
   if (why) skipTally[why] = (skipTally[why] || 0) + 1;
 }
 for (const [why, n] of Object.entries(skipTally).sort((a, b) => b[1] - a[1])) {
@@ -123,7 +132,7 @@ console.log(`\n${eligibleCount} of ${rows.length} row(s) can ever be re-checked`
   (skipTally['no REI link'] ? ` — ${skipTally['no REI link']} have no REI link, so there is no page to open.` : '.'));
 
 const state = await readState();
-let candidates = pickRecheckCandidates(rows, state, { now: new Date(), limit: LIMIT });
+let candidates = pickRecheckCandidates(rows, state, { now: new Date(), limit: LIMIT, includeClosed: INCLUDE_CLOSED });
 if (ONLY) {
   /*
    * --only ignores the SCHEDULE, never the eligibility rules.
@@ -206,7 +215,7 @@ if (ONLY) {
 
   const eligible = [];
   for (const row of matched) {
-    const why = recheckSkipReason(row);
+    const why = recheckSkipReason(row, { includeClosed: INCLUDE_CLOSED });
     if (why) console.log(`    skipping ${row['Seller Name']} — ${why}`);
     else eligible.push(row);
   }

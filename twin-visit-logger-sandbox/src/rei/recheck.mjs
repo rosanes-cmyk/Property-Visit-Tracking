@@ -196,7 +196,7 @@ const text = (v) => String(v == null ? '' : v).trim();
  * active stage. Returns the reason it was skipped, so a run can say why it looked at 4 rows out of 380
  * instead of leaving that to be guessed at.
  */
-export function recheckSkipReason(row) {
+export function recheckSkipReason(row, { includeClosed = false } = {}) {
   if (!text(row['REI BlackBook Link'])) return 'no REI link';
   if (text(row['Source']) === 'TEST') return 'test row';
   const stage = text(row['Current Stage']);
@@ -213,6 +213,18 @@ export function recheckSkipReason(row) {
    * the answer. A stage somebody DID choose — Lost / Closed Out, Long-Term Nurture — is still respected below.
    */
   if (!stage) return '';
+  /*
+   * includeClosed sweeps the leads a person deliberately parked: Lost / Closed Out and Long-Term Nurture.
+   *
+   * Off by default, and it should stay off by default. A closed-out lead is a decision, re-reading 214 of them
+   * every twenty minutes buys nothing, and the queue exists to keep live deals accurate.
+   *
+   * But the client asked for the whole sheet, twice, and then showed me the count: "its 378 leads … okay okay
+   * so start now, we need now all that updated." It is his data and there is a real reason for it — an offer
+   * made and never followed up would be sitting in exactly this pile. So it is available as a deliberate
+   * one-off rather than something to be talked out of.
+   */
+  if (includeClosed) return '';
   if (!ACTIVE_STAGES.includes(stage)) return `stage "${stage}" is not active`;
   return '';
 }
@@ -224,8 +236,8 @@ export function recheckSkipReason(row) {
  * shorter clock, because that is the case the client actually hit: the appointment is in the past, the
  * row still claims it is coming, and every hour that stays true the board is wrong about today.
  */
-export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MINUTES } = {}) {
-  if (recheckSkipReason(row)) return 0;
+export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MINUTES, includeClosed = false } = {}) {
+  if (recheckSkipReason(row, { includeClosed })) return 0;
   const last = lastCheckedIso ? new Date(lastCheckedIso) : null;
   const since = last && !Number.isNaN(last.getTime())
     ? (now.getTime() - last.getTime()) / 60000
@@ -290,11 +302,12 @@ export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MIN
  * would sit there for an hour and hammer REI — the same shape of mistake that got a WhatsApp number
  * banned. Bounded and repeated is slower and survivable.
  */
-export function pickRecheckCandidates(rows, state = {}, { now, limit = RECHECK_PER_RUN, minutes = RECHECK_MINUTES } = {}) {
+export function pickRecheckCandidates(rows, state = {},
+  { now, limit = RECHECK_PER_RUN, minutes = RECHECK_MINUTES, includeClosed = false } = {}) {
   return rows
     .map((row) => ({
       row,
-      urgency: recheckUrgency(row, state[recheckKey(row)]?.lastCheckedAt, { now, minutes })
+      urgency: recheckUrgency(row, state[recheckKey(row)]?.lastCheckedAt, { now, minutes, includeClosed })
     }))
     .filter((c) => c.urgency > 0)
     .sort((a, b) => b.urgency - a.urgency)

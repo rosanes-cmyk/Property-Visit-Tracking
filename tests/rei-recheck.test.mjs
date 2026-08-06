@@ -94,6 +94,45 @@ check('a blank stage is checked, not skipped', recheckSkipReason({ ...JOSE, 'Cur
 check('...and REI can then fill it', stageAdvance('', '4 Offer Sent'), 'Offer Sent');
 check('a stage a person chose is still respected',
   recheckSkipReason({ ...JOSE, 'Current Stage': 'Long-Term Nurture' }), 'stage "Long-Term Nurture" is not active');
+/*
+ * ...unless the whole sheet was asked for. "its 378 leads … okay okay so start now, we need now all that
+ * updated." Off by default — a closed-out lead is a decision and re-reading 214 of them every twenty minutes
+ * buys nothing — but available deliberately, because an offer made and never followed up sits in that pile.
+ */
+for (const stage of ['Long-Term Nurture', 'Lost / Closed Out', 'Contract Signed', 'Visit Scheduled']) {
+  check(`--include-closed reaches "${stage}"`,
+    recheckSkipReason({ ...JOSE, 'Current Stage': stage }, { includeClosed: true }), '');
+}
+check('...but a linkless row is STILL unreachable',
+  recheckSkipReason({ ...JOSE, 'REI BlackBook Link': '' }, { includeClosed: true }), 'no REI link');
+check('...and a TEST row stays out',
+  recheckSkipReason({ ...JOSE, Source: 'TEST' }, { includeClosed: true }), 'test row');
+/*
+ * The flag has to reach the QUEUE, not just the tally. recheckUrgency returns 0 for anything skipped, so a
+ * closed lead would be counted as eligible in the header and then never picked — the run would say 378 and
+ * check 155.
+ */
+const CLOSED = { ...JOSE, 'Current Stage': 'Lost / Closed Out' };
+check('urgency ignores a closed lead by default',
+  recheckUrgency(CLOSED, null, { now: NOW }), 0);
+check('...and scores it when the flag is set',
+  recheckUrgency(CLOSED, null, { now: NOW, includeClosed: true }) > 0, true);
+check('...so the picker returns it',
+  pickRecheckCandidates([CLOSED], {}, { now: NOW, limit: 5, includeClosed: true }).length, 1);
+check('...and does not, without the flag',
+  pickRecheckCandidates([CLOSED], {}, { now: NOW, limit: 5 }).length, 0);
+/*
+ * Every call site in the runner must pass it, or one of them silently disagrees with the others — the header
+ * would say 378 eligible and the picker would still hand back 155.
+ *
+ * Read under its own name: RUNNER is declared further down this file, and referring to it here reads as though
+ * hoisting will sort it out, which for a const it does not.
+ */
+const RUNNER_FLAGS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
+check('the runner passes it to the tally, the --only filter and the picker',
+  (RUNNER_FLAGS.match(/includeClosed: INCLUDE_CLOSED/g) || []).length, 3);
+check('...and it is off unless asked for',
+  /const INCLUDE_CLOSED = args\.includes\('--include-closed'\);/.test(RUNNER_FLAGS), true);
 check('...including a closed-out one',
   recheckSkipReason({ ...JOSE, 'Current Stage': 'Lost / Closed Out' }), 'stage "Lost / Closed Out" is not active');
 check('a linkless row is still skipped, blank stage or not',
@@ -326,7 +365,8 @@ check('a needle that found nothing is named individually',
   /NOT FOUND: \$\{missed\.map/.test(RUNNER), true);
 check('...and the advice for a lead that was never logged survives',
   /add-visit-from-rei\.mjs/.test(RUNNER), true);
-check('eligibility is still enforced', /const why = recheckSkipReason\(row\);/.test(RUNNER), true);
+check('eligibility is still enforced',
+  /const why = recheckSkipReason\(row, \{ includeClosed: INCLUDE_CLOSED \}\);/.test(RUNNER), true);
 check('...and it says what it dropped and why', /skipping \$\{row\['Seller Name'\]\} — \$\{why\}/.test(RUNNER), true);
 check('the coverage limit is stated, not buried in a tally',
   /can ever be re-checked/.test(RUNNER), true);
