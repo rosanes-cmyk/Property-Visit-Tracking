@@ -14,6 +14,8 @@ import { assertCompletionSelector, samePhone } from './task-gate.mjs';
 
 const BOOKED = /booked\s*appointment/i;
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
 /** Pull "Booked appointment | (650) 771-7814 | August 05, 2026 2:00 PM" apart. */
 export function parseTaskTitle(title, { timezone = 'America/Los_Angeles' } = {}) {
   const text = String(title ?? '').replace(/\s+/g, ' ').trim();
@@ -26,13 +28,32 @@ export function parseTaskTitle(title, { timezone = 'America/Los_Angeles' } = {})
   const dateMatch = withoutDue.match(
     /((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4})|(\d{1,2}\/\d{1,2}\/\d{4})/i
   );
+  /*
+   * Built from the components, NOT via new Date().
+   *
+   * "August 01, 2026 1:30 PM" was coming out as 2026-07-31 — a day early. new Date("August 01 2026") builds
+   * midnight in the MACHINE's timezone, and Intl then re-rendered it in Pacific; on any machine east of
+   * Pacific that lands on the previous day. It happened to look right on a Pacific machine, which is the worst
+   * version of this bug: correct where it was tried and silently wrong anywhere else, including a scheduled
+   * task on a box somebody set to UTC.
+   *
+   * And the date is not cosmetic here. pickTaskForVisit matches a task to a visit on phone AND date, so a
+   * one-day shift means no task ever matches, which the run reports as "REI has no open task for this visit" —
+   * a confident wrong answer about whether somebody's visit happened.
+   *
+   * A written date carries no timezone. "August 01, 2026" is the 1st wherever it is read, so nothing is
+   * converted: the numbers are simply reassembled.
+   */
   let date = '';
   if (dateMatch) {
-    const parsed = new Date(dateMatch[0].replace(',', ''));
-    if (!Number.isNaN(parsed.getTime())) {
-      date = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit'
-      }).format(parsed);
+    const named = dateMatch[0].match(
+      /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})$/i);
+    const slashed = dateMatch[0].match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (named) {
+      const month = MONTHS.indexOf(named[1].slice(0, 3).toLowerCase()) + 1;
+      if (month) date = `${named[3]}-${String(month).padStart(2, '0')}-${named[2].padStart(2, '0')}`;
+    } else if (slashed) {
+      date = `${slashed[3]}-${slashed[1].padStart(2, '0')}-${slashed[2].padStart(2, '0')}`;
     }
   }
   return { title: text, phone, date };
@@ -177,18 +198,32 @@ export async function readTasks(page, selectors, { timezone } = {}) {
    * something it cannot prove is inside the right row.
    */
   if (!out.length) {
-    const rows = page.getByText(BOOKED);
-    const count = await rows.count().catch(() => 0);
+    /*
+     * Read the page's own visible TEXT, line by line.
+     *
+     * getByText(BOOKED) was tried here first and also found nothing, which is the third mechanism to come back
+     * empty on a page the doctor was simultaneously printing five appointments from. Whatever REI's markup does
+     * — nesting, shadow roots, text split across spans — it defeats element matching.
+     *
+     * body.innerText does not care. It is exactly how the doctor found those five lines, so it is known to work
+     * on this page rather than hoped to. One line per task, and parseTaskTitle already takes a line:
+     *
+     *   "Booked appointment | (650) 704-3064 | August 01, 2026 1:30 PM Amelia Middel JR"
+     *
+     * The trade is that there is no element handle, so these tasks are readable and never completable — which
+     * completeTask enforces.
+     */
+    const body = ((await page.locator('body').innerText().catch(() => '')) || '');
     const seen = new Set();
-    for (let index = 0; index < count; index += 1) {
-      const text = ((await rows.nth(index).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
-      // Nested elements yield the same text more than once; the row is the thing, not the wrapper.
-      if (!text || seen.has(text)) continue;
+    let index = 0;
+    for (const raw of body.split('\n')) {
+      const text = raw.replace(/\s+/g, ' ').trim();
+      if (!text || !BOOKED.test(text) || seen.has(text)) continue;
       seen.add(text);
       const parsed = parseTaskTitle(text, { timezone });
       if (!parsed) continue;
       out.push({
-        index,
+        index: index++,
         selector: null,
         completable: false,
         ...parsed,

@@ -18,6 +18,7 @@ import {
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import { stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
+import { parseTaskTitle } from '../twin-visit-logger-sandbox/src/rei/tasks.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -1122,9 +1123,11 @@ check('...anchored, so "All Tasks Settings" cannot match',
  * sixth CSS selector is how the previous three attempts went; the TEXT is the stable thing, and it carries
  * everything parseTaskTitle needs.
  */
-check('rows are found by their text when no selector matches', /const rows = page\.getByText\(BOOKED\)/.test(TASKS), true);
+check('rows are found in the page text when no selector matches',
+  /page\.locator\('body'\)\.innerText\(\)/.test(TASKS), true);
+check('...line by line, which is how the doctor found them', /body\.split\('\\n'\)/.test(TASKS), true);
 check('...only as a fallback, after the configured selectors',
-  TASKS.indexOf('for (const selector of rowSelectors)') < TASKS.indexOf('page.getByText(BOOKED)'), true);
+  TASKS.indexOf('for (const selector of rowSelectors)') < TASKS.indexOf("body.split('\\n')"), true);
 check('...and duplicates from nested elements are dropped', /seen\.has\(text\)/.test(TASKS), true);
 /*
  * A text match gives no element to scope a click to, and the entire safety argument for completeTask is that
@@ -1151,6 +1154,41 @@ check('the count says whose list it is',
  */
 check('...and no longer says "on the contact"',
   /task\(s\) on the contact, none matching/.test(SCRAPER), false);
+
+console.log('\n=== a task date must not move with the machine\'s timezone ===');
+/*
+ * "Booked appointment | (650) 704-3064 | August 01, 2026 1:30 PM" was parsed as 2026-07-31 — a day early.
+ * new Date("August 01 2026") builds midnight in the MACHINE's timezone and Intl then re-rendered it in
+ * Pacific, so on any machine east of Pacific it landed on the day before. It looked right where it was
+ * written and was silently wrong anywhere else, including a scheduled task on a box set to UTC.
+ *
+ * The date is not cosmetic: pickTaskForVisit matches on phone AND date, so a one-day shift means no task ever
+ * matches, and the run reports "REI has no open task for this visit" — a confident wrong answer about whether
+ * somebody's visit happened.
+ */
+const REAL = 'Booked appointment | (650) 704-3064 | August 01, 2026 1:30 PM Amelia Middel JR';
+check('a month-name date keeps its own day', parseTaskTitle(REAL).date, '2026-08-01');
+check('...and its phone', parseTaskTitle(REAL).phone, '(650) 704-3064');
+check('a slashed date works too',
+  parseTaskTitle('Booked appointment | (650) 771-7814 | 08/01/2026 2:00 PM').date, '2026-08-01');
+check('a single-digit day is padded',
+  parseTaskTitle('Booked appointment | (1) 1 | August 5, 2026 7:00 AM').date, '2026-08-05');
+/*
+ * The real proof: the same line, parsed under two timezones, must give the same day. This is the assertion
+ * that would have caught the original bug — the old code passed in Pacific and failed everywhere else.
+ */
+const tzWas = process.env.TZ;
+const dates = [];
+for (const zone of ['UTC', 'Asia/Manila', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
+  process.env.TZ = zone;
+  dates.push(parseTaskTitle(REAL).date);
+}
+if (tzWas === undefined) delete process.env.TZ; else process.env.TZ = tzWas;
+check('every timezone agrees on the day', [...new Set(dates)], ['2026-08-01']);
+/* A line that is not a task must still be rejected, or the panel headings become tasks. */
+for (const line of ['MY TASKS ALL TASKS', 'These are your current assigned tasks.', 'Contact Tasks', '']) {
+  check(`"${line || '(empty)'}" is not a task`, parseTaskTitle(line), null);
+}
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
