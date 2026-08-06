@@ -3381,7 +3381,29 @@ var ATTENTION_BUCKETS = [
    * that decides whether a lead is dead — is still only ever moved by a person. The lead stops cluttering
    * the visit list and still cannot be quietly written off.
    */
-  { key: 'needsRebooking', icon: '🚫', title: 'Cancelled — Rebook or Close Out', stage: '',
+  /*
+   * "Cancelled, but nobody knows yet whether it is really off" gets its own place.
+   *
+   * Cherry, via the client: "if there was lead is suddenly cancelled but not sure if the lead will go or what,
+   * should had a pending tab" — and, about Jose specifically, "this was for follow up, should move to follow up
+   * tab."
+   *
+   * The distinction is between a lead that is OFF and a lead whose outcome is UNKNOWN, and they need opposite
+   * actions. Off means rebook it or close it out — a decision. Unknown means find out first, and there is
+   * nothing to decide until somebody has spoken to the seller. Putting both under one heading told whoever read
+   * it to make a decision they did not yet have the facts for.
+   *
+   * Two kinds of lead land here, and neither needed a new Visit Status value — a value outside the workbook's
+   * dropdown fails the whole row write:
+   *   Reschedule Needed   called off but still wanted; the automation already writes this from REI's notes
+   *   an OVERDUE visit    the date has passed and it is still marked Scheduled, so nobody knows what happened
+   *
+   * Jose Anguiano is the second kind, which is exactly where Cherry asked for him. It also means Upcoming Visit
+   * finally contains only visits that are actually still upcoming.
+   */
+  { key: 'pendingFollowUp', icon: '⏳', title: 'Follow Up — Outcome Not Known Yet', stage: '',
+    action: 'Ask the seller whether it is still going ahead, then set a date or close it out.' },
+  { key: 'needsRebooking', icon: '🚫', title: 'Cancelled — Close Out or Rebook', stage: '',
     action: 'Agree a new date with the seller, or move the lead to Lost / Closed Out.' },
   { key: 'needsDecision', icon: '📋', title: 'Completed Visit — Needs Next Course of Action', stage: 'Visit Completed — Needs Review',
     action: 'Decide: make an offer, pass, or move to nurture — and set the next action.' },
@@ -3492,15 +3514,30 @@ function attentionBucket_(rec, today) {
         return { key: 'needsRebooking', attention: true, sort: at,
           reason: 'CANCELED' + was + ' — rebook it or close the lead out' };
       }
+      /*
+       * Called off but still wanted is not the same as called off. It goes to Follow Up, where the job is to
+       * find out, rather than to Cancelled, where the job is to decide.
+       */
       if (status === 'Reschedule Needed') {
-        return { key: 'needsRebooking', attention: true, sort: at,
+        return { key: 'pendingFollowUp', attention: true, sort: at,
           reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
       }
 
       if (!on) return { key: b.key, attention: true, sort: at, reason: 'no visit date set — nothing to confirm against' };
+      /*
+       * An overdue visit moves to Follow Up too, and this is the change Cherry asked for by name.
+       *
+       * It used to sit inside Upcoming Visit under "Confirm the visit is going ahead" — for a visit whose date
+       * had already passed, where there is nothing left to confirm. Jose Anguiano had been reading that way for
+       * five days. What is actually needed is to find out what happened, which is this section's whole purpose.
+       *
+       * A side effect worth having: Upcoming Visit now contains only visits that really are upcoming, so its
+       * count means what it says.
+       */
       if (on < today) {
-        return { key: b.key, attention: true, sort: at,
-          reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled') };
+        return { key: 'pendingFollowUp', attention: true, sort: at,
+          reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled')
+            + ' — nobody has recorded what happened' };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
       var time = String(rec['Visit Time'] || '').trim();

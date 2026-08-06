@@ -329,11 +329,27 @@ var SECTIONS=[
    * written off by a display rule. Same split, and same section name, as attentionBucket_ in ChatNotify.gs,
    * so the board and the 3pm card cannot tell different stories about one lead.
    */
+  /*
+   * Three sections where there were two, matching attentionBucket_ in ChatNotify.gs exactly.
+   *
+   * Cherry: "if there was lead is suddenly cancelled but not sure if the lead will go or what, should had a
+   * pending tab", and about Jose "this was for follow up, should move to follow up tab."
+   *
+   * OFF and UNKNOWN need opposite actions. Off means decide — rebook or close out. Unknown means find out, and
+   * there is nothing to decide until somebody has spoken to the seller. Follow Up holds the unknowns: called
+   * off but still wanted, and a visit whose date has passed while still marked Scheduled. Upcoming Visits is
+   * left holding only visits that really are still upcoming.
+   */
   ['Upcoming Visits (Scheduled)',function(r){
-    return r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitStatus!=='Reschedule Needed';
+    return r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitStatus!=='Reschedule Needed'
+      && !(r.visitDate && r.visitDate < todayISO());
   }],
-  ['Cancelled — Rebook or Close Out',function(r){
-    return r.visitStatus==='Canceled' || r.visitStatus==='Reschedule Needed';
+  ['Follow Up — Outcome Not Known Yet',function(r){
+    return r.visitStatus==='Reschedule Needed'
+      || (r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitDate && r.visitDate < todayISO());
+  }],
+  ['Cancelled — Close Out or Rebook',function(r){
+    return r.visitStatus==='Canceled';
   }],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
   ['Offer Preparation',function(r){return r.stage==='Offer Preparation';}],

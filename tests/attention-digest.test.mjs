@@ -75,10 +75,20 @@ console.log("=== Cherry's five stages, plus gifts — and one section she did no
  * It is inserted directly after Upcoming Visit rather than at the end, because it IS the visit list's
  * overflow — a reader who has just looked at what is coming up should see next what was called off.
  */
-check('seven buckets', ATTENTION_BUCKETS.length, 7);
+/*
+ * EIGHT now, and the eighth came from Cherry herself, which is why it is not the departure the seventh was.
+ *
+ * "if there was lead is suddenly cancelled but not sure if the lead will go or what, should had a pending tab",
+ * and about Jose: "this was for follow up, should move to follow up tab."
+ *
+ * OFF and UNKNOWN want opposite actions. Off means decide — rebook or close out. Unknown means find out, and
+ * there is nothing to decide until somebody has spoken to the seller.
+ */
+check('eight buckets', ATTENTION_BUCKETS.length, 8);
 check('in reading order', ATTENTION_BUCKETS.map((b) => b.title), [
   'Upcoming Visit',
-  'Cancelled — Rebook or Close Out',
+  'Follow Up — Outcome Not Known Yet',
+  'Cancelled — Close Out or Rebook',
   'Completed Visit — Needs Next Course of Action',
   'Pending Offer — ASAP',
   'Offer Sent',
@@ -98,8 +108,9 @@ check("Cherry's five stages are untouched", STAGE_BUCKETS.map((b) => b.stage), [
  * The two stage-less buckets are the ones that route on something else: gifts on Gift Status, cancellations
  * on Visit Status. Neither may name a stage, or a lead would land in two sections at once.
  */
-check('gifts and cancellations are not tied to a stage',
-  ATTENTION_BUCKETS.filter((b) => !b.stage).map((b) => b.key), ['needsRebooking', 'giftFollowUp']);
+check('gifts, follow-ups and cancellations are not tied to a stage',
+  ATTENTION_BUCKETS.filter((b) => !b.stage).map((b) => b.key),
+  ['pendingFollowUp', 'needsRebooking', 'giftFollowUp']);
 check('every bucket names one action', ATTENTION_BUCKETS.every((b) => /\.$/.test(b.action)), true);
 // The stages must be real values of the workbook's own dropdown, or a bucket can never fire.
 const STAGES = (read('apps-script/Config.gs').match(/'Current Stage':\s*\[([^\]]+)\]/) || [])[1] || '';
@@ -117,9 +128,18 @@ check('a time is included when there is one',
  * outcome of simplifying, since a passed visit still marked Scheduled is the one line that means
  * something may have gone wrong with a seller. So it is called out INSIDE Upcoming Visit.
  */
+/*
+ * A passed visit is still surfaced, still flagged OVERDUE — and now in Follow Up rather than Upcoming Visit,
+ * where it was sitting under "Confirm the visit is going ahead" for a visit whose date had gone. Jose Anguiano
+ * read that way for five days. The reason says what is actually wanted: somebody has to find out.
+ */
 check('a passed visit stays visible, flagged OVERDUE',
   reason({ ...BASE, 'Visit Date': day(2026, 8, 1) }),
-  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled');
+  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled — nobody has recorded what happened');
+check('...and it moves to Follow Up, out of the visit list',
+  bucket({ ...BASE, 'Visit Date': day(2026, 8, 1) }), 'pendingFollowUp');
+check("...while today's visit stays upcoming", bucket({ ...BASE, 'Visit Date': TODAY }), 'upcomingVisit');
+check('...and so does one still to come', bucket(BASE), 'upcomingVisit');
 check('...and is marked so it can be sorted to the top',
   attentionBucket_({ ...BASE, 'Visit Date': day(2026, 8, 1) }, TODAY).attention, true);
 check('a future visit needs no attention flag', !!attentionBucket_(BASE, TODAY).attention, false);
@@ -556,13 +576,19 @@ console.log('\n=== A cancelled visit MOVES itself out of Upcoming Visit ===');
  * still only ever moved by a person.
  */
 const CHAT_C = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
-check('there is a section for them', /title: 'Cancelled — Rebook or Close Out'/.test(CHAT_C), true);
+check('there is a section for them', /title: 'Cancelled — Close Out or Rebook'/.test(CHAT_C), true);
 check('...and it tells you both options',
   /Agree a new date with the seller, or move the lead to Lost \/ Closed Out\./.test(CHAT_C), true);
 check('a cancelled visit is routed there, not to its stage bucket',
   /if \(status === 'Canceled'\) \{\s*\n\s*return \{ key: 'needsRebooking'/.test(CHAT_C), true);
-check('...and so is reschedule-needed',
-  /if \(status === 'Reschedule Needed'\) \{\s*\n\s*return \{ key: 'needsRebooking'/.test(CHAT_C), true);
+/*
+ * Reschedule-needed goes to FOLLOW UP, not Cancelled — Cherry's own split. "Called off but still wanted" is a
+ * lead whose outcome nobody knows yet, and the job there is to find out; Cancelled is where a decision is owed.
+ */
+check('...while reschedule-needed goes to Follow Up',
+  /if \(status === 'Reschedule Needed'\) \{\s*\n\s*return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+check('...and so does an overdue visit, which is what Cherry asked for by name',
+  /if \(on < today\) \{\s*\n\s*return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
 /*
  * The safety line: nothing here writes Current Stage. Moving a card is a display decision; closing a lead
  * out is a business one, and the automation still refuses the second.
@@ -578,10 +604,21 @@ console.log('\n--- and the dashboard moves it the same way ---');
 const DASH_C = fs.readFileSync(new URL('../apps-script/Dashboard.html', import.meta.url), 'utf8');
 check('Upcoming Visits excludes cancelled',
   /r\.stage==='Visit Scheduled' && r\.visitStatus!=='Canceled' && r\.visitStatus!=='Reschedule Needed'/.test(DASH_C), true);
-check('...and there is a section to receive them',
-  /\['Cancelled — Rebook or Close Out',function\(r\)\{/.test(DASH_C), true);
-check('the two views use the same section name',
-  /Cancelled — Rebook or Close Out/.test(CHAT_C) && /Cancelled — Rebook or Close Out/.test(DASH_C), true);
+check('...and excludes a visit whose date has passed',
+  /&& !\(r\.visitDate && r\.visitDate < todayISO\(\)\)/.test(DASH_C), true);
+check('...and there is a section to receive the cancelled',
+  /\['Cancelled — Close Out or Rebook',function\(r\)\{/.test(DASH_C), true);
+check('...and one for the unknowns', /\['Follow Up — Outcome Not Known Yet',function\(r\)\{/.test(DASH_C), true);
+/*
+ * Both views must tell the same story about one lead, so the SECTION NAMES are asserted identical. A lead in
+ * Follow Up on the 3pm card and in Upcoming Visits on the board is worse than neither moving.
+ */
+for (const title of ['Follow Up — Outcome Not Known Yet', 'Cancelled — Close Out or Rebook']) {
+  check(`"${title}" is worded identically in both views`,
+    CHAT_C.includes(title) && DASH_C.includes(title), true);
+}
+check('...and the old combined heading is gone from both',
+  /Cancelled — Rebook or Close Out/.test(CHAT_C) || /Cancelled — Rebook or Close Out/.test(DASH_C), false);
 
 console.log('\n=== A gift shows even on a lead the stage sections have finished with ===');
 /*

@@ -21,7 +21,16 @@ const end = HTML.indexOf('\n];', start) + 3;
 if (start < 0 || end <= start) throw new Error('Could not locate SECTIONS in Dashboard.html');
 // Declare SECTIONS *inside* the evaluated scope, exactly as the browser does, so the catch-all
 // predicate (which refers to SECTIONS to ask "did anything above claim this record?") resolves.
-const SECTIONS = new Function(`${HTML.slice(start, end)}\nreturn SECTIONS;`)();
+/*
+ * todayISO is injected, and FIXED.
+ *
+ * The Follow Up section asks whether a visit date has already passed, so the predicates now need the date
+ * helper the browser gives them. Passing the real one would make this suite's answers change overnight —
+ * "visit next week" quietly becomes "visit last week" — so a fixed day is supplied instead and the records
+ * below are written relative to it.
+ */
+const TODAY_ISO = '2026-08-06';
+const SECTIONS = new Function('todayISO', `${HTML.slice(start, end)}\nreturn SECTIONS;`)(() => TODAY_ISO);
 
 /** Which sections claim this record. */
 function route(rec) {
@@ -85,10 +94,64 @@ check('"Lost / Closed Out" is intentionally archived (no section)',
   route({ stage: 'Lost / Closed Out', dq: 'OK' }), (got) => got.length === 0);
 
 console.log('\n=== REGRESSION: the exact records from the audit report ===');
-check('David Fischer / Visit Scheduled 2026-08-05 -> Upcoming Visits',
-  route({ stage: 'Visit Scheduled', dq: 'OK', visitDate: '2026-08-05' }), has('Upcoming Visits'));
+/*
+ * David Fischer's record was written when 2026-08-05 was still ahead. Against the fixed today of 2026-08-06 it
+ * is a day past, so it now belongs in Follow Up — which is the change Cherry asked for, not a regression. The
+ * original intent of this check was "a Visit Scheduled lead reaches a visit section at all", so both halves are
+ * asserted rather than the date being quietly moved to keep the old answer.
+ */
+check('David Fischer / Visit Scheduled 2026-08-05, now a day past -> Follow Up',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitDate: '2026-08-05' }),
+  has('Follow Up — Outcome Not Known Yet'));
+check('...and the same lead dated ahead -> Upcoming Visits',
+  route({ stage: 'Visit Scheduled', dq: 'OK', visitDate: '2026-08-20' }), has('Upcoming Visits'));
 check('Test lead / Offer Preparation -> Offer Preparation',
   route({ stage: 'Offer Preparation', dq: 'OK', owner: 'Juan' }), has('Offer Preparation'));
+
+console.log("\n=== Cherry's third visit section: OFF and UNKNOWN are different jobs ===");
+/*
+ * Cherry: "if there was lead is suddenly cancelled but not sure if the lead will go or what, should had a
+ * pending tab", and about Jose: "this was for follow up, should move to follow up tab."
+ *
+ * Off means decide — rebook or close out. Unknown means find out first, and there is nothing to decide until
+ * somebody has spoken to the seller. One heading over both told the reader to make a decision they had no
+ * facts for.
+ */
+const FOLLOW = 'Follow Up — Outcome Not Known Yet';
+const CANCELLED = 'Cancelled — Close Out or Rebook';
+const UPCOMING = 'Upcoming Visits (Scheduled)';
+const visit = (visitStatus, visitDate) => ({ stage: 'Visit Scheduled', dq: 'OK', visitStatus, visitDate });
+
+// Jose Anguiano: visit was Aug 1, still marked Scheduled on Aug 6. The case Cherry named.
+check('an overdue visit is in Follow Up, not Upcoming',
+  route(visit('Scheduled', '2026-08-01')), both(has(FOLLOW), lacks(UPCOMING), lacks(CANCELLED)));
+// A visit still to come stays exactly where it was.
+check('a visit still to come stays in Upcoming',
+  route(visit('Scheduled', '2026-08-12')), both(has(UPCOMING), lacks(FOLLOW)));
+// Today is the boundary people get wrong: today's visit is upcoming, not overdue.
+check("today's visit is upcoming, not overdue",
+  route(visit('Scheduled', TODAY_ISO)), both(has(UPCOMING), lacks(FOLLOW)));
+// Called off but still wanted: find out, do not decide.
+check('reschedule-needed is in Follow Up, no longer under Cancelled',
+  route(visit('Reschedule Needed', '2026-08-12')), both(has(FOLLOW), lacks(CANCELLED), lacks(UPCOMING)));
+// Definitely off: a decision is owed.
+check('a cancelled visit is in Cancelled only',
+  route(visit('Canceled', '2026-08-12')), both(has(CANCELLED), lacks(FOLLOW), lacks(UPCOMING)));
+/*
+ * A cancelled visit whose date has also passed must not appear twice. Cancelled wins: somebody said it was off,
+ * which is a fact, and "we do not know what happened" is not true of it.
+ */
+check('a cancelled PAST visit is in Cancelled only',
+  route(visit('Canceled', '2026-08-01')), both(has(CANCELLED), lacks(FOLLOW)));
+
+// The three visit sections must be mutually exclusive for every combination that can occur.
+for (const status of ['Scheduled', 'Canceled', 'Reschedule Needed']) {
+  for (const date of ['2026-08-01', TODAY_ISO, '2026-08-12', '']) {
+    check(`${status} / ${date || 'no date'} lands in at most one visit section`,
+      route(visit(status, date)),
+      (got) => got.filter((t) => t === UPCOMING || t === FOLLOW || t === CANCELLED).length <= 1);
+  }
+}
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
