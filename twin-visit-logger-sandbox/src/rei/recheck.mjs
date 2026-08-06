@@ -21,6 +21,7 @@
 import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 import { latestReiNote, contactResultReplaceable } from './notes.mjs';
+import { giftFromNotes } from './gift.mjs';
 
 const ZONE = 'America/Los_Angeles';
 
@@ -80,7 +81,8 @@ export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller 
  * Both columns, because that is what the email path already does (sheets.mjs sets Assigned Owner and
  * Assigned Visitor from the same REI field). Following it rather than inventing a second rule.
  */
-export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount'];
+export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
+  'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason'];
 
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
@@ -120,7 +122,19 @@ export const ACTIVE_STAGES = [
   'Offer Sent',
   'Active Negotiation',
   'Verbal Agreement',
-  'Contract Sent'
+  'Contract Sent',
+  /*
+   * Contract Signed belongs here, and the reason is a lead the client raised.
+   *
+   * It was excluded on the grounds that "a finished lead is not going to change in REI in a way we care
+   * about". Rob Walker disproves that: he is Contract Signed, and REI holds a gift ordered for him AFTER
+   * signing — a Gourmet Get-Together Gift Basket with an apology card from Juan. Gifts are follow-up, and
+   * follow-up happens after the deal closes, which is exactly when this used to stop looking.
+   *
+   * Lost / Closed Out and Long-Term Nurture stay excluded. Gifts plausibly go to those too, but that is a
+   * guess and it is 206 more rows of browser traffic; this one is evidence.
+   */
+  'Contract Signed'
 ];
 
 /*
@@ -370,6 +384,18 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
    */
   const note = latestReiNote(scraped.notes);
   if (note) out['Last Contact Result'] = note;
+
+  /*
+   * A gift ordered in REI. Fill-only, so a gift somebody recorded by hand is never rewritten.
+   *
+   * Rob Walker's whole GIFT block was empty while REI held the order, the item, the total and the delivery
+   * date. Cherry's 3pm work queue has a section for gifts — "we want to track sending gifts to them as part
+   * of follow up" — and it can only be as good as these columns.
+   */
+  const gift = giftFromNotes(scraped.notes);
+  if (gift.status) out['Gift Status'] = gift.status;
+  if (gift.sentDate) out['Gift Sent Date'] = gift.sentDate;
+  if (gift.reason) out['Gift Recommendation Reason'] = gift.reason;
   return out;
 }
 
