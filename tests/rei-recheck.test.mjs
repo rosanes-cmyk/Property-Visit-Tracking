@@ -16,7 +16,7 @@ import {
   recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
   describeChanges, FILL_IF_BLANK, sameFieldValue
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
-import { stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
+import { stageAdvance, stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
 import { parseTaskTitle } from '../twin-visit-logger-sandbox/src/rei/tasks.mjs';
 import fs from 'node:fs';
@@ -80,7 +80,24 @@ check('a signed contract IS still worth checking — gifts come after it',
 // The two that stay out: plausible, but a guess, and 206 more rows of browser traffic.
 check('Long-Term Nurture is still skipped',
   recheckSkipReason({ ...JOSE, 'Current Stage': 'Long-Term Nurture' }), 'stage "Long-Term Nurture" is not active');
-check('a blank stage is skipped', recheckSkipReason({ ...JOSE, 'Current Stage': '' }), 'no stage');
+/*
+ * A BLANK stage is now CHECKED, not skipped — twenty-four rows were being dropped for it.
+ *
+ * The client: "now i need all of them should be re-checked, disposition, notes and all in the REI, all of them,
+ * so the tracker is updated." And the rule contradicted the rest of the module: stageAdvance says outright that
+ * "a blank stage is not position zero — it is unknown, and a lead with no stage at all should be given the one
+ * REI knows." The code was built to fill an empty stage from REI and eligibility never let those rows reach it.
+ *
+ * Same asymmetry as a blank owner: nobody chose blank. A stage somebody DID choose is still respected.
+ */
+check('a blank stage is checked, not skipped', recheckSkipReason({ ...JOSE, 'Current Stage': '' }), '');
+check('...and REI can then fill it', stageAdvance('', '4 Offer Sent'), 'Offer Sent');
+check('a stage a person chose is still respected',
+  recheckSkipReason({ ...JOSE, 'Current Stage': 'Long-Term Nurture' }), 'stage "Long-Term Nurture" is not active');
+check('...including a closed-out one',
+  recheckSkipReason({ ...JOSE, 'Current Stage': 'Lost / Closed Out' }), 'stage "Lost / Closed Out" is not active');
+check('a linkless row is still skipped, blank stage or not',
+  recheckSkipReason({ ...JOSE, 'Current Stage': '', 'REI BlackBook Link': '' }), 'no REI link');
 check('every active stage is a real dropdown value', ACTIVE_STAGES.length, 8);
 
 console.log('\n=== A passed visit still marked Scheduled jumps the queue ===');

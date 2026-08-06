@@ -200,7 +200,19 @@ export function recheckSkipReason(row) {
   if (!text(row['REI BlackBook Link'])) return 'no REI link';
   if (text(row['Source']) === 'TEST') return 'test row';
   const stage = text(row['Current Stage']);
-  if (!stage) return 'no stage';
+  /*
+   * A BLANK stage is checked, not skipped.
+   *
+   * The client: "now i need all of them should be re-checked, disposition, notes and all in the REI, all of
+   * them, so the tracker is updated." Twenty-four rows were being dropped for having no stage at all, and that
+   * rule contradicts the rest of the module: stageAdvance already says in as many words that "a blank stage is
+   * not position zero — it is unknown, and a lead with no stage at all should be given the one REI knows."
+   * So the code was built to fill an empty stage from REI and eligibility never let those rows reach it.
+   *
+   * It is the same asymmetry as a blank owner. Nobody chose blank; it is missing data, and REI may well have
+   * the answer. A stage somebody DID choose — Lost / Closed Out, Long-Term Nurture — is still respected below.
+   */
+  if (!stage) return '';
   if (!ACTIVE_STAGES.includes(stage)) return `stage "${stage}" is not active`;
   return '';
 }
