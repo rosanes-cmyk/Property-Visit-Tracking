@@ -92,6 +92,39 @@ export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Of
   'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date'];
 
 /*
+ * REI WINS on these, rather than only filling a blank — the client's decision, asked for three times.
+ *
+ * "all of the new update on that lead should be included, will automatic update in the dashboard."
+ *
+ * I argued for fill-if-blank and the argument has not survived the evidence. Every single conflict found
+ * today was REI being RIGHT and the tracker being stale: Amelia's owner (REI had Juan, the board said
+ * Unassigned), David's phone number, Rob's and Marlene's gifts, Toledo's and Sylvia Chan's dispositions,
+ * Amelia's $930,000. Not one case the other way round. The team works in REI; the tracker is the reporting
+ * layer. So for these columns REI is the source of truth and a stale cell loses.
+ *
+ * WHAT THIS COSTS, stated plainly because it is a real cost: a value typed on the dashboard can now be
+ * overwritten from REI within twenty minutes. If somebody reassigns a lead on the board and REI still names
+ * the old owner, the board goes back. The remedy is to make the change in REI, which is where the team makes
+ * it anyway.
+ *
+ * Three protections stay, and they are what make this safe rather than reckless:
+ *   1. A BLANK from REI never overwrites anything. A missing field means the page did not render.
+ *   2. mapOwner/mapVisitor still refuse a value the workbook's dropdown does not hold — REI really does
+ *      contain "Thea, Cherry", and an illegal value fails the WHOLE row write, not just its own cell.
+ *   3. Every change is logged old -> new in the Automation Log, so a wrong overwrite is visible and
+ *      reversible rather than silent.
+ *
+ * Deliberately NOT in here: Current Stage (forward-only, see stageAdvance — rewinding a signed deal into the
+ * visit queue is not a stale-cell problem, it is destruction), and Visit Notes, Seller Motivation, Seller
+ * Timeline, Asking Price, Seller Concerns — written by whoever stood in the property, and REI has no
+ * equivalent field to copy from in any case.
+ */
+export const REI_WINS = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
+  'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason',
+  'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date',
+  'Next Action', 'Last Contact Result'];
+
+/*
  * The sentence the automation writes for a gift, and the only one it is allowed to replace.
  *
  * Fill-if-blank is right for a gift reason a person wrote and wrong for one this code wrote badly. Marlene's
@@ -582,10 +615,18 @@ export function diffFromRei(row, reiFields) {
    * REI knows the answer. A cell with "Kyle" in it is somebody's decision, possibly a reassignment made
    * after REI was last touched, and REI's stale value must not win.
    */
-  for (const field of FILL_IF_BLANK) {
+  /*
+   * REI wins on REI_WINS, and a blank from REI still never overwrites.
+   *
+   * filledBlank is kept on the change when the cell WAS empty, because the run log distinguishes "filled a gap"
+   * from "corrected a value" and those read very differently to somebody scanning what the automation did.
+   */
+  for (const field of REI_WINS) {
     const to = text(reiFields[field]);
-    if (!to || text(row[field])) continue;
-    changes.push({ field, from: '', to, filledBlank: true });
+    if (!to) continue;                                  // rule 2: a blank from REI decides nothing
+    const from = text(row[field]);
+    if (sameFieldValue(field, from, to)) continue;
+    changes.push({ field, from, to, ...(from ? {} : { filledBlank: true }) });
   }
 
   /*
@@ -662,14 +703,17 @@ export function diffFromRei(row, reiFields) {
    * is not overwriting anyone's work; replacing a commitment somebody made would be, so that is refused.
    */
   /*
-   * The note replaces the cell only when it is blank or still holds this project's own intake line.
-   * Anything else there was typed by a person and is left exactly as it is.
+   * Last Contact Result and Next Action moved into the REI_WINS loop above.
+   *
+   * They were gated by contactResultReplaceable and nextActionReplaceable — replace only when blank or still
+   * holding the automation's own boilerplate. That guarded the wrong thing: REI's Next Step and its latest note
+   * are written by this team, in REI, so "a person typed it" was true of both sides and the older one was
+   * winning. Amelia's row said "Conduct scheduled visit & log outcome" while REI said "Confirm that Amelia
+   * prepared and sent the formal offer".
+   *
+   * Both predicates are still exported and still tested; nothing else in the project calls them, and they are
+   * the record of what the rule used to be.
    */
-  const noteFromRei = text(reiFields['Last Contact Result']);
-  if (noteFromRei && noteFromRei !== text(row['Last Contact Result'])
-      && contactResultReplaceable(row['Last Contact Result'])) {
-    changes.push({ field: 'Last Contact Result', from: text(row['Last Contact Result']), to: noteFromRei });
-  }
 
   /*
    * Last Contact Date moves FORWARD only.
@@ -681,11 +725,6 @@ export function diffFromRei(row, reiFields) {
   const contactFromRei = text(reiFields['Last Contact Date']);
   if (contactFromRei && sheetDayKey(contactFromRei) > sheetDayKey(row['Last Contact Date'] || '')) {
     changes.push({ field: 'Last Contact Date', from: text(row['Last Contact Date']), to: contactFromRei });
-  }
-
-  const nextFromRei = text(reiFields['Next Action']);
-  if (nextFromRei && nextFromRei !== text(row['Next Action']) && nextActionReplaceable(row['Next Action'])) {
-    changes.push({ field: 'Next Action', from: text(row['Next Action']), to: nextFromRei });
   }
 
   return changes;

@@ -41,7 +41,7 @@ import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
-  diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK, RECHECK_PER_RUN
+  diffFromRei, calendarAffected, describeChanges, RECHECKABLE, REI_WINS, RECHECK_PER_RUN
 } from '../src/rei/recheck.mjs';
 
 const args = process.argv.slice(2);
@@ -644,11 +644,16 @@ if (deadFlagged.length) {
  * Offer Amount and Next Action. A closing line that contradicts the evidence above it is worse than no
  * line at all, and it is the fourth time in this feature that a summary has understated what happened.
  */
-console.log(`Fields a re-check may overwrite: ${RECHECKABLE.join(', ')}`);
-console.log(`Fields it may fill only when empty: ${FILL_IF_BLANK.join(', ')}`);
-console.log('Current Stage: advanced FORWARD only, never off a closed-out or nurture lead.');
-console.log("Next Action: replaced only when blank or still holding the automation's own wording.");
-console.log('Never touched: Visit Notes, Seller Motivation, Assigned Owner/Visitor once named.');
+/*
+ * This footer has to say what the run can ACTUALLY do, and what it can do changed today. It previously read
+ * "fill only when empty" and "Assigned Owner/Visitor once named" is never touched — both untrue now, and a
+ * closing summary that contradicts the run above it is the failure this footer exists to prevent.
+ */
+console.log(`REI wins on: ${[...RECHECKABLE, ...REI_WINS].join(', ')}`);
+console.log('A BLANK from REI never overwrites anything — a missing field means the page did not render.');
+console.log('Current Stage: FORWARD only, or to Lost / Closed Out when REI says the lead is dead.');
+console.log('Never touched: Visit Notes, Seller Motivation, Seller Timeline, Asking Price, Seller Concerns.');
+console.log('Every change above is in the workbook\'s "Automation Log" with its old value, so it can be undone.');
 
 /*
  * Written last, and only when applying. A dry run logging "here is what I would have done" would fill the

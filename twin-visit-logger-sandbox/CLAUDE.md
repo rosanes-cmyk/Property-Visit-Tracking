@@ -115,7 +115,28 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
   on its date, its title prefixed `[CANCELED] `, and every reminder stripped — `tagEventCancelled` in
   `src/google/calendar.mjs` and `markVisitEvents_` in `apps-script/WebApp.gs` do the same thing on
   purpose. Deletion happens only when a row has no visit date left to sit on.
-- `Current Stage` is the team's, not the automation's. There are now TWO exceptions and no more.
+- **REI is the source of truth for the fields it holds, and a stale tracker cell loses.** Changed at the
+  client's instruction, asked three times over: *"all of the new update on that lead should be included,
+  will automatic update in the dashboard."* `REI_WINS` in `src/rei/recheck.mjs` lists them — Assigned
+  Owner, Assigned Visitor, Approved Offer Amount, all six Gift columns, Next Action, Last Contact Result —
+  alongside `RECHECKABLE` (Visit Date/Time/Status, Seller Name, Phone, Email).
+
+  This replaced a fill-if-blank rule I argued for and the evidence did not support: every conflict found in
+  a full day of live runs was REI right and the tracker stale — Amelia's owner, David's phone, Rob's and
+  Marlene's gifts, Toledo's and Sylvia Chan's dispositions, Amelia's $930,000. Not one the other way.
+  The team works in REI; the tracker is the reporting layer.
+
+  **The cost, stated because it is real:** a value typed on the dashboard can be overwritten from REI
+  within twenty minutes. The remedy is to change it in REI. Three protections remain and must not be
+  removed: a BLANK from REI never overwrites (a missing field means the page did not render), `mapOwner`/
+  `mapVisitor` still refuse a value the workbook's dropdown does not hold (REI really does contain
+  `"Thea, Cherry"`, and an illegal value fails the whole row write), and every change is logged old→new in
+  the `Automation Log` so a wrong overwrite is visible and reversible.
+
+  Still never written: `Visit Notes`, `Seller Motivation`, `Seller Timeline`, `Asking Price`,
+  `Seller Concerns` — written by whoever stood in the property, with no REI equivalent to copy from.
+- `Current Stage` is the team's, not the automation's, and is NOT in `REI_WINS`. There are now TWO
+  exceptions and no more.
   1. `Visit Scheduled` → `Visit Completed — Needs Review` when REI shows the appointment task complete,
      because the workbook makes that same move itself and a Sheets API write does not fire `onEdit`.
      Never move a stage that a person has already advanced past `Visit Scheduled`.

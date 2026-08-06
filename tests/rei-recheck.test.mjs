@@ -14,7 +14,7 @@
 import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
   recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
-  describeChanges, FILL_IF_BLANK, sameFieldValue
+  describeChanges, FILL_IF_BLANK, REI_WINS, sameFieldValue
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import { stageAdvance, stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
@@ -261,8 +261,19 @@ check('...and never off a lead somebody closed out',
   diffFromRei({ ...JOSE, 'Current Stage': 'Lost / Closed Out' }, { 'Current Stage': 'Offer Sent' }), []);
 check('offer money fills an empty cell',
   diffFromRei(JOSE, { 'Approved Offer Amount': 999999 }).map((c) => c.field), ['Approved Offer Amount']);
-check('...and never overwrites a figure somebody entered',
-  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 999999 }), []);
+/*
+ * The offer amount is now corrected from REI rather than only filled. The client's decision, third time of
+ * asking: "all of the new update on that lead should be included, will automatic update in the dashboard."
+ *
+ * It is the most expensive cell on the row, which cuts both ways — a figure the sheet has and REI does not
+ * agree with is either older or wrong, and the team enters offers in REI. Every change is logged old -> new, so
+ * a bad one is visible rather than silent.
+ */
+check('...and a figure REI disagrees with is corrected',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 999999 })
+    .map((c) => [c.field, c.from, c.to]), [['Approved Offer Amount', '905000', '999999']]);
+check('...while a blank from REI leaves it alone',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, {}), []);
 check('visit notes from REI are ignored',
   diffFromRei({ ...JOSE, 'Visit Notes': 'Seller was lovely' }, { 'Visit Notes': 'something else' }), []);
 
@@ -375,10 +386,20 @@ check('the coverage limit is stated, not buried in a tally',
  * underneath a run that had just changed Current Stage, Approved Offer Amount and Next Action — a summary
  * contradicting the evidence above it, for the fourth time in this feature.
  */
-check('the footer separates overwrite from fill-only',
-  /Fields a re-check may overwrite:[\s\S]*Fields it may fill only when empty:/.test(RUNNER), true);
-check('...and names the stage rule', /advanced FORWARD only/.test(RUNNER), true);
-check('...and the Next Action rule', /still holding the automation's own wording/.test(RUNNER), true);
+/*
+ * The footer has to say what the run can ACTUALLY do, and that changed today: fill-if-blank became REI-wins.
+ * A footer reading "fill only when empty" under a run that had just corrected a named owner is exactly the
+ * self-contradiction this footer exists to prevent — it has happened four times in this feature already.
+ */
+check('the footer names every field REI can win on',
+  /REI wins on: \$\{\[\.\.\.RECHECKABLE, \.\.\.REI_WINS\]\.join/.test(RUNNER), true);
+check('...and the protection that remains',
+  /A BLANK from REI never overwrites anything/.test(RUNNER), true);
+check('...and names the stage rule', /Current Stage: FORWARD only, or to Lost \/ Closed Out/.test(RUNNER), true);
+check('...and says the changes are reversible',
+  /with its old value, so it can be undone/.test(RUNNER), true);
+check('...and no longer claims fill-only',
+  /Fields it may fill only when empty/.test(RUNNER), false);
 check('...and what is never touched', /Never touched: Visit Notes, Seller Motivation/.test(RUNNER), true);
 // The whole point: a row with no REI link must never reach the browser.
 check('a linkless row is ineligible, so --only cannot reach it',
@@ -880,12 +901,30 @@ check('...and is marked as a fill, not an overwrite',
   filled.find((c) => c.field === 'Assigned Owner')?.filledBlank, true);
 check('...from an empty value', filled.find((c) => c.field === 'Assigned Owner')?.from, '');
 
-console.log('\n--- but a named owner is NEVER replaced ---');
-// If the team moved the lead from Juan to Kyle, REI's older value must not win.
+console.log("\n--- and a named owner is now CORRECTED, not kept ---");
+/*
+ * This assertion has been inverted, deliberately, and it is the one with a real cost attached.
+ *
+ * It used to say: if the team moved the lead from Juan to Kyle, REI's older value must not win. The client has
+ * now asked three times for the opposite — "all of the new update on that lead should be included" — and the
+ * evidence from a full day of live runs is one-sided: every conflict found was REI right and the sheet stale.
+ * Amelia's owner was the original example, REI holding Juan while the board said Unassigned.
+ *
+ * THE COST: reassign a lead on the dashboard, and if REI still names the old owner the board goes back within
+ * twenty minutes. The remedy is to reassign in REI, which is where this team does it anyway.
+ */
 const REASSIGNED = { ...AMELIA, 'Assigned Owner': 'Kyle', 'Assigned Visitor': 'Kyle' };
-check('Kyle is kept', diffFromRei(REASSIGNED, FROM_REI).some((c) => c.field === 'Assigned Owner'), false);
-check('...and so is the visitor', diffFromRei(REASSIGNED, FROM_REI).some((c) => c.field === 'Assigned Visitor'), false);
-check('one filled and one named is handled per field',
+check('Kyle is corrected to the name REI holds',
+  diffFromRei(REASSIGNED, FROM_REI).find((c) => c.field === 'Assigned Owner')?.to, 'Juan');
+check('...and so is the visitor',
+  diffFromRei(REASSIGNED, FROM_REI).find((c) => c.field === 'Assigned Visitor')?.to, 'Juan');
+check('...and the old name is recorded, so the change is reversible',
+  diffFromRei(REASSIGNED, FROM_REI).find((c) => c.field === 'Assigned Owner')?.from, 'Kyle');
+/*
+ * filledBlank still marks the case where the cell was EMPTY, because the run log separates "filled a gap" from
+ * "corrected a value" and those read very differently to somebody scanning what the automation did.
+ */
+check('only the empty one is reported as a fill',
   diffFromRei({ ...AMELIA, 'Assigned Owner': 'Kyle' }, FROM_REI).filter((c) => c.filledBlank).map((c) => c.field),
   ['Assigned Visitor']);
 check('a blank from REI fills nothing', diffFromRei(AMELIA, reiFieldsFromScrape({})).length, 0);
@@ -939,9 +978,12 @@ check('an absent pair yields nothing, which is the real failure mode',
  * Approved Offer Amount and can never change a figure somebody entered, which is the part that matters: an
  * offer amount is a decision, and a wrong one is the most expensive cell on the row.
  */
-check('Amount Offer fills an empty cell', FILL_IF_BLANK.includes('Approved Offer Amount'), true);
-check('...and fill-only means it cannot overwrite',
-  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 930000 }), []);
+check('Amount Offer is a REI-wins field', REI_WINS.includes('Approved Offer Amount'), true);
+check('...so a stale figure is corrected',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 905000 }, { 'Approved Offer Amount': 930000 })
+    .map((c) => c.to), ['930000']);
+check('...and an identical figure writes nothing',
+  diffFromRei({ ...JOSE, 'Approved Offer Amount': 930000 }, { 'Approved Offer Amount': 930000 }), []);
 
 console.log('\n--- and the run says "filled", not "changed" ---');
 check('a fill is reported distinctly', /filled \$\{filled\.length\} empty field\(s\) from REI/.test(RUNNER), true);

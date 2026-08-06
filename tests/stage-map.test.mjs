@@ -21,7 +21,7 @@
  */
 import { STAGE_ORDER, mapReiStage, stageAdvance, nextActionReplaceable, parseReiMoney, AUTOMATION_NEXT_ACTIONS }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
-import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -114,13 +114,28 @@ check('the offer amount lands', by('Approved Offer Amount')?.to, '930000');
 check('the stage advances to Offer Sent', by('Current Stage')?.to, 'Offer Sent');
 check('...and is marked as an advance', by('Current Stage')?.advanced, true);
 check('the next action follows REI', /Confirm that Amelia/.test(by('Next Action')?.to || ''), true);
-// Her owner is already Juan and her visitor is Thea — neither may be touched.
+/*
+ * Her owner is already Juan, so nothing is written there. Her visitor says Thea and REI says Juan, and that is
+ * now CORRECTED rather than kept — the client, third time of asking: "all of the new update on that lead should
+ * be included, will automatic update in the dashboard."
+ *
+ * Thea is worth pausing on, because she is why the dropdown guard exists: REI's owner field on one lead
+ * literally reads "Thea, Cherry", which is not a legal value, and an illegal value fails the WHOLE row write.
+ * mapVisitor resolves what it can and returns '' otherwise, and '' never overwrites.
+ */
 check('the owner already matches, so nothing is written', by('Assigned Owner'), undefined);
-check('Thea is kept as the visitor', by('Assigned Visitor'), undefined);
-check('exactly three fields change', changes.map((c) => c.field).sort(),
-  ['Approved Offer Amount', 'Current Stage', 'Next Action']);
+check('a stale visitor is corrected to the name REI holds', by('Assigned Visitor')?.to, 'Juan');
+check('...and the old name is on the record', by('Assigned Visitor')?.from, 'Thea');
+check('exactly four fields change', changes.map((c) => c.field).sort(),
+  ['Approved Offer Amount', 'Assigned Visitor', 'Current Stage', 'Next Action']);
+/*
+ * Idempotence is the property that matters most now that REI wins: with overwriting allowed, a rule that is not
+ * idempotent rewrites the same cells every twenty minutes, burns a Sheets write each time and fills the audit
+ * log with changes that did not happen.
+ */
 check('a second run changes nothing',
   diffFromRei({ ...AMELIA_ROW, 'Approved Offer Amount': '930000', 'Current Stage': 'Offer Sent',
+    'Assigned Visitor': 'Juan',
     'Next Action': 'Confirm that Amelia prepared and sent the formal offer.' }, FROM_REI), []);
 
 console.log('\n--- and the same row once a person has moved it on ---');
@@ -128,10 +143,20 @@ check('a lead at Contract Sent keeps its stage',
   diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Contract Sent' }, FROM_REI).some((c) => c.field === 'Current Stage'), false);
 check('a closed-out lead keeps its stage',
   diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Lost / Closed Out' }, FROM_REI).some((c) => c.field === 'Current Stage'), false);
-check('a human next action is kept',
-  diffFromRei({ ...AMELIA_ROW, 'Next Action': 'Call Cherry back Thursday' }, FROM_REI).some((c) => c.field === 'Next Action'), false);
-check('an offer amount somebody entered is kept',
-  diffFromRei({ ...AMELIA_ROW, 'Approved Offer Amount': '905000' }, FROM_REI).some((c) => c.field === 'Approved Offer Amount'), false);
+/*
+ * A next action and an offer amount typed on the dashboard are now REPLACED by REI's. Both were guarded on the
+ * grounds that a person wrote them — but REI's Next Step and Amount Offer are written by this same team, in REI,
+ * so both sides were human and the older one was winning.
+ *
+ * Current Stage is the exception that stays: it is still forward-only, and still refuses to move a lead somebody
+ * closed out. Rewinding a signed deal into the visit queue is not a stale-cell problem, it is destruction.
+ */
+check("a dashboard next action is replaced by REI's",
+  diffFromRei({ ...AMELIA_ROW, 'Next Action': 'Call Cherry back Thursday' }, FROM_REI)
+    .find((c) => c.field === 'Next Action')?.from, 'Call Cherry back Thursday');
+check('an offer amount is corrected to REI\'s figure',
+  diffFromRei({ ...AMELIA_ROW, 'Approved Offer Amount': '905000' }, FROM_REI)
+    .find((c) => c.field === 'Approved Offer Amount')?.to, '930000');
 
 console.log('\n=== The completion rule still wins over REI\'s stage ===');
 /*
@@ -144,10 +169,19 @@ const completed = diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Visit Scheduled
 check('a completed visit goes to Needs Review, not Offer Sent',
   completed.find((c) => c.field === 'Current Stage')?.to, 'Visit Completed — Needs Review');
 
-console.log('\n=== Approved Offer Amount is fill-only ===');
-check('it is in FILL_IF_BLANK', FILL_IF_BLANK.includes('Approved Offer Amount'), true);
+console.log('\n=== Approved Offer Amount comes from REI, and a blank never clears it ===');
+check('it is a REI-wins field', REI_WINS.includes('Approved Offer Amount'), true);
 const RECHECK = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/recheck.mjs', import.meta.url), 'utf8');
-check('...so it can never overwrite', /if \(!to \|\| text\(row\[field\]\)\) continue;/.test(RECHECK), true);
+/*
+ * The one protection that survives the change, and the one that actually prevents damage: a field REI did not
+ * return is skipped. A missing field almost always means the page did not finish rendering, not that the seller
+ * has no phone number and no offer.
+ */
+check('a blank from REI is skipped before anything is compared',
+  /if \(!to\) continue;\s+\/\/ rule 2: a blank from REI decides nothing/.test(RECHECK), true);
+/* And behaviourally, not just in the source: REI returning nothing must leave every cell as it was. */
+check('...so a lead REI said nothing about is untouched',
+  diffFromRei({ ...AMELIA_ROW, 'Assigned Visitor': 'Thea' }, {}), []);
 // Money must reach the sheet as digits: "$930,000" as text in a numeric column is a value no formula adds.
 check('the amount is written as digits, not a formatted string',
   /parseReiMoney\(scraped\.amountOffer\)/.test(RECHECK), true);

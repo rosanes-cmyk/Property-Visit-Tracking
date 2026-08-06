@@ -15,7 +15,7 @@
  * gift sent AFTER signing is exactly such a change.
  */
 import { giftFromNotes } from '../twin-visit-logger-sandbox/src/rei/gift.mjs';
-import { ACTIVE_STAGES, FILL_IF_BLANK, recheckSkipReason, reiFieldsFromScrape, diffFromRei,
+import { ACTIVE_STAGES, FILL_IF_BLANK, REI_WINS, recheckSkipReason, reiFieldsFromScrape, diffFromRei,
   giftReasonUpgradable } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
@@ -188,13 +188,27 @@ check('Gift Approval Owner', got('Gift Approval Owner'), 'Juan');
 check('Gift Approved By', got('Gift Approved By'), 'Cherry');
 check('Gift Approval Date', got('Gift Approval Date'), '08/05/2026');
 check('Gift Recommendation Reason', /Gourmet Get-Together/.test(got('Gift Recommendation Reason')), true);
-check('all six are fills, never overwrites',
+/*
+ * These six are now REI_WINS, not FILL_IF_BLANK. The client, having asked three times: "all of the new update
+ * on that lead should be included, will automatic update in the dashboard."
+ *
+ * For gifts the argument is close to airtight — REI is the ONLY place a gift order exists. There is no second
+ * source for the basket, the order number, the delivery date or who approved it, so a tracker value that
+ * disagrees with REI is either older or wrong.
+ */
+check('all six are REI-wins fields',
   ['Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason', 'Gift Approval Owner',
-    'Gift Approved By', 'Gift Approval Date'].every((f) => FILL_IF_BLANK.includes(f)), true);
-// An approval somebody entered by hand still wins.
-check('a hand-set approver is never replaced',
+    'Gift Approved By', 'Gift Approval Date'].every((f) => REI_WINS.includes(f)), true);
+check('a stale approver IS corrected from REI',
   diffFromRei({ ...ROB_EMPTY, 'Gift Approved By': 'Juan' }, reiFieldsFromScrape({ notes: [ROB] }))
-    .some((c) => c.field === 'Gift Approved By'), false);
+    .find((c) => c.field === 'Gift Approved By')?.to, 'Cherry');
+/*
+ * The protection that remains, and it is the important one: a BLANK from REI still overwrites nothing. A field
+ * missing from a scrape means the page did not render, not that the gift was never approved.
+ */
+check('...but a blank from REI never clears it',
+  diffFromRei({ ...ROB_EMPTY, 'Gift Approved By': 'Juan' }, {}).some((c) => c.field === 'Gift Approved By'),
+  false);
 
 console.log('\n=== And a gift reaches Chat ===');
 /*
@@ -266,16 +280,25 @@ check('Gift Sent Date lands', by('Gift Sent Date')?.to, '08/06/2026');
 check('Gift Recommendation Reason lands', /Gourmet Get-Together/.test(by('Gift Recommendation Reason')?.to || ''), true);
 check('all three are marked as fills, not overwrites',
   ['Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason'].every((f) => by(f)?.filledBlank), true);
-// A gift somebody recorded by hand is never rewritten.
 /*
- * A gift the team recorded themselves, in ALL six columns. Every one must survive: the whole point of
- * fill-only is that REI fills gaps and never argues with somebody who was there.
+ * A gift the team recorded by hand, in all six columns, against a REI order that says otherwise.
+ *
+ * This assertion used to require every one of them to survive. It now requires the opposite, and the reason is
+ * that the two are not equal sources: REI holds the actual order — item, price, order number, delivery date —
+ * and the sheet holds somebody's recollection of it. Rob's real case was the sheet saying nothing while REI
+ * held the whole thing.
+ *
+ * What is NOT overwritten is a column REI has no answer for; that is rule 2, asserted above.
  */
 const RECORDED = { ...ROB_ROW, 'Gift Status': 'Approved', 'Gift Sent Date': '08/01/2026',
   'Gift Recommendation Reason': 'Cherry approved after the walkthrough',
   'Gift Approval Owner': 'Cherry', 'Gift Approved By': 'Juan', 'Gift Approval Date': '07/30/2026' };
-check('a hand-recorded gift is untouched in every column',
-  diffFromRei(RECORDED, fields).some((c) => c.field.startsWith('Gift')), false);
+const corrected = diffFromRei(RECORDED, fields).filter((c) => c.field.startsWith('Gift'));
+check('a stale hand-recorded gift is corrected from REI', corrected.length > 0, true);
+check('...to the order REI actually holds',
+  corrected.find((c) => c.field === 'Gift Status')?.to, 'Sent');
+check('...and the correction records what it replaced',
+  corrected.find((c) => c.field === 'Gift Status')?.from, 'Approved');
 // Idempotent: once applied, the same scrape must produce nothing on the next pass.
 check('a second run changes nothing',
   diffFromRei({ ...ROB_ROW, 'Gift Status': 'Sent', 'Gift Sent Date': '08/06/2026',

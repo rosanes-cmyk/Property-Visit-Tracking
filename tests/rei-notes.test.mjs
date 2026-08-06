@@ -97,10 +97,28 @@ check('"Spoke to her myself, wants 950k" is NOT replaceable',
   contactResultReplaceable('Spoke to her myself, wants 950k'), false);
 check('a note merely mentioning REI is not our line',
   contactResultReplaceable('Checked REI task email, nothing new'), false);
-check('the guard is applied in diffFromRei',
-  /contactResultReplaceable\(row\['Last Contact Result'\]\)/.test(RECHECK), true);
-check('...and an identical note is not rewritten every run',
-  /noteFromRei !== text\(row\['Last Contact Result'\]\)/.test(RECHECK), true);
+/*
+ * contactResultReplaceable is no longer CONSULTED, and that is the client's decision: "all of the new update on
+ * that lead should be included, will automatic update in the dashboard."
+ *
+ * The guard protected the wrong thing. Its logic was "a person typed this, so leave it" — but REI's latest note
+ * is also written by this team, in REI, so both sides were human and the OLDER one was winning. Amelia's row
+ * carried "Auto-logged from REI task email" from the day it was created while REI held that morning's call
+ * summary and an email update confirming the $930,000 terms.
+ *
+ * The predicate stays exported and tested above, because it is the record of what the rule was and the
+ * distinction it drew is still a real one. Nothing calls it now.
+ */
+check('Last Contact Result is a REI-wins field',
+  /'Next Action', 'Last Contact Result'\]/.test(RECHECK), true);
+check('...so the guard is no longer consulted',
+  /contactResultReplaceable\(row\['Last Contact Result'\]\)/.test(RECHECK), false);
+/*
+ * Identical text must still produce no change, or every run rewrites the same cell — which spends a Sheets
+ * write, logs a change that did not happen, and makes the audit trail unreadable. sameFieldValue does it now.
+ */
+check('an identical note is not rewritten every run',
+  /if \(sameFieldValue\(field, from, to\)\) continue;/.test(RECHECK), true);
 
 console.log('\n=== The right conversation and the WRONG silence ===');
 /*
