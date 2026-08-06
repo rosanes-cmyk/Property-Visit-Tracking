@@ -25,7 +25,7 @@ import path from 'node:path';
 import { launchReiContext, assertAuthenticated } from '../src/rei/browser.mjs';
 import { expandTruncatedText, isSafeExpander } from '../src/rei/expand.mjs';
 import { giftFromNotes } from '../src/rei/gift.mjs';
-import { acquireLock } from '../src/utils/lock.mjs';
+import { acquireLockWaiting } from '../src/utils/lock.mjs';
 import { config } from '../src/config.mjs';
 
 const url = process.argv.find((a) => /^https?:\/\//i.test(a));
@@ -36,15 +36,28 @@ if (!url) {
 }
 
 /*
- * The same lock every other REI entry point takes. Two Chromium processes on one persistent profile corrupt
- * it, which is what was silently logging this account out of REI.
+ * The same lock every other REI entry point takes — but this one WAITS for it.
+ *
+ * Two Chromium processes on one persistent profile corrupt it, which is what was silently logging this
+ * account out of REI, so the lock is not optional. What is optional is giving up: the scheduled runs hold it
+ * for a minute or two at a time and a command typed by hand kept losing the race. The documented workaround
+ * was to disable the scheduled tasks first, and on the client's machine schtasks answered "Access is denied"
+ * for one of them — so the advice did not work and left the other task switched off in the meantime.
+ *
+ * Waiting needs no privileges and cannot leave the automation off by accident.
  */
-const release = await acquireLock();
+console.log('Waiting for REI to be free (the scheduled run holds it for a minute or two)…');
+const release = await acquireLockWaiting('run', {
+  onWait: (secondsLeft) => console.log(`  still busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
+});
 if (!release) {
-  console.log('Another REI run is active — skipped, to avoid two browsers on one profile.');
-  console.log('Pause the timers first:  schtasks /Change /TN "Twin Visit Logger REI Recheck" /DISABLE');
-  process.exit(0);
+  console.log('\nREI stayed busy for 12 minutes, which is longer than any single run should take.');
+  console.log('A run may have died holding the lock. Check, and delete it if nothing is running:');
+  console.log('  type data\\run.lock        <- shows the pid that claimed it');
+  console.log('  del data\\run.lock         <- only once you are sure no browser is open');
+  process.exit(1);
 }
+console.log('Got it.\n');
 
 try {
   const selectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
@@ -167,7 +180,25 @@ try {
   await fs.writeFile(out, await bodyText(), 'utf8');
   console.log(`\nFull page text saved to ${out}`);
   console.log('It contains seller contact details — read it locally, do not post it anywhere public.');
-  console.log('\nThe browser is left open on purpose. Close it when you are done looking.');
+
+  /*
+   * The browser closes when this process exits, because the persistent context belongs to it. An earlier
+   * version claimed the window was "left open on purpose", which was simply untrue.
+   *
+   * --keepopen holds the process — and therefore the window — until Enter is pressed, for when the control
+   * has to be found by eye. It also keeps hold of the REI lock for that whole time, so it is opt-in: the
+   * scheduled re-checks stand down while somebody is reading the screen.
+   */
+  if (process.argv.includes('--keepopen')) {
+    console.log('\nThe browser stays open until you press Enter here.');
+    console.log('The scheduled re-checks are paused for as long as it does, so do not leave it sitting.');
+    await new Promise((resolve) => {
+      process.stdin.resume();
+      process.stdin.once('data', resolve);
+    });
+  } else {
+    console.log('\nPass --keepopen if you need the window to stay open to find a control by eye.');
+  }
 } finally {
   await release();
 }

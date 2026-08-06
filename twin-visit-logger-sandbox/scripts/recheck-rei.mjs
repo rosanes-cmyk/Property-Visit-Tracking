@@ -34,7 +34,7 @@ import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
-import { acquireLock } from '../src/utils/lock.mjs';
+import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, FILL_IF_BLANK, RECHECK_PER_RUN
@@ -190,8 +190,27 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
  * cheap: it runs every five minutes and the next one picks up whatever accumulated. A logged-out REI
  * stops everything until somebody notices.
  */
-const release = await acquireLock();
+/*
+ * A SCHEDULED run stands down; a run somebody typed WAITS.
+ *
+ * The two want opposite things from a busy lock. The timer fires every twenty minutes, so skipping costs
+ * nothing — the next one picks up whatever accumulated. A person checking one lead has no next one, and
+ * losing the race three times in a row is how this actually went. Waiting is chosen by --only, which is
+ * already the flag that means "I am doing this by hand, now".
+ */
+const release = ONLY
+  ? await acquireLockWaiting('run', {
+    onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
+  })
+  : await acquireLock();
 if (!release) {
+  if (ONLY) {
+    console.log('\nREI stayed busy for 12 minutes, which is longer than any single run should take.');
+    console.log('A run may have died holding the lock:');
+    console.log('  type data\\run.lock        <- shows the pid that claimed it');
+    console.log('  del data\\run.lock         <- only once you are sure no browser is open');
+    process.exit(1);
+  }
   console.log('\nAnother REI run is active — skipped, to avoid two browsers on one profile.');
   console.log('That is what was logging REI out. This run will be picked up by the next one.');
   process.exit(0);

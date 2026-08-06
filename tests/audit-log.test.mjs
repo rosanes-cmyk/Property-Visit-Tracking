@@ -125,7 +125,17 @@ console.log('\n=== One browser at a time, or REI logs the client out ===');
  * The schedules guarantee the collision: the email task fires at :00 :05 :10 :15 :20, this at :00 :20 :40.
  * They land on the same minute every twenty, and a 20-lead run takes five to eight minutes.
  */
-check('the re-check takes the lock', /const release = await acquireLock\(\);/.test(RUNNER), true);
+/*
+ * It takes the lock either way — but a SCHEDULED run stands down when it is busy and a --only run waits.
+ * The timer fires again in twenty minutes so skipping costs nothing; a person checking one lead has no next
+ * run, and lost the race three times in a row before this split existed. tests/lock covers the behaviour;
+ * this asserts only that the lock is still taken on both paths.
+ */
+check('the re-check takes the lock', /await acquireLock(Waiting)?\(/.test(RUNNER), true);
+check('...and waits for it when a lead was named by hand',
+  /const release = ONLY\s*\?\s*await acquireLockWaiting/.test(RUNNER), true);
+check('...but a scheduled run still stands down instead of queueing',
+  /:\s*await acquireLock\(\);/.test(RUNNER), true);
 check('...the same unnamed one run-once uses',
   /acquireLock\(\);/.test(fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/run-once.mjs', import.meta.url), 'utf8')), true);
 check('it exits cleanly when another run holds it', /Another REI run is active — skipped/.test(RUNNER), true);

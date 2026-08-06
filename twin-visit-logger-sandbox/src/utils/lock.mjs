@@ -22,6 +22,30 @@ async function removeStaleLock(LOCK_PATH) {
   }
 }
 
+/**
+ * Wait for the lock instead of walking away from it. Returns a release function, or null on timeout.
+ *
+ * The scheduled runs hold this lock for a minute or two at a time, so a command typed by hand loses the race
+ * more often than it wins — three attempts in a row were turned away. The documented way round it was to
+ * disable the scheduled tasks first, and on the client's machine `schtasks /Change /DISABLE` answered "Access
+ * is denied" for one of them, so the advice did not even work. Waiting a couple of minutes needs no
+ * privileges and cannot leave the automation switched off by accident, which disabling a task can.
+ *
+ * `onWait` is called before each sleep so the caller can show progress: a silent five-minute pause is
+ * indistinguishable from a hang.
+ */
+export async function acquireLockWaiting(name = 'run', { timeoutMs = 12 * 60 * 1000, pollMs = 5000, onWait } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const release = await acquireLock(name);
+    if (release) return release;
+    const left = deadline - Date.now();
+    if (left <= 0) return null;
+    if (onWait) onWait(Math.ceil(left / 1000));
+    await new Promise((resolve) => { setTimeout(resolve, Math.min(pollMs, left)); });
+  }
+}
+
 export async function acquireLock(name = 'run') {
   const LOCK_PATH = lockPath(name);
   await fs.mkdir(path.dirname(LOCK_PATH), { recursive: true });
