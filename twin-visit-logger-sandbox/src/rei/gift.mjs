@@ -26,11 +26,25 @@ const text = (v) => String(v == null ? '' : v).trim();
  * deliver the offer Tuesday" both contain it. Demanding an ORDER and a GIFT-ish word together is what keeps
  * this from firing on ordinary deal correspondence.
  */
-const ORDER_MARKER = /\border\s*#\s*\d+|\border\s+summary\b|\bplace an order\b/i;
+const ORDER_MARKER = /\border\s*#\s*\d+|\border\s*(?:number|no\.?)\s*:?\s*\d|\border\s+summary\b|\bplace an order\b/i;
 const GIFT_MARKER = /\bgift\b|\bbasket\b|\bdeliver on\b|\bflowers?\b|\bhamper\b/i;
 
-/** 'MM/dd/yyyy' or 'M/d/yyyy' out of "Deliver on 08/06/2026". */
-const DELIVER_ON = /\bdeliver(?:y|ed)?\s+(?:on|date:?)\s*(\d{1,2}\/\d{1,2}\/\d{4})/i;
+/*
+ * The delivery date, in either of the two shapes the team's own notes use.
+ *
+ * REI's gift vendor writes "Delivery Info Deliver on 08/06/2026". Theavil Marie, ordering Marlene Martin's
+ * moving supplies through Amazon, writes "Estimated delivery: Today, August 4, 2026" — a month name, and a
+ * "Today," in the way. Only the first shape was handled, so Marlene's gift reached the sheet with no sent
+ * date and the work queue reported it as "marked Sent but no Gift Sent Date recorded" for a gift that had
+ * already shipped. The client's answer was short: "for marlene that is already finished and done."
+ *
+ * Up to 24 non-period characters are allowed between the word and the date, which covers ": Today, " and
+ * " on " while a price like "Delivery Fee:$13.99" cannot reach across its own decimal point to steal one.
+ */
+const MONTH_NAME = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*';
+const DELIVER_SLASH = /\bdeliver(?:y|ed|ery)?\b[^.\n]{0,24}?(\d{1,2}\/\d{1,2}\/\d{4})/i;
+const DELIVER_NAMED = new RegExp(
+  `\\bdeliver(?:y|ed|ery)?\\b[^.\\n]{0,24}?\\b${MONTH_NAME}\\s+(\\d{1,2}),?\\s+(\\d{4})`, 'i');
 
 /*
  * The item name, taken by looking BACKWARDS from the first price.
@@ -46,6 +60,15 @@ const DELIVER_ON = /\bdeliver(?:y|ed)?\s+(?:on|date:?)\s*(\d{1,2}\/\d{1,2}\/\d{4
 const FIRST_PRICE = /:\s*\$\s*([\d,]+\.\d{2})/;
 const ITEM_BOUNDARY = /.*(?:#\s*\d+|\bOrder Summary\b|\bSummary\b|\bInfo\b|\n|\|)/s;
 
+/*
+ * A label is not a product name.
+ *
+ * Reading backwards from "Total cost: $48.32" in Marlene's note lands on the words "Total cost" themselves,
+ * which passed every length check and would have been written to the sheet as the gift. These are the field
+ * labels that appear immediately before a price in the notes seen so far.
+ */
+const NOT_A_NAME = /^(?:total|order|item|sub|grand|tax|shipping|delivery|tracking|status|price|cost|amount)\b/i;
+
 /** The gift's name, or '' when the text before the price yields nothing usable. */
 function itemName(raw) {
   const price = raw.match(FIRST_PRICE);
@@ -53,11 +76,25 @@ function itemName(raw) {
   const before = raw.slice(0, price.index).replace(ITEM_BOUNDARY, '');
   // A name, not a sentence: letters, digits and the punctuation a product name really uses.
   const name = before.replace(/[^A-Za-z0-9'&\- ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (NOT_A_NAME.test(name)) return '';
   return name.length >= 4 && name.length <= 70 ? name : '';
 }
+
+/*
+ * The other way these notes name a gift: "Marlene Martin's moving-supplies gift:".
+ *
+ * There is no price glued to the item in that format, so the backwards-from-the-price rule has nothing to
+ * work from. The phrase must END in "gift" right before its colon, which is what keeps it off Rob's "Gourmet
+ * Get-Together Gift Basket:$69.99" — that one ends in "Basket" and is already read correctly by price.
+ */
+const NAMED_GIFT = /(?:^|\n|:|'s)\s*([A-Za-z][A-Za-z0-9&\- ]{2,40}?\s+gift)\s*:/i;
+
 const ORDER_TOTAL = /\border\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 const ITEM_TOTAL = /\bitem\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
-const ORDER_NUMBER = /\border\s*#\s*(\d+)/i;
+/* Amazon's wording for the same thing. Last, so a REI order total still wins where both appear. */
+const TOTAL_COST = /\btotal\s*cost\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
+/* "Order #104240205" and "Order number: 113-5603799-0573039" are both order numbers. */
+const ORDER_NUMBER = /\border\s*(?:#|number|no\.?)\s*:?\s*(\d[\d-]{3,})/i;
 
 /*
  * The date the order was PLACED, from the note's own header — "Aug 5, 2026 | 4:36PM".
@@ -70,13 +107,25 @@ const ORDER_NUMBER = /\border\s*#\s*(\d+)/i;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const NOTE_HEADER_DATE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i;
 
+/** 'MM/DD/YYYY' from a month name, day and year, or '' when the month is not a real one. */
+function fromNamedMonth(name, day, year) {
+  const month = MONTHS.indexOf(String(name).slice(0, 3).toLowerCase()) + 1;
+  if (!month) return '';
+  return `${String(month).padStart(2, '0')}/${String(Number(day)).padStart(2, '0')}/${year}`;
+}
+
+/** 'MM/DD/YYYY' for the day the gift is delivered or shipped, or '' when the note gives no date. */
+function deliveredOn(raw) {
+  const slash = raw.match(DELIVER_SLASH);
+  if (slash) return slash[1];
+  const named = raw.match(DELIVER_NAMED);
+  return named ? fromNamedMonth(named[1], named[2], named[3]) : '';
+}
+
 /** 'MM/DD/YYYY' for the date the order was placed, or '' when the note carries no such stamp. */
 function orderedOn(raw) {
   const m = raw.match(NOTE_HEADER_DATE);
-  if (!m) return '';
-  const month = MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1;
-  if (!month) return '';
-  return `${String(month).padStart(2, '0')}/${String(Number(m[2])).padStart(2, '0')}/${m[3]}`;
+  return m ? fromNamedMonth(m[1], m[2], m[3]) : '';
 }
 
 /*
@@ -112,18 +161,18 @@ export function giftFromNotes(notes) {
 
   const out = { status: 'Sent' };
 
-  const when = raw.match(DELIVER_ON);
   /*
-   * The DELIVERY date, because it is the one REI states outright. The order was placed on the 5th for
+   * The DELIVERY date, because it is the one the note states outright. The order was placed on the 5th for
    * delivery on the 6th, and a note's own explicit date beats a date inferred from when somebody typed it.
    * The order date is not lost — it goes into the reason below, so both are on the record.
    */
-  if (when) out.sentDate = when[1];
+  const when = deliveredOn(raw);
+  if (when) out.sentDate = when;
 
   const bits = [];
-  const item = itemName(raw);
-  if (item) bits.push(item);
-  const total = raw.match(ORDER_TOTAL) || raw.match(ITEM_TOTAL);
+  const item = itemName(raw) || (raw.match(NAMED_GIFT) || [])[1] || '';
+  if (item) bits.push(item.trim());
+  const total = raw.match(ORDER_TOTAL) || raw.match(ITEM_TOTAL) || raw.match(TOTAL_COST);
   if (total) bits.push(`$${total[1]}`);
   const number = raw.match(ORDER_NUMBER);
   if (number) bits.push(`order #${number[1]}`);

@@ -7,6 +7,7 @@ import { assertAuthenticated } from './browser.mjs';
 // readTasks is READ-ONLY — it lists task rows and clicks nothing. completeTask, the one REI write this
 // project can make, is deliberately not imported here.
 import { readTasks, openPanel } from './tasks.mjs';
+import { expandTruncatedText } from './expand.mjs';
 import { taskMatchesVisit } from './task-gate.mjs';
 import { cancellationEvidence, deadLeadTags } from './cancel-signal.mjs';
 
@@ -166,6 +167,20 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     await assertAuthenticated(page, selectorConfig.login || {});
 
     const effectiveLink = /reiblackbook\.com\/contacts\/\d+/i.test(page.url()) ? page.url() : targetUrl;
+
+    /*
+     * Reveal the rest of any clamped note BEFORE reading the page.
+     *
+     * Rob Walker's gift arrived with its basket name and order number and without its price, order date or
+     * delivery date — all three further down the same note, behind REI's "Show More". The parser was reading
+     * exactly what it was given. Anything this project learns from a note is capped by how much of it is on
+     * screen, so this runs on every scrape rather than only for gifts.
+     */
+    const expanded = await expandTruncatedText(page);
+    if (expanded.clicked) {
+      console.log(`   Expanded ${expanded.clicked} truncated note(s)${expanded.capped ? ' (hit the cap)' : ''}`);
+    }
+
     const visibleText = normalize(await page.locator('body').innerText().catch(() => ''));
     const pairs = await extractListItemPairs(page);
 

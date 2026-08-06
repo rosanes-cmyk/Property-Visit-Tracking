@@ -72,6 +72,48 @@ check('a different gift parses', flowers.reason,
   'Gift ordered in REI — Spring Flowers Bouquet · $61.20 · order #99881');
 check('...with its own delivery date', flowers.sentDate, '09/02/2026');
 
+console.log("\n=== Marlene Martin's gift: the same job, a different vendor's wording ===");
+/*
+ * Theavil Marie's note, verbatim from REI. This one is an Amazon shipment rather than REI's gift vendor, and
+ * it broke three of the four rules written for Rob's: no "#" on the order number, "Total cost" instead of
+ * "Order total", and a month-name delivery date with "Today," wedged in front of it. The gift reached the
+ * sheet with no sent date, so the work queue reported it as unrecorded — for a gift that had already
+ * shipped. The client: "for marlene that is already finished and done, it should notify the current day."
+ */
+const MARLENE = 'Theavil Marie Aug 04 2026, 9:36 AM Description Update fro August 4, 2026 '
+  + "Marlene Martin's moving-supplies gift: Order number: 113-5603799-0573039 "
+  + 'Status: Shipped; currently being processed at the carrier facility '
+  + 'Estimated delivery: Today, August 4, 2026 Tracking ID: TBA333401788713 Total cost: $48.32 '
+  + 'The shipment includes the moving bags, packing tape, bubble wrap, permanent markers, and removable '
+  + 'labels. The order summary confirms that the shipment was processed on August 4, 2026.';
+const marlene = giftFromNotes(MARLENE);
+check('it is recognised as a gift at all', marlene.status, 'Sent');
+check('the delivery date is read from the month name', marlene.sentDate, '08/04/2026');
+check('the order number survives its hyphens', /order #113-5603799-0573039/.test(marlene.reason), true);
+check('"Total cost" counts as the total', /\$48\.32/.test(marlene.reason), true);
+check('the gift is named, with no price glued to it', /moving-supplies gift/.test(marlene.reason), true);
+/*
+ * "Total cost" is a LABEL. Reading backwards from its price landed on those two words, which passed every
+ * length check and would have been written to the sheet as the name of the gift.
+ */
+check('the label is not mistaken for the product', /Total cost ·/.test(marlene.reason), false);
+check('the whole reason reads as a record of the gift', marlene.reason,
+  'Gift ordered in REI — moving-supplies gift · $48.32 · order #113-5603799-0573039 · ordered 08/04/2026');
+// Newlines are how the note is really laid out on screen; one-line is how the scraper yields it.
+check('the on-screen layout parses identically',
+  giftFromNotes(MARLENE.replace(/ (Order number|Status|Estimated delivery|Tracking ID|Total cost):/g, '\n$1:')).sentDate,
+  '08/04/2026');
+
+console.log('\n--- a delivery FEE is not a delivery DATE ---');
+/*
+ * Rob's note contains "Delivery Fee:$13.99" and "Same Day/Weekend/Holiday Delivery Fee:$3.99" before it ever
+ * reaches "Deliver on 08/06/2026". A price cannot reach across its own decimal point to be read as a date.
+ */
+check('Rob still gets his real delivery date', rob.sentDate, '08/06/2026');
+check('a note with only fees yields no date',
+  giftFromNotes('Place an order - Order #7 Gift Basket:$20.00 Delivery Fee:$5.99 Order Total: $25.99').sentDate,
+  undefined);
+
 console.log('\n=== What must NOT be read as a gift ===');
 /*
  * Two markers are required together. An order number alone is not a gift — this team's notes carry offer,
