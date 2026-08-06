@@ -115,10 +115,23 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
   on its date, its title prefixed `[CANCELED] `, and every reminder stripped — `tagEventCancelled` in
   `src/google/calendar.mjs` and `markVisitEvents_` in `apps-script/WebApp.gs` do the same thing on
   purpose. Deletion happens only when a row has no visit date left to sit on.
-- `Current Stage` is the team's, not the automation's. The one exception is `Visit Scheduled` →
-  `Visit Completed — Needs Review` when REI shows the appointment task complete, because the workbook
-  makes that same move itself and a Sheets API write does not fire `onEdit`. Never move a stage that a
-  person has already advanced past `Visit Scheduled`.
+- `Current Stage` is the team's, not the automation's. There are now TWO exceptions and no more.
+  1. `Visit Scheduled` → `Visit Completed — Needs Review` when REI shows the appointment task complete,
+     because the workbook makes that same move itself and a Sheets API write does not fire `onEdit`.
+     Never move a stage that a person has already advanced past `Visit Scheduled`.
+  2. → `Lost / Closed Out` when **REI's own stage field** says lost or dead. Added at the client's
+     instruction over David Jackowitz: *"add this in david, its already tagged as a dead lead, lost deal,
+     and then you can see the lead stage is dead, so it already updated."* This is the only move the
+     automation makes BACKWARDS, so it is guarded three ways in `stageCloseOut`: REI's stage FIELD must say
+     it (never a tag — David carries `Dead Lead`, `Lost Deal` **and** `Follow up` at once); anything from
+     `Verbal Agreement` onwards is refused and reported through `closeOutRefusal`, because closing a
+     nearly-done deal automatically could bury it; and `Long-Term Nurture` or an already-closed lead is
+     left alone. `Final Disposition` = `Lost` and a `Closeout Reason` quoting REI go with it, fill-if-blank,
+     so the board can say *why* a lead is dead.
+- **Chat notifications are a shorter list than the changes.** A visit that MOVES updates the row, the
+  dashboard and Juan's calendar event and posts **nothing** — the client's instruction: *"i dont want the
+  update for this in the chat, it will confuse my teammate; as long as its updating in the dashboard its
+  fine."* Only a `Visit Status` change and a new gift post. Do not add notifications without asking.
 
 ## Calendar behavior
 

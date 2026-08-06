@@ -32,7 +32,8 @@ import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
-import { OWNER_VALUES, VISITOR_VALUES } from '../src/google/owner-map.mjs';
+import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '../src/google/owner-map.mjs';
+import { closeOutRefusal } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
@@ -222,6 +223,11 @@ const changedRows = [];
 // Leads where REI never answered the question, collected so the closing summary cannot claim
 // agreement over the top of them.
 const unanswered = [];
+/*
+ * Leads REI calls dead that the tracker has too far along to close automatically. Not failures — conflicts,
+ * and each one is somebody's decision about a real deal.
+ */
+const closeOutConflicts = [];
 // Leads REI has already written off. Reported to a person, never acted on.
 const deadFlagged = [];
 /*
@@ -255,6 +261,20 @@ try {
     console.log(`    ${describeChanges(row, changes, reiFields, scraped)}`);
 
     if (scraped.visitTaskState === 'unknown') unanswered.push({ row, reason: scraped.visitTaskReason });
+
+    /*
+     * REI says dead, the tracker says nearly closed. Reported, never acted on.
+     *
+     * stageCloseOut refuses anything from Verbal Agreement onwards, because auto-closing a deal at contract
+     * stage could bury one that is nearly done. A refusal nobody sees is the same as no guard at all — the
+     * two systems disagree and nobody is told — so it is collected here and printed in the summary.
+     */
+    const refusal = closeOutRefusal(row['Current Stage'], reiFields['Current Stage']);
+    if (refusal) {
+      closeOutConflicts.push({ row, reason: refusal });
+      auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
+        message: `${row['Seller Name'] || '(no name)'} · ${row['Property Address'] || ''} — ${refusal}` });
+    }
 
     /*
      * Print the sentence a Cancelled status came from.
@@ -303,7 +323,8 @@ try {
      * writes, because one bad cell does not fail alone — it fails every other correction in the same
      * request, silently, and with 367 leads now linked that is a whole batch of real fixes lost.
      */
-    const DROPDOWN = { 'Assigned Owner': OWNER_VALUES, 'Assigned Visitor': VISITOR_VALUES };
+    const DROPDOWN = { 'Assigned Owner': OWNER_VALUES, 'Assigned Visitor': VISITOR_VALUES,
+      'Current Stage': STAGE_VALUES, 'Final Disposition': DISPOSITION_VALUES };
     const legal = changes.filter((c) => {
       const allowed = DROPDOWN[c.field];
       if (!allowed || allowed.includes(String(c.to))) return true;
@@ -409,14 +430,24 @@ try {
         { kind: 'ok' }
       );
     } else if (movedChange) {
-      // Spell out both fields when both moved, so nobody has to infer the new time from the new date.
+      /*
+       * A moved visit updates the sheet, the dashboard and the calendar — and says NOTHING in Chat.
+       *
+       * The client's instruction, after seeing one: "i dont want the update for this in the chat, it will
+       * confuse my teammate; as long as its updating in the dashboard its fine."
+       *
+       * He is right, and the alert he saw is why. It read "the visit MOVED in REI. Visit Date 2026-07-29 ->
+       * 07/29/2026" — the same day written two ways, because the comparison was a raw string test. So the
+       * team was being told visits had moved when nothing had. sameFieldValue now compares dates by day, and
+       * the calendar event stops being rewritten every run as well.
+       *
+       * A genuine move still reaches everybody, through the row, the dashboard, the calendar invitation and
+       * the Automation Log line below. What it no longer does is interrupt the Space. Cancellations and gifts
+       * still notify, because those need a decision from a person rather than a corrected diary.
+       */
       const moved = changes.filter((c) => c.field === 'Visit Date' || c.field === 'Visit Time')
         .map((c) => `${c.field} ${c.from || '(blank)'} -> ${c.to}`).join(' · ');
-      await notifyChat(
-        `REI re-check: ${who} — the visit MOVED in REI. ${moved}. ` +
-        "Tracker, dashboard and Juan's calendar event updated to the new time.",
-        { kind: 'warn' }
-      );
+      console.log(`    visit moved: ${moved} — sheet, dashboard and calendar updated, no Chat message sent`);
     }
   }
   /*
@@ -477,6 +508,15 @@ if (failures.length) {
   for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
     console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);
   }
+}
+
+if (closeOutConflicts.length) {
+  console.log(`\n${closeOutConflicts.length} lead(s) REI calls DEAD that the tracker has further along:`);
+  for (const { row, reason } of closeOutConflicts) {
+    console.log(`  row ${row.__rowNumber}  ${row['Seller Name'] || '(no name)'} — ${reason}`);
+  }
+  console.log('Nothing was changed on these. Close them out on the dashboard, or move them on in REI.');
+  console.log('They are logged as EXCEPTION in the workbook\'s "Automation Log" tab.');
 }
 
 if (!changedRows.length && !unanswered.length && !failures.length) {

@@ -28,6 +28,18 @@ export const VISITOR_VALUES = ['Juan', 'Juan Diaz', 'Kyle', 'Cherry', 'Jonathan'
 
 const text = (v) => String(v == null ? '' : v).trim();
 
+/*
+ * Two more of the workbook's dropdowns, copied from the sheet's own validation lists.
+ *
+ * They are here for the same reason the owner lists are: a value outside a dropdown fails the ENTIRE row
+ * write, not just its own cell, and this project has been bitten by that twice. The re-check writes to both
+ * columns now that it can close a lead out from REI, so both need checking before the batch goes.
+ */
+export const STAGE_VALUES = ['Visit Scheduled', 'Visit Completed — Needs Review', 'Offer Preparation',
+  'Offer Sent', 'Active Negotiation', 'Verbal Agreement', 'Contract Sent', 'Contract Signed',
+  'Long-Term Nurture', 'Lost / Closed Out'];
+export const DISPOSITION_VALUES = ['Contracted', 'Lost', 'Long-Term Nurture', 'Closed Out'];
+
 /**
  * A legal dropdown value, or '' when REI's wording cannot be recognised.
  *

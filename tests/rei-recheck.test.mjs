@@ -14,8 +14,10 @@
 import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
   recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
-  describeChanges, FILL_IF_BLANK
+  describeChanges, FILL_IF_BLANK, sameFieldValue
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import { stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
+  from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -469,18 +471,36 @@ check('the runner posts to Chat', /import \{ notifyChat \}/.test(RUNNER), true);
 check('only a status change is announced', /const statusChange = changes\.find\(\(c\) => c\.field === 'Visit Status'\)/.test(RUNNER), true);
 check('a cancellation is flagged as a warning', /kind: statusChange\.to === 'Canceled' \? 'warn' : 'ok'/.test(RUNNER), true);
 
-console.log('\n--- a MOVED visit notifies too, not just a cancellation ---');
+console.log('\n--- a MOVED visit updates everything and says NOTHING in Chat ---');
 /*
- * This was cancel-and-complete only. If REI moves a visit from Friday to Monday, the row and the calendar
- * are corrected silently and the person driving there finds out by turning up on the wrong day. The
- * calendar reminder does move with it, but a reminder that quietly relocates itself is not being told.
+ * It used to post. The client stopped it after seeing one: "i dont want the update for this in the chat, it
+ * will confuse my teammate; as long as its updating in the dashboard its fine."
+ *
+ * He is right, and the alert he saw is why: "the visit MOVED in REI. Visit Date 2026-07-29 -> 07/29/2026" —
+ * the same day written two ways, because the comparison was a raw string test. The team was being told visits
+ * had moved when nothing had. sameFieldValue fixes the false positive; this removes the interruption.
+ *
+ * A real move still reaches everybody through the row, the dashboard, Juan's calendar invitation and the
+ * Automation Log. Cancellations and gifts still post, because those need a decision from a person.
  */
-check('a date or time change notifies',
+check('a date or time change is still detected',
   /const movedChange = changes\.find\(\(c\) => c\.field === 'Visit Date' \|\| c\.field === 'Visit Time'\)/.test(RUNNER), true);
-check('it says the visit MOVED, in those words', /the visit MOVED in REI/.test(RUNNER), true);
-check('it names the old and new value', /\$\{c\.from \|\| '\(blank\)'\} -> \$\{c\.to\}/.test(RUNNER), true);
+check('...and still names the old and new value', /\$\{c\.from \|\| '\(blank\)'\} -> \$\{c\.to\}/.test(RUNNER), true);
 check('both fields are spelled out when both moved', /\.join\(' · '\)/.test(RUNNER), true);
-check('a move is a warning, not a routine ok', /`REI re-check: \$\{who\} — the visit MOVED[\s\S]*?kind: 'warn'/.test(RUNNER), true);
+/*
+ * Read the branch itself rather than the whole file. The comment explaining the removal quotes the old
+ * message verbatim, so searching the file for that wording would find the explanation and call it a
+ * regression — the assertion has to look at the code that runs.
+ */
+const movedBranch = RUNNER.slice(RUNNER.indexOf('} else if (movedChange) {'),
+  RUNNER.indexOf('const moved = changes.filter'));
+check('the moved branch posts nothing to Chat', /notifyChat/.test(movedBranch), false);
+check('...and the branch was really found', movedBranch.length > 40, true);
+check('...it is printed to the run log instead', /visit moved: \$\{moved\}/.test(RUNNER), true);
+check('...and says plainly that nothing was posted', /no Chat message sent/.test(RUNNER), true);
+/* The two that DO still post, so removing one did not remove them all. */
+check('a cancellation still posts', /is now \$\{statusChange\.to\} in REI/.test(RUNNER), true);
+check('a gift still posts', /a GIFT is recorded in REI/.test(RUNNER), true);
 // A status change still wins — "cancelled" matters more than "moved", and one message is enough.
 check('a status change takes precedence over a move', /\} else if \(movedChange\) \{/.test(RUNNER), true);
 // And a cosmetic diff still says nothing at all.
@@ -846,6 +866,151 @@ check('among identical leads, the one waiting longest goes first',
   recheckUrgency(lead('Offer Sent', 50, '07/01/2026', 'Completed'), null, { now: NOW })
     > recheckUrgency(lead('Offer Sent', 50, '07/01/2026', 'Completed'),
       new Date(NOW.getTime() - 30 * 60000).toISOString(), { now: NOW }), true);
+
+console.log('\n=== "the visit MOVED in REI. Visit Date 2026-07-29 -> 07/29/2026" ===');
+/*
+ * That alert really went to the client's team, and it is the same day written two ways. REI's fields come
+ * back as 'MM/dd/yyyy'; the sheet hands back what the cell renders as, which for a date cell is 'yyyy-MM-dd'.
+ * A raw string comparison therefore reported every scheduled visit as moved, on every run, for ever — each
+ * one rewriting the row and pushing Juan's calendar event again. It could not even settle, because writing
+ * 07/29/2026 into a date cell makes it render as 2026-07-29 again.
+ */
+check('the same day in two formats is not a change',
+  sameFieldValue('Visit Date', '2026-07-29', '07/29/2026'), true);
+check('...in either direction', sameFieldValue('Visit Date', '07/29/2026', '2026-07-29'), true);
+check('a REAL move is still a change',
+  sameFieldValue('Visit Date', '2026-07-29', '07/30/2026'), false);
+/*
+ * A bare Sheets serial. 46233 is 29 July 2026 — new Date('46233') reads it as a YEAR, so sheetDayKey used to
+ * answer '46231-12-31' and every comparison built on it was quietly wrong: such a visit sorted as if it were
+ * forty thousand years away and could never be overdue.
+ */
+check('a sheet serial is the same day too', sameFieldValue('Visit Date', 46233, '07/29/2026'), true);
+check('...and a different serial is a different day', sameFieldValue('Visit Date', 46232, '07/29/2026'), false);
+check('a small number is not a date at all', sheetDayKey(5), '');
+check('an unparseable date is not silently equal',
+  sameFieldValue('Visit Date', 'sometime next week', '07/29/2026'), false);
+
+console.log('\n--- times, phones and emails, compared by meaning ---');
+check('9:30 AM and 09:30 AM are one time', sameFieldValue('Visit Time', '9:30 AM', '09:30 AM'), true);
+check('lower-case am matches', sameFieldValue('Visit Time', '9:30 am', '9:30 AM'), true);
+check('no space matches', sameFieldValue('Visit Time', '9:30AM', '9:30 AM'), true);
+check('9:30 AM is NOT 9:30 PM', sameFieldValue('Visit Time', '9:30 AM', '9:30 PM'), false);
+check('12:15 AM is not 12:15 PM', sameFieldValue('Visit Time', '12:15 AM', '12:15 PM'), false);
+check('a reformatted phone is not a change',
+  sameFieldValue('Phone', '5102208546', '(510) 220-8546'), true);
+check('a country code is not a change', sameFieldValue('Phone', '+1 510 220 8546', '(510) 220-8546'), true);
+/*
+ * David Jackowitz's home number was in the mobile column: (510) 346-8546 where REI had (510) 220-8546. That
+ * correction is the reason Phone is re-checkable at all, and normalising formatting must not hide it.
+ */
+check("David's wrong number is STILL caught",
+  sameFieldValue('Phone', '(510) 346-8546', '(510) 220-8546'), false);
+check('a differently-cased email is not a change',
+  sameFieldValue('Email', 'DJackowitz@live.com', 'djackowitz@live.com'), true);
+check('a different email is', sameFieldValue('Email', 'dj@live.com', 'djackowitz@live.com'), false);
+/* A name is left alone: case and punctuation there may be somebody's deliberate correction. */
+check('a name is compared exactly', sameFieldValue('Seller Name', 'jose anguiano', 'Jose Anguiano'), false);
+check('an identical name is equal', sameFieldValue('Seller Name', 'Jose Anguiano', 'Jose Anguiano'), true);
+
+console.log('\n--- and no change means no write, no calendar push, no alert ---');
+const MARICHU = { 'Property Address': '27833 Gainesville Ave, Hayward, CA 94545', 'Seller Name': 'Marichu Mangclimot',
+  'Current Stage': 'Visit Scheduled', 'Visit Status': 'Scheduled', 'Visit Date': '2026-07-29',
+  'Visit Time': '2:00 PM', Phone: '(510) 555-0101', Email: 'm@example.com', 'Assigned Owner': 'Juan',
+  'Assigned Visitor': 'Juan', 'Next Action': 'Conduct scheduled visit & log outcome',
+  'Last Contact Result': 'x', 'Last Contact Date': '07/29/2026' };
+const sameAgain = diffFromRei(MARICHU, { 'Visit Date': '07/29/2026', 'Visit Time': '2:00 PM',
+  'Visit Status': 'Scheduled', 'Seller Name': 'Marichu Mangclimot', Phone: '(510) 555-0101',
+  Email: 'm@example.com' });
+check('a row REI agrees with produces no changes at all', sameAgain, []);
+check('...so the calendar is not touched', calendarAffected(sameAgain), false);
+
+console.log('\n=== David Jackowitz: REI says the lead is dead ===');
+/*
+ * The client: "add this in david, its already tagged as a dead lead, lost deal, and then you can see the lead
+ * stage is dead, so it already updated." REI has him at Lead Stage "9 Lost / Dead Lead", Category "Lost/Dead",
+ * Call Disposition "We Passed", and the tracker had him live.
+ *
+ * This is the only move the automation makes BACKWARDS along the pipeline, so the guards matter more than
+ * the feature: closing a lead out takes it off the work queue, and the failure mode is a live deal nobody
+ * follows up.
+ */
+check("REI's own stage field is read", reiSaysLost('9 Lost / Dead Lead'), true);
+check('...and "Dead Lead" too', reiSaysLost('Dead Lead'), true);
+check('an active stage is not lost', reiSaysLost('4 Offer Sent'), false);
+check('nor is a blank one', reiSaysLost(''), false);
+/*
+ * "Lost" must not be found inside an ordinary word. \b on both sides is what stops "Lost Keys Follow Up"
+ * from mattering and, more importantly, keeps a stage like "Closest Match" from reading as dead.
+ */
+check('"lost" inside another word is not a stage', reiSaysLost('Closest Contact'), false);
+
+console.log('\n--- from a live stage it closes out ---');
+for (const from of ['Visit Scheduled', 'Visit Completed — Needs Review', 'Offer Preparation',
+  'Offer Sent', 'Active Negotiation']) {
+  check(`${from} -> Lost / Closed Out`, stageCloseOut(from, '9 Lost / Dead Lead'), STAGE_LOST);
+  check(`...and nothing is refused from ${from}`, closeOutRefusal(from, '9 Lost / Dead Lead'), '');
+}
+
+console.log('\n--- from a nearly-done deal it REFUSES, and says so ---');
+/*
+ * REI calling a deal dead while the sheet has a contract out is a conflict, not an instruction. Acting on it
+ * automatically could bury a deal that is nearly closed, so it is reported for a person to settle.
+ */
+for (const from of ['Verbal Agreement', 'Contract Sent', 'Contract Signed']) {
+  check(`${from} is not closed out`, stageCloseOut(from, '9 Lost / Dead Lead'), '');
+  check(`...and the conflict is reported`, /too far along to close out/.test(closeOutRefusal(from, '9 Lost / Dead Lead')), true);
+  check(`...naming both sides`, /9 Lost \/ Dead Lead/.test(closeOutRefusal(from, '9 Lost / Dead Lead'))
+    && closeOutRefusal(from, '9 Lost / Dead Lead').includes(from), true);
+}
+check('a lead already closed out is left alone', stageCloseOut(STAGE_LOST, '9 Lost / Dead Lead'), '');
+check('...and reports nothing, because there is no conflict', closeOutRefusal(STAGE_LOST, '9 Lost / Dead Lead'), '');
+check('nurture is left where a person parked it', stageCloseOut('Long-Term Nurture', 'Dead Lead'), '');
+check('a blank stage is not given a conclusion', stageCloseOut('', '9 Lost / Dead Lead'), '');
+check('an active REI stage closes nothing', stageCloseOut('Offer Sent', '4 Offer Sent'), '');
+
+console.log('\n--- the close-out carries a disposition and a reason ---');
+/*
+ * A stage of 'Lost / Closed Out' with no disposition and no reason is the half-filled state the client
+ * objected to over the gift block: the board says the lead is dead and cannot say why. REI's own words are
+ * used, so it is auditable rather than invented.
+ */
+const DAVID = { 'Property Address': '1390 Estudillo Ave, San Leandro, CA 94577', 'Seller Name': 'David Jackowitz',
+  'Current Stage': 'Offer Sent', 'Visit Status': 'Completed', 'Assigned Owner': 'Cherry' };
+const deadFields = { 'Current Stage': '9 Lost / Dead Lead',
+  'Last Contact Result': 'We are passing on this lead | Market is slow in that area' };
+const deadChanges = diffFromRei(DAVID, deadFields);
+const at = (f) => deadChanges.find((c) => c.field === f);
+check('Current Stage is closed out', at('Current Stage')?.to, STAGE_LOST);
+check('...marked as a close-out, not an advance', at('Current Stage')?.closedOut, true);
+check('Final Disposition is set to a legal dropdown value', at('Final Disposition')?.to, 'Lost');
+check('...one the workbook offers', ['Contracted', 'Lost', 'Long-Term Nurture', 'Closed Out']
+  .includes(at('Final Disposition')?.to), true);
+check('the reason quotes REI', /We are passing on this lead/.test(at('Closeout Reason')?.to || ''), true);
+check('...and says where it came from', /^Closed out from REI —/.test(at('Closeout Reason')?.to || ''), true);
+/* Anything a person already wrote in those two columns survives. */
+const settled = { ...DAVID, 'Final Disposition': 'Closed Out', 'Closeout Reason': 'Seller relisted with an agent' };
+const settledChanges = diffFromRei(settled, deadFields);
+check("a person's own disposition is untouched",
+  settledChanges.some((c) => c.field === 'Final Disposition'), false);
+check("...and their own reason", settledChanges.some((c) => c.field === 'Closeout Reason'), false);
+/* Idempotent: once closed out, the same scrape must produce nothing. */
+check('a second pass changes nothing',
+  diffFromRei({ ...settled, 'Current Stage': STAGE_LOST }, deadFields)
+    .some((c) => c.field === 'Current Stage'), false);
+
+console.log('\n--- a dead lead is closed out, NOT promoted to Needs Review ---');
+/*
+ * Ordering matters. A dead lead whose last visit happened would otherwise be advanced to "Visit Completed —
+ * Needs Review", which puts it back on the work queue asking somebody to decide about a deal the team has
+ * already passed on.
+ */
+const deadAndVisited = diffFromRei({ ...DAVID, 'Current Stage': 'Visit Scheduled' },
+  { ...deadFields, 'Visit Status': 'Completed' });
+check('the stage goes to Lost / Closed Out',
+  deadAndVisited.find((c) => c.field === 'Current Stage')?.to, STAGE_LOST);
+check('...and not to Needs Review',
+  deadAndVisited.some((c) => c.to === 'Visit Completed — Needs Review'), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

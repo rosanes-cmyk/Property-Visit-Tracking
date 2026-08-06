@@ -41,8 +41,7 @@ export const STAGE_ORDER = [
  * Left out, each for a reason:
  *   "Follow Up"        ambiguous. Could be before a visit or after an offer; REI uses it for both.
  *   "New Lead"         earlier than anything this tracker holds, and forward-only would ignore it anyway.
- *   "Dead" / "Lost"    closing a lead out is a decision about somebody's deal. Reported, never written —
- *                      the same rule the dead-lead TAGS follow, and the same one syncVisitCalendar_ uses.
+ *   "Dead" / "Lost"    handled by stageCloseOut below, which is a backwards move and cannot use this list.
  *   "Nurture"          a downgrade, and forward-only would refuse it.
  */
 const REI_STAGE_PATTERNS = [
@@ -99,6 +98,76 @@ export function stageAdvance(currentStage, reiStage) {
   const from = STAGE_ORDER.indexOf(current);
   if (from < 0) return '';                 // Lost / Closed Out, Long-Term Nurture — a human put it there
   return to > from ? target : '';
+}
+
+/*
+ * Closing a lead out from REI — the one move that goes BACKWARDS, and the rules that make it safe.
+ *
+ * The client, on David Jackowitz: "add this in david, its already tagged as a dead lead, lost deal, and then
+ * you can see the lead stage is dead, so it already updated." REI has him at Lead Stage "9 Lost / Dead Lead",
+ * Category "Lost/Dead", Call Disposition "We Passed", and a note reading "We are passing on this lead |
+ * Market is slow in that area". The tracker still had him live.
+ *
+ * This is a SECOND exception to "Current Stage is the team's, not the automation's", and it deserves more
+ * suspicion than the first, because closing a lead out takes it off the work queue — the failure mode is a
+ * live deal nobody follows up. Three guards:
+ *
+ *  1. REI's own STAGE FIELD must say it. Not a tag: David carries "Dead Lead" and "Lost Deal" AND "Follow
+ *     up" at the same time, so his tags cannot settle anything. The stage field is one value, and a person
+ *     in REI chose it.
+ *  2. Stages at or past Verbal Agreement are REFUSED. If REI says dead and the sheet says a contract is out,
+ *     that is a conflict for a human — closing it automatically could bury a deal that is nearly done.
+ *  3. Nothing already closed out or in nurture is touched, so this cannot churn.
+ *
+ * Both strings are exact values of the workbook's dropdowns ('Lost / Closed Out' on Current Stage, 'Lost' on
+ * Final Disposition). A value outside a dropdown fails the whole row write, not just its own cell.
+ */
+export const STAGE_LOST = 'Lost / Closed Out';
+export const DISPOSITION_LOST = 'Lost';
+
+/* Matched against REI's stage FIELD only. "Lost Deal" as a tag never reaches here. */
+const REI_LOST_STAGE = /\b(?:lost|dead)\b/i;
+
+/*
+ * Stages this will not close out from, each because REI being wrong there is expensive.
+ *
+ * Verbal Agreement onwards is money in motion. 'Long-Term Nurture' is somewhere a person deliberately parked
+ * the lead, and it is already out of the work queue, so there is nothing to gain by overriding them.
+ */
+const NEVER_CLOSE_FROM = ['Verbal Agreement', 'Contract Sent', 'Contract Signed', 'Long-Term Nurture', STAGE_LOST];
+
+/** Whether REI's stage field says this lead is lost or dead. */
+export function reiSaysLost(reiStage) {
+  return REI_LOST_STAGE.test(text(reiStage));
+}
+
+/**
+ * 'Lost / Closed Out' when REI's stage says the lead is dead and it is safe to act on, otherwise ''.
+ *
+ * A blank current stage returns '' — such a row is already skipped as un-checkable, and inventing a
+ * close-out for a row nobody has staged would be writing a conclusion about a lead nobody has started.
+ */
+export function stageCloseOut(currentStage, reiStage) {
+  if (!reiSaysLost(reiStage)) return '';
+  const current = text(currentStage);
+  if (!current) return '';
+  if (NEVER_CLOSE_FROM.indexOf(current) >= 0) return '';
+  return STAGE_LOST;
+}
+
+/**
+ * Why a close-out was refused, for the run summary — or '' when there was nothing to refuse.
+ *
+ * Refusals are the whole point of guard 2, and a refusal nobody sees is the same as no guard: the conflict
+ * sits in the sheet, both systems disagree, and nobody is told. This is the text that gets reported.
+ */
+export function closeOutRefusal(currentStage, reiStage) {
+  if (!reiSaysLost(reiStage)) return '';
+  const current = text(currentStage);
+  if (!current || current === STAGE_LOST) return '';
+  if (NEVER_CLOSE_FROM.indexOf(current) < 0) return '';
+  return `REI says "${text(reiStage)}" but the tracker has this at "${current}" — too far along to close out `
+    + 'automatically. A person needs to settle which is right.';
 }
 
 /*

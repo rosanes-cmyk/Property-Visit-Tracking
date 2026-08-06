@@ -18,7 +18,8 @@
  * tests run from anywhere. This one needs date maths and one timezone-aware format, and Intl does both
  * in the standard library — so the decisions stay testable without the sandbox's node_modules.
  */
-import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
+import { stageAdvance, stageCloseOut, nextActionReplaceable, parseReiMoney, DISPOSITION_LOST }
+  from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 import { latestReiNote, latestReiNoteDate, contactResultReplaceable } from './notes.mjs';
 import { giftFromNotes } from './gift.mjs';
@@ -305,6 +306,24 @@ export function parseSheetDate(value) {
   // 'yyyy-MM-dd' — what the Sheets API hands back for a date cell.
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  /*
+   * A bare Sheets serial — 46232 means 29 July 2026.
+   *
+   * new Date('46232') reads it as a YEAR, so sheetDayKey answered '46231-12-31' and every comparison built
+   * on it was quietly wrong: a serial-valued visit date sorted as if it were forty thousand years away and
+   * so was never "overdue". The API returns formatted strings by default, which is why this went unseen, but
+   * a row written unformatted, or a fetch with UNFORMATTED_VALUE, produces exactly this.
+   *
+   * The epoch is 30 December 1899 and the arithmetic is done in UTC before being rebuilt as a local date, so
+   * no timezone can shift the day. The floor at 1000 keeps a small number — a count, an ID — from being read
+   * as a date at all.
+   */
+  if (/^\d+(?:\.\d+)?$/.test(s)) {
+    // Below the floor it is a count or an id, not a date. new Date('5') answers 2001, which is worse than ''.
+    if (Number(s) < 1000) return null;
+    const utc = new Date(Date.UTC(1899, 11, 30) + Math.round(Number(s)) * 86400000);
+    return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
+  }
   const parsed = new Date(s);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -329,6 +348,55 @@ export function sheetDayKey(value, zone = ZONE) {
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const parsed = parseSheetDate(value);
   return parsed ? dayKey(parsed, zone) : '';
+}
+
+/*
+ * "The visit MOVED in REI. Visit Date 2026-07-29 -> 07/29/2026."
+ *
+ * That alert went to the client's team, and it is the same day written two ways. The comparison was a raw
+ * string test: REI's fields come back as 'MM/dd/yyyy' while the sheet hands back whatever the cell renders
+ * as, which for a real date cell is 'yyyy-MM-dd'. So every scheduled visit looked like it had been moved,
+ * every run, for ever — and each false move rewrote the row and pushed Juan's calendar event again.
+ *
+ * It also could never settle. Writing 07/29/2026 into a date-formatted cell makes it render as 2026-07-29
+ * again, so the next pass found the same "change" and did it all over.
+ *
+ * Compared by MEANING, per field, and only where two spellings really are the same value:
+ *   Visit Date   the same day in any of the formats sheetDayKey understands
+ *   Visit Time   the same clock time, whatever the spacing or case of am/pm
+ *   Phone        the same digits — this must still catch David Jackowitz's (510) 346-8546 -> (510) 220-8546
+ *   Email        the same address in any case
+ *
+ * Seller Name is NOT normalised. Case and punctuation in somebody's name are the kind of difference a person
+ * may have corrected on purpose, and a name is cheap to write.
+ */
+const timeKey = (v) => {
+  const m = text(v).match(/^(\d{1,2}):(\d{2})\s*([ap])\.?m\.?$/i);
+  if (!m) return text(v).toLowerCase().replace(/[\s.]/g, '');
+  const hour = Number(m[1]) % 12 + (m[3].toLowerCase() === 'p' ? 12 : 0);
+  return `${String(hour).padStart(2, '0')}:${m[2]}`;
+};
+
+/** Whether the sheet's value and REI's mean the same thing for this field, however each is spelled. */
+export function sameFieldValue(field, from, to) {
+  const a = text(from);
+  const b = text(to);
+  if (a === b) return true;
+  if (field === 'Visit Date') {
+    const ka = sheetDayKey(a);
+    const kb = sheetDayKey(b);
+    return Boolean(ka) && ka === kb;
+  }
+  if (field === 'Visit Time') return timeKey(a) === timeKey(b);
+  if (field === 'Phone') {
+    const da = a.replace(/\D/g, '');
+    const db = b.replace(/\D/g, '');
+    // Last ten digits, so a leading 1 or +1 is not a change. Short strings are compared as they are.
+    const tail = (d) => (d.length > 10 ? d.slice(-10) : d);
+    return Boolean(da) && tail(da) === tail(db);
+  }
+  if (field === 'Email') return a.toLowerCase() === b.toLowerCase();
+  return false;
 }
 
 /**
@@ -462,7 +530,7 @@ export function diffFromRei(row, reiFields) {
     const to = text(reiFields[field]);
     if (!to) continue;                       // rule 2
     const from = text(row[field]);
-    if (from === to) continue;               // rule 3
+    if (sameFieldValue(field, from, to)) continue;   // rule 3
     changes.push({ field, from, to });
   }
 
@@ -512,7 +580,40 @@ export function diffFromRei(row, reiFields) {
     changes.push({ field: 'Gift Recommendation Reason', from: text(row['Gift Recommendation Reason']), to: reason });
   }
 
-  if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
+  /*
+   * REI saying the lead is dead comes FIRST, before any forward move.
+   *
+   * The client, on David Jackowitz: "add this in david, its already tagged as a dead lead, lost deal, and then
+   * you can see the lead stage is dead, so it already updated." REI has him at "9 Lost / Dead Lead" and the
+   * tracker had him live.
+   *
+   * Ordered ahead of the completion move on purpose: a dead lead whose last visit happened should be closed
+   * out, not promoted to "Visit Completed — Needs Review", which would put it back on the work queue asking
+   * somebody to decide about a deal the team has already passed on. stageCloseOut refuses anything from
+   * Verbal Agreement onwards, so a conflict that matters is reported rather than acted on — see
+   * closeOutRefusal, which the runner prints.
+   */
+  const closedOut = stageCloseOut(row['Current Stage'], reiFields['Current Stage']);
+  if (closedOut) {
+    changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: closedOut, closedOut: true });
+    /*
+     * Final Disposition and Closeout Reason go with it, fill-if-blank.
+     *
+     * A stage of 'Lost / Closed Out' with no disposition and no reason is the same half-filled state the
+     * client objected to over the gift block: the board says the lead is dead and cannot say why. REI's own
+     * words are used, so the reason is auditable rather than invented — David's read "We are passing on this
+     * lead | Market is slow in that area".
+     */
+    if (!text(row['Final Disposition'])) {
+      changes.push({ field: 'Final Disposition', from: '', to: DISPOSITION_LOST, filledBlank: true });
+    }
+    if (!text(row['Closeout Reason'])) {
+      const why = text(reiFields['Last Contact Result']) || text(reiFields['Current Stage']);
+      if (why) {
+        changes.push({ field: 'Closeout Reason', from: '', to: `Closed out from REI — ${why}`.slice(0, 500), filledBlank: true });
+      }
+    }
+  } else if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
     changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: STAGE_ON_COMPLETION });
   } else {
     /*
