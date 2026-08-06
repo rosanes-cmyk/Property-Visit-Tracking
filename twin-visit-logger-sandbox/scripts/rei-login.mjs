@@ -46,8 +46,25 @@ function waitForEnter() {
 
 await Promise.race([
   waitForEnter(),
-  context.waitForEvent('close')
-]);
+  /*
+   * timeout: 0 — NO limit, and this was a real bug rather than a precaution.
+   *
+   * waitForEvent takes Playwright's default timeout, which fired at 45 seconds while the client was still
+   * completing MFA. The race then lost to its own clock and the script crashed mid-login with a
+   * TimeoutError, in the middle of the one step that inherently takes minutes: read a code off a phone,
+   * type it, wait for a dashboard to load. Nothing about logging in belongs on a 45-second budget.
+   */
+  context.waitForEvent('close', { timeout: 0 })
+]).catch((error) => {
+  /*
+   * Even if the wait fails, say the true thing about the session. Chromium writes a persistent profile to
+   * disk CONTINUOUSLY, not on close, so a login completed before the error is already saved — and telling
+   * somebody their login was lost when it was not sends them round the loop a second time for nothing.
+   */
+  console.warn(`\nStopped waiting: ${error.message}`);
+  console.warn('If you finished logging in, the session IS saved — the profile is written to disk as you');
+  console.warn('go, not at the end. Run the re-check and see; log in again only if it still redirects.');
+});
 
 await context.close().catch(() => {});
 console.log('REI sandbox profile saved. Do not commit browser-data/.');

@@ -142,5 +142,22 @@ check('logging in takes the lock too', /const releaseLogin = await acquireLock\(
 check('...and refuses rather than corrupting the profile', /A scheduled REI run is active/.test(LOGIN), true);
 check('...releasing it on exit', /process\.on\('exit'/.test(LOGIN), true);
 
+console.log('\n--- and logging in is not on a 45-second clock ---');
+/*
+ * waitForEvent took Playwright's DEFAULT timeout, which fired at 45 seconds while the client was still
+ * completing MFA. The race lost to its own clock and the script crashed mid-login -- during the one step
+ * that inherently takes minutes: read a code off a phone, type it, wait for a dashboard.
+ */
+check('the wait for the window has no timeout',
+  /context\.waitForEvent\('close', \{ timeout: 0 \}\)/.test(LOGIN), true);
+check('a failed wait no longer crashes the script', /\]\)\.catch\(\(error\) => \{/.test(LOGIN), true);
+/*
+ * And it tells the truth about the session. Chromium writes a persistent profile continuously, so a login
+ * completed before an error is already saved -- claiming otherwise sends somebody round the loop again for
+ * nothing.
+ */
+check('...and says the session may already be saved', /the session IS saved/.test(LOGIN), true);
+check('...with how to check rather than a guess', /Run the re-check and see/.test(LOGIN), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
