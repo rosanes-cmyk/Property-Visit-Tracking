@@ -121,6 +121,27 @@ export async function readTasks(page, selectors, { timezone } = {}) {
   const rowSelectors = (selectors?.tasks?.taskRows || []).map(assertCompletionSelector);
   const out = [];
 
+  /*
+   * "MY TASKS  ALL TASKS" — the panel opens filtered to the logged-in user.
+   *
+   * The doctor on Jahan Woodfork printed that toggle, alongside "These are your current assigned tasks."
+   * Every booked appointment listed belonged to somebody else's lead — Amelia Middel, Maria Ramos, Karyn
+   * Kambur — because the default view is whoever is logged in, not this contact.
+   *
+   * So a visit assigned to another member of the team is invisible until All Tasks is selected, and the
+   * automation would conclude "REI has no open task for this visit" purely because Juan is not the assignee.
+   * That is the wrong answer for the right-looking reason, which is the failure mode this whole feature keeps
+   * producing.
+   *
+   * Clicking it is safe on the same grounds as everything else here: the text must be exactly "All Tasks",
+   * anchored, and a filter reveals rows rather than changing anything.
+   */
+  const allTasks = page.getByText(/^\s*all\s+tasks\s*$/i).last();
+  if (await allTasks.count().catch(() => 0)) {
+    await allTasks.click({ timeout: 4000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+  }
+
   for (const selector of rowSelectors) {
     const rows = page.locator(selector);
     const count = await rows.count().catch(() => 0);
@@ -140,6 +161,41 @@ export async function readTasks(page, selectors, { timezone } = {}) {
     }
     if (out.length) break;
   }
+
+  /*
+   * If no configured selector matched, find the rows by their own text.
+   *
+   * All five taskRows selectors reported "no match" on Jahan's page while the doctor printed five booked
+   * appointments in plain sight. REI's rows are not list-items and not <li> — they are whatever this build of
+   * the app renders — and guessing a sixth CSS selector is how the last three attempts went.
+   *
+   * The text is the stable thing: "Booked appointment | (650) 704-3064 | August 01, 2026 1:30 PM". That is
+   * everything parseTaskTitle needs, and it does not depend on the markup at all.
+   *
+   * completable: false is deliberate. A text match gives no element that can be scoped for a click, so a task
+   * found this way may be READ but never ticked off — completeTask refuses it outright rather than clicking
+   * something it cannot prove is inside the right row.
+   */
+  if (!out.length) {
+    const rows = page.getByText(BOOKED);
+    const count = await rows.count().catch(() => 0);
+    const seen = new Set();
+    for (let index = 0; index < count; index += 1) {
+      const text = ((await rows.nth(index).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      // Nested elements yield the same text more than once; the row is the thing, not the wrapper.
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const parsed = parseTaskTitle(text, { timezone });
+      if (!parsed) continue;
+      out.push({
+        index,
+        selector: null,
+        completable: false,
+        ...parsed,
+        complete: /\bcompleted?\b/i.test(text)
+      });
+    }
+  }
   return out;
 }
 
@@ -155,6 +211,21 @@ export function pickTaskForVisit(tasks, visit) {
  * button belonging to a different task can never be the one that gets clicked.
  */
 export async function completeTask(page, selectors, task) {
+  /*
+   * A task read by TEXT cannot be completed, and this refusal is not a limitation to work around.
+   *
+   * The text fallback in readTasks gives no element to scope a click to, and the whole safety argument for
+   * this function is that the tick it clicks is provably INSIDE the matched row. Without that, a page-level
+   * control belonging to a different task could be the one that gets clicked — on somebody's live CRM.
+   */
+  if (!task?.selector || task.completable === false) {
+    return {
+      clicked: null,
+      confirmed: false,
+      rowText: 'refused: this task was found by its text, so no row can be scoped for a click. '
+        + 'Add a working taskRows selector to config/rei-selectors.json first.'
+    };
+  }
   const candidates = (selectors?.tasks?.completeControl || []).map(assertCompletionSelector);
   const row = page.locator(task.selector).nth(task.index);
 

@@ -321,8 +321,20 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
             : `REI's tasks were never read — ${taskPanel.how}`;
         } else {
           visitTaskState = 'unknown';
-          visitTaskReason = `${tasks.length} booked-appointment task(s) on the contact, none matching this ` +
-            `visit on phone AND date${apptDay ? ` (${apptDay})` : ' (no appointment date to match on)'}`;
+          /*
+           * "on the contact" was wrong, and misleadingly so.
+           *
+           * The doctor on Jahan Woodfork showed what the Tasks panel really is: "MY TASKS  ALL TASKS", "These
+           * are your current assigned tasks", and five booked appointments belonging to OTHER leads — Amelia
+           * Middel, Maria Ramos, Karyn Kambur. It is the logged-in user's task list, not this contact's. So a
+           * message reading "5 booked-appointment task(s) on the contact" invites somebody to open the lead
+           * expecting five appointments and find none.
+           *
+           * The phone-AND-date match is what makes a global list usable, and it was already required.
+           */
+          visitTaskReason = `${tasks.length} booked-appointment task(s) in REI's task list (it lists the whole `
+            + "team's tasks, not just this contact's), none matching this "
+            + `visit on phone AND date${apptDay ? ` (${apptDay})` : ' (no appointment date to match on)'}`;
         }
       } catch (error) {
         visitTaskState = 'unknown';

@@ -1099,5 +1099,58 @@ check('the failure path skips the lead before it is marked checked',
 check('failures still veto the closing all-clear',
   /!changedRows\.length && !unanswered\.length && !failures\.length/.test(RUNNER), true);
 
+console.log("\n=== what REI's Tasks panel actually is ===");
+/*
+ * The doctor on Jahan Woodfork, once the panel finally opened:
+ *
+ *   MY TASKS  ALL TASKS
+ *   These are your current assigned tasks.
+ *   Booked appointment | (650) 704-3064 | August 01, 2026 1:30 PM Amelia Middel JR
+ *   Booked appointment | (415) 756-3261 | July 31, 2026 5:00 PM Maria Ramos JR
+ *   ...
+ *
+ * Two things follow. It is the LOGGED-IN USER'S task list, not the contact's — every appointment listed
+ * belongs to a different lead. And it opens filtered to that user, so a visit assigned to somebody else is
+ * invisible until All Tasks is selected.
+ */
+check('the All Tasks filter is selected before reading',
+  /getByText\(\/\^\\s\*all\\s\+tasks\\s\*\$\/i\)/.test(TASKS), true);
+check('...anchored, so "All Tasks Settings" cannot match',
+  /\^\\s\*all\\s\+tasks\\s\*\$/.test(TASKS), true);
+/*
+ * All five configured selectors reported "no match" while five appointments sat in plain sight. Guessing a
+ * sixth CSS selector is how the previous three attempts went; the TEXT is the stable thing, and it carries
+ * everything parseTaskTitle needs.
+ */
+check('rows are found by their text when no selector matches', /const rows = page\.getByText\(BOOKED\)/.test(TASKS), true);
+check('...only as a fallback, after the configured selectors',
+  TASKS.indexOf('for (const selector of rowSelectors)') < TASKS.indexOf('page.getByText(BOOKED)'), true);
+check('...and duplicates from nested elements are dropped', /seen\.has\(text\)/.test(TASKS), true);
+/*
+ * A text match gives no element to scope a click to, and the entire safety argument for completeTask is that
+ * the tick it clicks is provably inside the matched row. So such a task is readable and never completable.
+ */
+check('a text-found task is marked not completable', /completable: false/.test(TASKS), true);
+check('...and completeTask refuses it outright',
+  /task\.completable === false/.test(TASKS), true);
+check('...before it locates any row', TASKS.indexOf('task.completable === false')
+  < TASKS.indexOf('const row = page.locator(task.selector)'), true);
+check('...saying why, rather than failing silently',
+  /found by its text, so no row can be scoped for a click/.test(TASKS), true);
+
+console.log('\n--- and the report stops calling them the contact\'s tasks ---');
+/*
+ * "5 booked-appointment task(s) on the contact, none matching this visit" invites somebody to open the lead
+ * expecting five appointments and find none of them there.
+ */
+check('the count says whose list it is',
+  /lists the whole `\s*\+ "team's tasks, not just this contact's/.test(SCRAPER), true);
+/*
+ * Matched on the full old sentence, not the fragment: the comment above the fix quotes "on the contact" to
+ * explain what was wrong with it, and an assertion that trips over its own explanation is worse than none.
+ */
+check('...and no longer says "on the contact"',
+  /task\(s\) on the contact, none matching/.test(SCRAPER), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
