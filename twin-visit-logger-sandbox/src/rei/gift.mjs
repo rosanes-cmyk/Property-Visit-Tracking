@@ -59,6 +59,38 @@ const ORDER_TOTAL = /\border\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 const ITEM_TOTAL = /\bitem\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 const ORDER_NUMBER = /\border\s*#\s*(\d+)/i;
 
+/*
+ * The date the order was PLACED, from the note's own header — "Aug 5, 2026 | 4:36PM".
+ *
+ * Distinct from the delivery date, and both matter: the client wants the gift block complete, and "approved
+ * on the 5th, delivered on the 6th" is the real sequence. A month-name form is tried first because that is
+ * how REI stamps a note header, while "08/06/2026" inside the body is the DELIVERY date and must not be
+ * mistaken for it.
+ */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const NOTE_HEADER_DATE = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/i;
+
+/** 'MM/DD/YYYY' for the date the order was placed, or '' when the note carries no such stamp. */
+function orderedOn(raw) {
+  const m = raw.match(NOTE_HEADER_DATE);
+  if (!m) return '';
+  const month = MONTHS.indexOf(m[1].slice(0, 3).toLowerCase()) + 1;
+  if (!month) return '';
+  return `${String(month).padStart(2, '0')}/${String(Number(m[2])).padStart(2, '0')}/${m[3]}`;
+}
+
+/*
+ * Who owns and signs off a gift.
+ *
+ * The client's instruction: "gift approve by cheeryy since that is already automatic once it noted there is
+ * approved" — a gift order existing in REI IS the approval, and Cherry is the approver. Both columns are
+ * dropdowns limited to Cherry and Juan, so no other name can be written to them however the note reads.
+ *
+ * If the note names Juan as the one who placed it, he takes the owner column instead — he is on this order's
+ * billing and card. Otherwise it falls to Cherry, which is the standing arrangement.
+ */
+const APPROVERS = ['Cherry', 'Juan'];
+
 /**
  * What a note says about a gift: { status, sentDate, reason } — or {} when it says nothing about one.
  *
@@ -66,9 +98,13 @@ const ORDER_NUMBER = /\border\s*#\s*(\d+)/i;
  * fails the whole row write rather than just its own cell, which this project has already been bitten by
  * twice — Lead Source on G379 and "Thea, Cherry" on an owner.
  *
- * Deliberately NOT returned: Gift Approved By and Gift Approval Owner. Rob's card is signed "Juan" and the
- * billing name is Juan Diaz, but who PAID and who APPROVED are different facts, and the note was actually
- * added by a third person. Those two columns stay for a human — the same rule the dead-lead tags follow.
+ * Approval is included now, at the client's instruction: "gift approve by cheeryy since that is already
+ * automatic once it noted there is approved". A gift order sitting in REI IS the sign-off, so recording it
+ * is not a guess about a decision — the decision already happened and left this trace.
+ *
+ * The actual person who placed the order is kept in the reason text rather than squeezed into a dropdown
+ * that only accepts Cherry and Juan. Rob's was placed by Theavil Marie, who is in neither list, and a value
+ * outside a dropdown fails the whole row write.
  */
 export function giftFromNotes(notes) {
   const raw = Array.isArray(notes) ? notes.join('\n\n') : String(notes || '');
@@ -91,11 +127,30 @@ export function giftFromNotes(notes) {
   if (total) bits.push(`$${total[1]}`);
   const number = raw.match(ORDER_NUMBER);
   if (number) bits.push(`order #${number[1]}`);
+  const placed = orderedOn(raw);
+  if (placed) bits.push(`ordered ${placed}`);
   /*
    * The reason line carries the gift facts and nothing else. The note also holds the seller's home address
    * and phone number, and there is no reason for either to be copied into a second place.
    */
   if (bits.length) out.reason = `Gift ordered in REI — ${bits.join(' · ')}`;
+
+  /*
+   * The order date doubles as the approval date. The gift was signed off at the moment somebody placed it;
+   * there is no separate approval step in REI to read, and leaving the column blank while claiming the gift
+   * is approved would be the incomplete half the client objected to.
+   */
+  const placedOn = orderedOn(raw);
+  if (placedOn) out.approvalDate = placedOn;
+
+  /*
+   * Juan takes the owner column when the note names him — on Rob's order he is both the billing name and the
+   * card signature. Otherwise Cherry, which is the standing arrangement. Never anybody else: these are
+   * dropdowns.
+   */
+  const named = APPROVERS.find((who) => new RegExp(`\\b${who}\\b`, 'i').test(raw));
+  out.approvalOwner = named || 'Cherry';
+  out.approvedBy = 'Cherry';
 
   return out;
 }

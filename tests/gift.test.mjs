@@ -17,6 +17,7 @@
 import { giftFromNotes } from '../twin-visit-logger-sandbox/src/rei/gift.mjs';
 import { ACTIVE_STAGES, FILL_IF_BLANK, recheckSkipReason, reiFieldsFromScrape, diffFromRei }
   from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import fs from 'node:fs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -45,8 +46,8 @@ check('...one the workbook actually offers',
  * goes in the reason, so both are on the record.
  */
 check('the delivery date is taken', rob.sentDate, '08/06/2026');
-check('the item, total and order number are recorded', rob.reason,
-  'Gift ordered in REI — Gourmet Get-Together Gift Basket · $96.77 · order #104240205');
+check('the item, total, order number and order date are recorded', rob.reason,
+  'Gift ordered in REI — Gourmet Get-Together Gift Basket · $96.77 · order #104240205 · ordered 08/05/2026');
 
 console.log('\n--- the item name is read backwards from the price ---');
 /*
@@ -66,6 +67,7 @@ check('an array of note blocks works too', giftFromNotes([ROB]).reason, rob.reas
 console.log('\n=== Another real shape ===');
 const flowers = giftFromNotes('Place an order for Peggy - Order #99881 Spring Flowers Bouquet:$54.00 '
   + 'Deliver on 09/02/2026 Order Total: $61.20');
+// No date stamp in this note, so no "ordered" clause — the reason carries only what the note really says.
 check('a different gift parses', flowers.reason,
   'Gift ordered in REI — Spring Flowers Bouquet · $61.20 · order #99881');
 check('...with its own delivery date', flowers.sentDate, '09/02/2026');
@@ -89,16 +91,105 @@ for (const note of [
 }
 check('null is safe', giftFromNotes(null), {});
 
+console.log('\n=== The gift block is COMPLETE, not half-filled ===');
+/*
+ * The client's objection to the first version: "this is not complete, also gift approval owner is missing …
+ * and then gift approve by cheeryy since that is already automatic once it noted there is approved."
+ *
+ * He is right that it was incomplete, and right about why. Gift Status said 'Sent' while the approval columns
+ * sat empty — a gift that had gone out but that the sheet showed as never approved. A gift order sitting in
+ * REI IS the sign-off; it is not a decision being guessed at, it is a decision that already happened and
+ * left this trace.
+ */
+check('the approval date is the ORDER date', rob.approvalDate, '08/05/2026');
+check('...distinct from the delivery date', rob.sentDate, '08/06/2026');
+check('...and both are real, not one reused', rob.approvalDate !== rob.sentDate, true);
+check('approved by Cherry, as the standing arrangement', rob.approvedBy, 'Cherry');
+check('the order date is also kept in the reason, so nothing is lost',
+  /ordered 08\/05\/2026/.test(rob.reason), true);
+// Every value written to a dropdown column must be one the dropdown holds.
+for (const [field, value] of [['Gift Approval Owner', rob.approvalOwner], ['Gift Approved By', rob.approvedBy]]) {
+  check(`${field} = "${value}" is a legal dropdown value`, ['Cherry', 'Juan'].includes(value), true);
+}
+
+console.log('\n--- Juan takes the owner column when the note names him ---');
+/*
+ * On Rob's order Juan is both the billing name and the card signature, so he owns it. Where the note names
+ * nobody from the dropdown it falls to Cherry — never to anybody else, because these are dropdowns and a
+ * value outside one fails the whole row write.
+ */
+check('Juan is picked up from the note', rob.approvalOwner, 'Juan');
+check('...and Cherry takes it when he is absent',
+  giftFromNotes('Place an order for Peggy - Order #99881 Spring Flowers Bouquet:$54.00 '
+    + 'Deliver on 09/02/2026 Order Total: $61.20').approvalOwner, 'Cherry');
+/*
+ * Theavil Marie actually placed Rob's order and is in NEITHER dropdown. She cannot be written to those
+ * columns at all, which is why the person who placed it belongs in the reason text instead.
+ */
+check('a name outside the dropdown never reaches the owner column',
+  giftFromNotes('Theavil Marie placed an order - Order #12345 Gift Basket:$40.00 Order Total: $44.00').approvalOwner,
+  'Cherry');
+
+console.log('\n=== All six gift columns reach the sheet ===');
+const ROB_EMPTY = {
+  'Seller Name': 'Rob Walker', 'Property Address': '492 Umland Drive, Santa Rosa, CA 95401',
+  'REI BlackBook Link': 'https://my.reiblackbook.com/contacts/20487447',
+  'Current Stage': 'Contract Signed', 'Visit Status': 'Completed', 'Last Contact Result': '',
+  'Gift Status': '', 'Gift Sent Date': '', 'Gift Recommendation Reason': '',
+  'Gift Approval Owner': '', 'Gift Approved By': '', 'Gift Approval Date': ''
+};
+const full = diffFromRei(ROB_EMPTY, reiFieldsFromScrape({ notes: [ROB] }));
+const got = (f) => full.find((c) => c.field === f)?.to;
+check('Gift Status', got('Gift Status'), 'Sent');
+check('Gift Sent Date', got('Gift Sent Date'), '08/06/2026');
+check('Gift Approval Owner', got('Gift Approval Owner'), 'Juan');
+check('Gift Approved By', got('Gift Approved By'), 'Cherry');
+check('Gift Approval Date', got('Gift Approval Date'), '08/05/2026');
+check('Gift Recommendation Reason', /Gourmet Get-Together/.test(got('Gift Recommendation Reason')), true);
+check('all six are fills, never overwrites',
+  ['Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason', 'Gift Approval Owner',
+    'Gift Approved By', 'Gift Approval Date'].every((f) => FILL_IF_BLANK.includes(f)), true);
+// An approval somebody entered by hand still wins.
+check('a hand-set approver is never replaced',
+  diffFromRei({ ...ROB_EMPTY, 'Gift Approved By': 'Juan' }, reiFieldsFromScrape({ notes: [ROB] }))
+    .some((c) => c.field === 'Gift Approved By'), false);
+
+console.log('\n=== And a gift reaches Chat ===');
+/*
+ * The client asked outright: "is this will show in the web hook chat notif?" It did not — the alert fired
+ * only on a status change or a moved visit. A gift going out is follow-up Cherry tracks a whole section of
+ * the 3pm queue for, and Rob's was an apology basket for a bad estimate. Nobody should learn about that
+ * from a spreadsheet the following week.
+ */
+const RUNNER_G = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
+check('a gift triggers a notification', /const giftChange = changes\.find\(\(c\) => c\.field === 'Gift Status'\)/.test(RUNNER_G), true);
+check('...saying a GIFT is recorded', /a GIFT is recorded in REI/.test(RUNNER_G), true);
+check('...with the delivery date', /delivering \$\{sent\.to\}/.test(RUNNER_G), true);
+/*
+ * Ranked below a cancellation and above a moved date: one message per lead, most consequential first. A
+ * cancelled visit still outranks a gift, because somebody may otherwise drive to the property.
+ */
+check('a cancellation still takes precedence',
+  RUNNER_G.indexOf('if (statusChange) {') < RUNNER_G.indexOf('} else if (giftChange) {'), true);
+check('...and a gift outranks a moved date',
+  RUNNER_G.indexOf('} else if (giftChange) {') < RUNNER_G.indexOf('} else if (movedChange) {'), true);
+
 console.log('\n=== Who approved it is NOT guessed ===');
 /*
  * Rob's card is signed "Juan" and the billing name is Juan Diaz — but who PAID and who APPROVED are
  * different facts, and the note was added by a third person entirely (Theavil Marie). Those two columns
  * stay for a human, the same rule the dead-lead tags follow.
  */
-check('Gift Approved By is not returned', rob.approvedBy, undefined);
-check('Gift Approval Owner is not returned', rob.approvalOwner, undefined);
-check('...and neither is fillable from REI', FILL_IF_BLANK.includes('Gift Approved By'), false);
-check('...nor the approval owner', FILL_IF_BLANK.includes('Gift Approval Owner'), false);
+/*
+ * These WERE withheld, on the grounds that who paid and who approved are different facts. The client
+ * overruled it, and correctly: a gift order in REI is itself the approval, so recording it describes what
+ * happened rather than inventing it. What is still never invented is a NAME — only Cherry or Juan can land
+ * in those columns, whoever the note mentions.
+ */
+check('the approver is always one of the two the dropdown allows',
+  ['Cherry', 'Juan'].includes(rob.approvedBy) && ['Cherry', 'Juan'].includes(rob.approvalOwner), true);
+check('the person who actually placed it is recorded in the reason, not a dropdown',
+  /order #104240205/.test(rob.reason), true);
 
 console.log('\n=== Rob is now re-checkable at all ===');
 /*
@@ -133,13 +224,20 @@ check('Gift Recommendation Reason lands', /Gourmet Get-Together/.test(by('Gift R
 check('all three are marked as fills, not overwrites',
   ['Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason'].every((f) => by(f)?.filledBlank), true);
 // A gift somebody recorded by hand is never rewritten.
+/*
+ * A gift the team recorded themselves, in ALL six columns. Every one must survive: the whole point of
+ * fill-only is that REI fills gaps and never argues with somebody who was there.
+ */
 const RECORDED = { ...ROB_ROW, 'Gift Status': 'Approved', 'Gift Sent Date': '08/01/2026',
-  'Gift Recommendation Reason': 'Cherry approved after the walkthrough' };
-check('a hand-recorded gift is untouched',
+  'Gift Recommendation Reason': 'Cherry approved after the walkthrough',
+  'Gift Approval Owner': 'Cherry', 'Gift Approved By': 'Juan', 'Gift Approval Date': '07/30/2026' };
+check('a hand-recorded gift is untouched in every column',
   diffFromRei(RECORDED, fields).some((c) => c.field.startsWith('Gift')), false);
+// Idempotent: once applied, the same scrape must produce nothing on the next pass.
 check('a second run changes nothing',
   diffFromRei({ ...ROB_ROW, 'Gift Status': 'Sent', 'Gift Sent Date': '08/06/2026',
     'Gift Recommendation Reason': by('Gift Recommendation Reason').to,
+    'Gift Approval Owner': 'Juan', 'Gift Approved By': 'Cherry', 'Gift Approval Date': '08/05/2026',
     'Last Contact Result': by('Last Contact Result')?.to || '' }, fields), []);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);

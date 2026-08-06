@@ -362,6 +362,8 @@ try {
      * that quietly relocates itself is not the same as being told.
      */
     const movedChange = changes.find((c) => c.field === 'Visit Date' || c.field === 'Visit Time');
+    // A gift ranks below a cancellation but above a moved date: one message per lead, most consequential first.
+    const giftChange = changes.find((c) => c.field === 'Gift Status');
     const who = `${row['Seller Name'] || '(no name)'} · ${row['Property Address']}`;
     if (statusChange) {
       const when = String(row['Visit Date'] || '').trim();
@@ -369,6 +371,23 @@ try {
         `REI re-check: ${who} — visit ${when ? `on ${when} ` : ''}is now ${statusChange.to} in REI ` +
         `(was "${statusChange.from || 'blank'}"). Tracker, dashboard and calendar updated.`,
         { kind: statusChange.to === 'Canceled' ? 'warn' : 'ok' }
+      );
+    } else if (giftChange) {
+      /*
+       * A gift notifies too. The client asked directly: "is this will show in the web hook chat notif?"
+       *
+       * It did not — the alert fired only on a status change or a moved visit. But a gift going out is a
+       * FOLLOW-UP action Cherry tracks a whole section of the 3pm queue for, and it is the one kind of
+       * change here that somebody may need to speak to a seller about the same day. Rob Walker's was an
+       * apology basket for a bad estimate; nobody should learn about that from a spreadsheet next week.
+       */
+      const sent = changes.find((c) => c.field === 'Gift Sent Date');
+      await notifyChat(
+        `REI re-check: ${who} — a GIFT is recorded in REI` +
+        `${sent ? `, delivering ${sent.to}` : ''}. ` +
+        `${(changes.find((c) => c.field === 'Gift Recommendation Reason') || {}).to || ''}`.trim() +
+        ' Tracker and dashboard updated.',
+        { kind: 'ok' }
       );
     } else if (movedChange) {
       // Spell out both fields when both moved, so nobody has to infer the new time from the new date.

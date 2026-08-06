@@ -733,9 +733,15 @@ check('one filled and one named is handled per field',
 check('a blank from REI fills nothing', diffFromRei(AMELIA, reiFieldsFromScrape({})).length, 0);
 check('the fillable fields', FILL_IF_BLANK,
   ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
-    'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason']);
-// Who approved a gift is a workflow fact REI does not hold. See tests/gift.test.mjs.
-check('who approved the gift is NOT fillable', FILL_IF_BLANK.includes('Gift Approved By'), false);
+    'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason',
+    'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date']);
+/*
+ * The approval columns are filled, at the client's instruction: "gift approve by cheeryy since that is
+ * already automatic once it noted there is approved". A gift order in REI IS the sign-off, so recording it
+ * describes what happened. What is never invented is a NAME — only Cherry or Juan can reach those columns,
+ * because both are dropdowns. See tests/gift.test.mjs.
+ */
+check('who approved the gift IS fillable now', FILL_IF_BLANK.includes('Gift Approved By'), true);
 // They must stay OUT of RECHECKABLE, or the fill-only guarantee is gone.
 for (const f of FILL_IF_BLANK) check(`${f} is not overwritable`, RECHECKABLE.includes(f), false);
 check('a re-run after filling changes nothing',

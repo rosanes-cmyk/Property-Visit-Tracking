@@ -82,7 +82,13 @@ export const RECHECKABLE = ['Visit Date', 'Visit Time', 'Visit Status', 'Seller 
  * Assigned Visitor from the same REI field). Following it rather than inventing a second rule.
  */
 export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Offer Amount',
-  'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason'];
+  'Gift Status', 'Gift Sent Date', 'Gift Recommendation Reason',
+  /*
+   * The approval columns, at the client's instruction: "gift approve by cheeryy since that is already
+   * automatic once it noted there is approved". A gift order sitting in REI IS the sign-off. Leaving these
+   * blank while Gift Status said 'Sent' was the incomplete half he objected to.
+   */
+  'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date'];
 
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
@@ -396,6 +402,9 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   if (gift.status) out['Gift Status'] = gift.status;
   if (gift.sentDate) out['Gift Sent Date'] = gift.sentDate;
   if (gift.reason) out['Gift Recommendation Reason'] = gift.reason;
+  if (gift.approvalOwner) out['Gift Approval Owner'] = gift.approvalOwner;
+  if (gift.approvedBy) out['Gift Approved By'] = gift.approvedBy;
+  if (gift.approvalDate) out['Gift Approval Date'] = gift.approvalDate;
   return out;
 }
 
