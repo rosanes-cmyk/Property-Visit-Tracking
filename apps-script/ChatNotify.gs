@@ -656,12 +656,20 @@ function giftPending_(rec) {
    * over-correction that had a closed-out lead asking Cherry to approve a gift for a seller nobody is
    * pursuing. If the team does want apology gifts on lost leads, that is a decision to make deliberately.
    *
-   * The rest are about the ROW rather than its stage: no address to send anything to, a test row, and
-   * imported history the whole queue keeps out on volume grounds.
+   * Source = 'Import' does NOT exclude a gift either, and that took reading the live sheet to find.
+   *
+   * After the stage fix above, Rob Walker's gift STILL did not appear. His row is Source = 'Import' — he
+   * came in with the 373 rows recovered from the client's own workbook — and the queue drops imported rows
+   * on volume grounds. That argument is about a backlog of 373 leads all claiming attention at once. It does
+   * not transfer to gifts: a gift is money already spent on a named seller, there were exactly two in the
+   * whole sheet when this was written, and the section caps at five lines anyway. Worse, the tracker only
+   * began in July, so nearly every lead far enough along to be sent a gift is imported by definition — the
+   * exclusion was removing the section's whole subject matter.
+   *
+   * The remaining two are about the ROW: nowhere to send anything, and a test row.
    */
   if (!rec['Property Address']) return '';
   if (String(rec['Source'] || '').trim() === 'TEST') return '';
-  if (String(rec['Source'] || '').trim() === 'Import' && !CFG.DIGEST_INCLUDE_IMPORTED) return '';
   if (String(rec['Current Stage'] || '').trim() === 'Lost / Closed Out') return '';
 
   var status = String(rec['Gift Status'] || '').trim();

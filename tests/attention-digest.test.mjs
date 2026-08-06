@@ -449,8 +449,18 @@ console.log('\n=== Imported history stays OUT of the work queue ===');
 check('an imported row is excluded', bucket({ ...BASE, Source: 'Import' }), null);
 check('...and the reason says why',
   excludedFromDigest_({ ...BASE, Source: 'Import' }), 'imported history (pre-cutover)');
-check('an imported row owes no gift either',
-  giftPending_({ ...BASE, Source: 'Import', 'Gift Status': 'Recommended' }), '');
+/*
+ * A gift is the exception, and only a gift.
+ *
+ * The volume argument above is about 373 leads all claiming attention at once. It does not apply to a gift:
+ * money is already spent on a named seller, and the tracker only began in July, so a lead far enough along
+ * to be sent a gift is imported almost by definition. Excluding Import here was removing the section's
+ * whole subject matter — checked against the live sheet, where it was hiding Rob Walker's basket.
+ */
+check('an imported row DOES still owe a gift',
+  giftPending_({ ...BASE, Source: 'Import', 'Gift Status': 'Recommended', 'Gift Approval Owner': 'Cherry' }),
+  'gift recommended — awaiting approval from Cherry');
+check('...while its stage bucket stays excluded', bucket({ ...BASE, Source: 'Import' }), null);
 check('a dashboard-added lead is NOT excluded', bucket({ ...BASE, Source: 'Manual' }), 'upcomingVisit');
 check('a REI intake lead is NOT excluded', bucket({ ...BASE, Source: 'Intake' }), 'upcomingVisit');
 check('a scraper lead with no Source is NOT excluded', bucket({ ...BASE, Source: '' }), 'upcomingVisit');
@@ -603,10 +613,29 @@ check('so does one approved but not sent',
   'gift approved by Cherry on 2026-08-05 — not sent yet');
 /* The exclusions that DO still hold are about the row, not its stage. */
 check('a test row is still excluded', giftPending({ ...SIGNED, Source: 'TEST', 'Gift Status': 'Recommended' }), '');
-check('imported history is still excluded',
-  giftPending({ ...SIGNED, Source: 'Import', 'Gift Status': 'Recommended' }), '');
 check('a row with no address is still excluded — nowhere to send it',
   giftPending({ 'Gift Status': 'Recommended' }), '');
+
+/*
+ * Rob Walker's row, exactly as the live sheet holds it after the re-check wrote his gift.
+ *
+ * Three separate exclusions had to come off before this line could appear: the Contract Signed stage, the
+ * Import source, and — still outstanding — REI never gave up a delivery date, so the section says so
+ * instead of inventing one. This is the regression test for all three at once.
+ */
+check('Rob Walker, live: imported, signed, sent, no date',
+  giftPending({
+    'Property Address': '492 Umland Dr, Santa Rosa, CA 95401',
+    Source: 'Import',
+    'Current Stage': 'Contract Signed',
+    'Gift Status': 'Sent',
+    'Gift Sent Date': '',
+    'Gift Recommendation Reason': 'Gift ordered in REI — Gourmet Get-Together Gift Basket · order #104240205',
+    'Gift Approval Owner': 'Juan',
+    'Gift Approved By': 'Cherry',
+    'Gift Approval Date': '08/05/2026'
+  }),
+  'gift marked Sent but no Gift Sent Date recorded');
 
 console.log('\n--- a gift SENT is shown briefly, then drops off by itself ---');
 /*
