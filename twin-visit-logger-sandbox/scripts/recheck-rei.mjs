@@ -291,6 +291,8 @@ const unanswered = [];
 const closeOutConflicts = [];
 /* Leads where REI's stage is BEHIND the tracker's — a disagreement about where the deal is, for a person. */
 const stageConflicts = [];
+/* Leads REI HAS assigned, to somebody the workbook's dropdown does not hold. Fixable by adding the name. */
+const unmappedOwners = [];
 // Leads REI has already written off. Reported to a person, never acted on.
 const deadFlagged = [];
 /*
@@ -386,6 +388,24 @@ try {
      * Reporting it is the point. If the two systems disagree about where a deal is, one of them is wrong and
      * somebody has to say which.
      */
+    /*
+     * REI has an owner the workbook's dropdown will not accept. Reported, because otherwise it is invisible.
+     *
+     * The client: "why other is unassigned?" — and there was no way to tell from the output. mapOwner returns
+     * '' for a name the dropdown does not hold, the field is skipped, and a lead REI assigned to Theavil Marie
+     * looked exactly like one REI had never assigned. Only one of those two is fixable, and it is fixed by
+     * adding the name to the dropdown.
+     */
+    if (reiFields.__unmappedOwner && !text(row['Assigned Owner'])) {
+      const who = reiFields.__unmappedOwner;
+      console.log(`    REI assigns this to "${who}" — not a value the Assigned Owner dropdown accepts, `
+        + 'so nothing was written.');
+      unmappedOwners.push({ row, who });
+      auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
+        message: `${row['Seller Name'] || '(no name)'} — REI assigns this lead to "${who}", which is not a `
+          + 'value the Assigned Owner dropdown holds. The lead stays Unassigned until the name is added.' });
+    }
+
     const behind = stageBehindTracker(row['Current Stage'], reiFields['Current Stage']);
     if (behind) {
       stageConflicts.push({ row, reason: behind });
@@ -636,6 +656,24 @@ if (failures.length) {
   for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
     console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);
   }
+}
+
+if (unmappedOwners.length) {
+  /*
+   * Grouped by NAME rather than listed per lead. "Theavil Marie — 34 leads" is one dropdown edit; the same
+   * thing as 34 separate lines reads like 34 problems.
+   */
+  const byName = new Map();
+  for (const { row, who } of unmappedOwners) {
+    if (!byName.has(who)) byName.set(who, []);
+    byName.get(who).push(row.__rowNumber);
+  }
+  console.log(`\n${unmappedOwners.length} lead(s) are Unassigned only because REI's owner is not in the dropdown:`);
+  for (const [who, rows] of [...byName.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`  "${who}" — ${rows.length} lead(s), rows ${rows.slice(0, 8).join(', ')}`
+      + (rows.length > 8 ? ` and ${rows.length - 8} more` : ''));
+  }
+  console.log('Add the name to the Assigned Owner dropdown in the workbook, tell me, and they fill themselves.');
 }
 
 if (stageConflicts.length) {

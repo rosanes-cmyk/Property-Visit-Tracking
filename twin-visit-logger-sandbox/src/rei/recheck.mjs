@@ -549,6 +549,16 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
     const visitor = mapVisitor(scraped.assignedOwner);
     if (owner) out['Assigned Owner'] = owner;
     if (visitor) out['Assigned Visitor'] = visitor;
+    /*
+     * REI names somebody the dropdown does not hold. Say so — this is why "other is unassigned".
+     *
+     * The run said NOTHING about these: mapOwner returned '' and the field was simply skipped, so a lead REI
+     * had assigned to Theavil Marie looked identical to one REI had not assigned at all. The client could not
+     * tell the two apart by looking, and only one of them is fixable.
+     *
+     * It is carried out rather than logged here because this module is pure — the runner reports it.
+     */
+    if (!owner) out.__unmappedOwner = text(scraped.assignedOwner);
   }
 
   /*

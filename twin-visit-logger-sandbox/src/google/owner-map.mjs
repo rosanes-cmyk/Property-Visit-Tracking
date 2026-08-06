@@ -21,8 +21,35 @@
  * "Thea, Cherry" cannot simply be passed through — and why an unrecognised name must map to '' rather than
  * to a guess. REI's field is free text and holds whatever a person typed.
  */
-export const OWNER_VALUES = ['Jonathan', 'Kyle', 'Cherry', 'Juan', 'Arly', 'Matt', 'Darius', 'Danica',
-  'Team', 'Matt/Arly', 'Matt/Juan', 'Cherry/Matt'];
+/*
+ * The acquisitions team as it stands, set by the client: "add thea, also there should be combo of cherry and
+ * thea; remove kyle, Arly, Matt, Darius, Danica, Matt/Arly, Matt/Juan, Cherry/Matt, jonathan."
+ *
+ * THIS LIST MUST MATCH THE WORKBOOK'S OWN DROPDOWN EXACTLY. It is a copy of the sheet's data validation, not a
+ * substitute for it: a value outside the dropdown fails the WHOLE row write, not just its own cell, which this
+ * project has been bitten by twice. If the sheet's validation still offers Kyle and this list does not, a lead
+ * REI assigns to Kyle simply keeps whatever the cell already has — which is safe. The dangerous direction is
+ * the other one: a name here that the sheet does not accept.
+ *
+ * Removing a name does NOT clear it from rows that already carry it. Nothing here ever blanks a cell.
+ */
+export const OWNER_VALUES = ['Cherry', 'Juan', 'Thea', 'Team', 'Cherry/Thea'];
+
+/*
+ * What REI actually writes, mapped to what the dropdown accepts.
+ *
+ * Aliases exist because the word-boundary search cannot get there on its own:
+ *   "Theavil Marie"  the fuller name. \bThea\b does not match inside "Theavil" — there is no boundary after
+ *                    the 'a' — so without this she reads as nobody and the lead stays Unassigned.
+ *   "Thea, Cherry"   two people, and REI's own way of writing the pair. This is the exact value that nearly
+ *                    failed a whole batch write, so it now resolves to the combined dropdown value instead of
+ *                    being thrown away.
+ */
+const OWNER_ALIASES = [
+  [/\bthea(?:vil)?(?:\s+marie)?\s*(?:,|\/|&|and)\s*cherry\b/i, 'Cherry/Thea'],
+  [/\bcherry\s*(?:,|\/|&|and)\s*thea(?:vil)?(?:\s+marie)?\b/i, 'Cherry/Thea'],
+  [/\btheavil\b/i, 'Thea']
+];
 export const VISITOR_VALUES = ['Juan', 'Juan Diaz', 'Kyle', 'Cherry', 'Jonathan', 'Cesar', 'Jose Herrera',
   'Manny Morales', 'Lily', 'Alan Hernandez'];
 
@@ -59,6 +86,18 @@ export function mapOwner(raw, allowed = OWNER_VALUES) {
   // 1. The whole string is already a legal value, including the combined ones.
   const exact = allowed.find((a) => a.toLowerCase() === value.toLowerCase());
   if (exact) return exact;
+
+  /*
+   * 1b. REI's own wordings, checked BEFORE the name search below.
+   *
+   * Before it, so "Thea, Cherry" resolves to the pair rather than to whichever single name the search happens
+   * to reach first — the search has no way of knowing that two names separated by a comma mean both of them.
+   * Only applied when the alias target is actually in `allowed`, so the visitor column does not inherit
+   * owner-only values.
+   */
+  for (const [pattern, target] of OWNER_ALIASES) {
+    if (pattern.test(value) && allowed.includes(target)) return target;
+  }
 
   /*
    * 2. Find the first legal name INSIDE the string, longest candidates first.
