@@ -211,8 +211,19 @@ check('a blank cell', parseSheetDate(''), null);
 check('junk text', parseSheetDate('ASAP'), null);
 
 console.log('\n=== What REI says, in the sheet\'s own shape ===');
-check('a moved appointment',
-  reiFieldsFromScrape({ appointmentStartIso: '2026-08-08T14:00:00-07:00' }),
+/*
+ * A FIXED `now`, because the answer depends on whether the appointment is still ahead. Without it this
+ * assertion silently changes meaning on 9 August and starts failing on its own — the same trap as the gift
+ * visibility window.
+ */
+const AUG6 = new Date('2026-08-06T12:00:00-07:00');
+check('a moved appointment, still ahead',
+  reiFieldsFromScrape({ appointmentStartIso: '2026-08-08T14:00:00-07:00' }, { now: AUG6 }),
+  { 'Visit Date': '08/08/2026', 'Visit Time': '2:00 PM', 'Visit Status': 'Scheduled' });
+/* The same appointment once it has passed: the date is corrected, the status is left to whoever was there. */
+check('...and once it is in the past',
+  reiFieldsFromScrape({ appointmentStartIso: '2026-08-08T14:00:00-07:00' },
+    { now: new Date('2026-08-20T12:00:00-07:00') }),
   { 'Visit Date': '08/08/2026', 'Visit Time': '2:00 PM' });
 check('a cancellation in REI', reiFieldsFromScrape({ taskStatus: 'Cancelled' }), { 'Visit Status': 'Canceled' });
 /*
@@ -1347,6 +1358,44 @@ check('the day comparison uses the visit timezone',
 /* A row that already HAS an event is left to the change-driven path, so nothing is rewritten every run. */
 check('a row with an event id does not re-sync on its own',
   /calendarAffected\(changes\) \|\| missingEvent/.test(RUNNER), true);
+
+console.log('\n=== A rebooked visit goes back to Scheduled ===');
+/*
+ * Sara Davenport. Her visit on the 5th was cancelled; Cherry rebooked her for Aug 7 at 10am and REI says so.
+ * The re-check picked up the new date and time and left Visit Status on 'Canceled' — so the board would have
+ * shown her cancelled WITH a future visit date, sitting under "Cancelled — Close Out or Rebook" for a visit
+ * that is actually going ahead.
+ *
+ * That is the same drift this whole feature exists to correct, one field along: REI knew, the board did not.
+ */
+const NOW_FIXED = new Date('2026-08-06T12:00:00-07:00');
+const fromRei = (iso, taskStatus) =>
+  reiFieldsFromScrape({ appointmentStartIso: iso, taskStatus }, { now: NOW_FIXED });
+check("a future appointment sets Visit Status to Scheduled",
+  fromRei('2026-08-07T10:00:00-07:00')['Visit Status'], 'Scheduled');
+check('...with the new date and time', [fromRei('2026-08-07T10:00:00-07:00')['Visit Date'],
+  fromRei('2026-08-07T10:00:00-07:00')['Visit Time']], ['08/07/2026', '10:00 AM']);
+check("...and today's counts as future", fromRei('2026-08-06T15:00:00-07:00')['Visit Status'], 'Scheduled');
+/*
+ * FUTURE OR TODAY only. A past appointment with no completion signal must NOT be flipped back to Scheduled:
+ * somebody who was there may have marked it Completed, and Visit Status is a field REI wins on, so this would
+ * overwrite them.
+ */
+check('a PAST appointment does not set a status', 'Visit Status' in fromRei('2026-08-01T11:00:00-07:00'), false);
+check('...but still corrects the date', fromRei('2026-08-01T11:00:00-07:00')['Visit Date'], '08/01/2026');
+/* REI's own task status still wins over the date, in both directions. */
+check('REI saying cancelled still wins',
+  fromRei('2026-08-07T10:00:00-07:00', 'Canceled')['Visit Status'], 'Canceled');
+check('...and REI saying completed still wins',
+  fromRei('2026-08-01T11:00:00-07:00', 'Completed')['Visit Status'], 'Completed');
+/* End to end: the cancelled row is corrected rather than left contradicting itself. */
+const SARA = { 'Seller Name': 'Sara Davenport', 'Property Address': '340 Vallejo Dr, Apt 83, Millbrae, CA 94030',
+  'Current Stage': 'Visit Scheduled', 'Visit Status': 'Canceled', 'Visit Date': '08/05/2026',
+  'Visit Time': '2:00 PM' };
+const rebooked = diffFromRei(SARA, fromRei('2026-08-07T10:00:00-07:00'));
+check('her row stops saying Canceled',
+  rebooked.find((c) => c.field === 'Visit Status')?.to, 'Scheduled');
+check('...and the calendar is told', calendarAffected(rebooked), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

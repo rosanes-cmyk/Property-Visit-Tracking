@@ -536,7 +536,7 @@ export function sameFieldValue(field, from, to) {
  * Deliberately mirrors visitToRecord's formats ('MM/dd/yyyy', 'h:mm a') so a diff compares like with
  * like. Comparing a Luxon object against a formatted cell would report a change on every single run.
  */
-export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
+export function reiFieldsFromScrape(scraped, { zone = ZONE, now = new Date() } = {}) {
   const startRaw = scraped.appointmentStartIso ? new Date(scraped.appointmentStartIso) : null;
   const start = startRaw && !Number.isNaN(startRaw.getTime()) ? startRaw : null;
   const status = text(scraped.taskStatus);
@@ -570,6 +570,20 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
   } else if (start) {
     out['Visit Date'] = fmtSheetDate(start, zone);
     out['Visit Time'] = fmtSheetTime(start, zone);
+    /*
+     * A visit REI has booked for a day that has not happened yet IS Scheduled.
+     *
+     * Sara Davenport is why. Her visit on the 5th was cancelled; Cherry rebooked her for Aug 7 at 10am and REI
+     * says so. The re-check picked up the new date and time and left Visit Status on 'Canceled' — so the board
+     * would have shown her cancelled with a future visit date, sitting under "Cancelled — Close Out or Rebook"
+     * for a visit that is actually going ahead. That is the same drift this whole feature exists to correct,
+     * one field along.
+     *
+     * FUTURE OR TODAY only. A past appointment with no completion signal must not be flipped back to
+     * Scheduled: it may already be marked Completed by somebody who was there, and Visit Status is a field REI
+     * wins on, so this would overwrite them.
+     */
+    if (dayKey(start, zone) >= dayKey(now, zone)) out['Visit Status'] = 'Scheduled';
   }
 
   for (const [field, value] of [['Seller Name', scraped.sellerName], ['Phone', scraped.phone], ['Email', scraped.email]]) {
