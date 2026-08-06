@@ -317,7 +317,24 @@ var SECTIONS=[
   ['⚠ SLA / Service Failures',function(r){return !!r.sla;}],
   ['🗓 Scheduling Conflicts',function(r){return r.conflict;}],
   ['Contracts Possible This Week',function(r){return ['Verbal Agreement','Contract Sent','Active Negotiation'].indexOf(r.stage)>=0;}],
-  ['Upcoming Visits (Scheduled)',function(r){return r.stage==='Visit Scheduled';}],
+  /*
+   * A cancelled visit leaves this section by itself.
+   *
+   * The client: "the card should automatic move as well where that should be move, it should be automated
+   * right?" Sara Davenport sat here under "Upcoming Visits" for a visit that had been called off, so the
+   * section read as three visits coming up when one was off.
+   *
+   * The move is driven by VISIT STATUS, which REI and the team both set. Current Stage — the thing that
+   * decides whether a lead is dead — is still only ever moved by a person, so a lead cannot be quietly
+   * written off by a display rule. Same split, and same section name, as attentionBucket_ in ChatNotify.gs,
+   * so the board and the 3pm card cannot tell different stories about one lead.
+   */
+  ['Upcoming Visits (Scheduled)',function(r){
+    return r.stage==='Visit Scheduled' && r.visitStatus!=='Canceled' && r.visitStatus!=='Reschedule Needed';
+  }],
+  ['Cancelled — Rebook or Close Out',function(r){
+    return r.visitStatus==='Canceled' || r.visitStatus==='Reschedule Needed';
+  }],
   ['Visited — No Offer Decision',function(r){return r.stage==='Visit Completed — Needs Review';}],
   ['Offer Preparation',function(r){return r.stage==='Offer Preparation';}],
   ['Offer Sent — Follow-Up Due',function(r){return r.stage==='Offer Sent';}],

@@ -3361,6 +3361,20 @@ var DIGEST_LINES_PER_SECTION = 5;
 var ATTENTION_BUCKETS = [
   { key: 'upcomingVisit', icon: '📅', title: 'Upcoming Visit', stage: 'Visit Scheduled',
     action: 'Confirm the visit is going ahead. Afterwards mark it Completed or Canceled.' },
+  /*
+   * Cancelled visits get their OWN section, and move into it by themselves.
+   *
+   * The client: "the card should automatic move as well where that should be move, it should be automated
+   * right?" He is right, and the distinction that makes it safe is between MOVING a card and CLOSING a
+   * deal. Sara Davenport sat under "Upcoming Visit — confirm the visit is going ahead" for a visit that had
+   * been called off, which made the section read as three visits coming up when one was off.
+   *
+   * So the card moves on VISIT STATUS, which REI and the team both set, while Current Stage — the thing
+   * that decides whether a lead is dead — is still only ever moved by a person. The lead stops cluttering
+   * the visit list and still cannot be quietly written off.
+   */
+  { key: 'needsRebooking', icon: '🚫', title: 'Cancelled — Rebook or Close Out', stage: '',
+    action: 'Agree a new date with the seller, or move the lead to Lost / Closed Out.' },
   { key: 'needsDecision', icon: '📋', title: 'Completed Visit — Needs Next Course of Action', stage: 'Visit Completed — Needs Review',
     action: 'Decide: make an offer, pass, or move to nurture — and set the next action.' },
   { key: 'offerPending', icon: '⏱', title: 'Pending Offer — ASAP', stage: 'Offer Preparation',
@@ -3461,12 +3475,17 @@ function attentionBucket_(rec, today) {
        */
       var at = on ? on.getTime() : Infinity;
 
+      /*
+       * Out of Upcoming Visit and into its own section, automatically. The key is 'needsRebooking', not
+       * b.key, which is what actually moves the card — see the bucket comment above for why this is done on
+       * Visit Status and never by rewriting Current Stage.
+       */
       if (status === 'Canceled') {
-        return { key: b.key, attention: true, sort: at,
+        return { key: 'needsRebooking', attention: true, sort: at,
           reason: 'CANCELED' + was + ' — rebook it or close the lead out' };
       }
       if (status === 'Reschedule Needed') {
-        return { key: b.key, attention: true, sort: at,
+        return { key: 'needsRebooking', attention: true, sort: at,
           reason: 'RESCHEDULE NEEDED' + was + ' — agree a new date with the seller' };
       }
 

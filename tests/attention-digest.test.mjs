@@ -54,29 +54,49 @@ const BASE = {
   'Assigned Owner': 'Juan'
 };
 
-console.log("=== Cherry's five stages, plus gifts, in her order ===");
-check('six buckets', ATTENTION_BUCKETS.length, 6);
-check('in her reading order', ATTENTION_BUCKETS.map((b) => b.title), [
+console.log("=== Cherry's five stages, plus gifts — and one section she did not ask for ===");
+/*
+ * SEVEN sections now, and this is a deliberate departure from Cherry's sign-off that she needs to be told
+ * about. She wrote "notification should be like this only" and named five stages plus gifts.
+ *
+ * The client then asked for cancelled visits to leave the visit list on their own: "the card should
+ * automatic move as well where that should be move, it should be automated right?" Sara Davenport was
+ * sitting under "Upcoming Visit — confirm the visit is going ahead" for a visit that had been called off,
+ * so the section read as three visits coming up when one was off.
+ *
+ * It is inserted directly after Upcoming Visit rather than at the end, because it IS the visit list's
+ * overflow — a reader who has just looked at what is coming up should see next what was called off.
+ */
+check('seven buckets', ATTENTION_BUCKETS.length, 7);
+check('in reading order', ATTENTION_BUCKETS.map((b) => b.title), [
   'Upcoming Visit',
+  'Cancelled — Rebook or Close Out',
   'Completed Visit — Needs Next Course of Action',
   'Pending Offer — ASAP',
   'Offer Sent',
   'Still Negotiating',
   'Gift Follow-Up'
 ]);
-check('each of the five names one stage', ATTENTION_BUCKETS.slice(0, 5).map((b) => b.stage), [
+/* The five STAGE-driven buckets, which are still exactly Cherry's five. */
+const STAGE_BUCKETS = ATTENTION_BUCKETS.filter((b) => b.stage);
+check("Cherry's five stages are untouched", STAGE_BUCKETS.map((b) => b.stage), [
   'Visit Scheduled',
   'Visit Completed — Needs Review',
   'Offer Preparation',
   'Offer Sent',
   'Active Negotiation'
 ]);
-check('the gift bucket is not tied to a stage', ATTENTION_BUCKETS[5].stage, '');
+/*
+ * The two stage-less buckets are the ones that route on something else: gifts on Gift Status, cancellations
+ * on Visit Status. Neither may name a stage, or a lead would land in two sections at once.
+ */
+check('gifts and cancellations are not tied to a stage',
+  ATTENTION_BUCKETS.filter((b) => !b.stage).map((b) => b.key), ['needsRebooking', 'giftFollowUp']);
 check('every bucket names one action', ATTENTION_BUCKETS.every((b) => /\.$/.test(b.action)), true);
 // The stages must be real values of the workbook's own dropdown, or a bucket can never fire.
 const STAGES = (read('apps-script/Config.gs').match(/'Current Stage':\s*\[([^\]]+)\]/) || [])[1] || '';
 check('every stage exists in the Current Stage dropdown',
-  ATTENTION_BUCKETS.slice(0, 5).every((b) => STAGES.includes(`'${b.stage}'`)), true);
+  STAGE_BUCKETS.every((b) => STAGES.includes(`'${b.stage}'`)), true);
 
 console.log('\n=== 1. Upcoming Visit ===');
 check('a visit booked for next week', bucket(BASE), 'upcomingVisit');
@@ -109,7 +129,12 @@ console.log('\n--- a cancelled visit is LISTED here, and says so ---');
  * exactly what somebody has to act on.
  */
 const canceled = { ...BASE, 'Visit Status': 'Canceled' };
-check('it stays in Upcoming Visit', bucket(canceled), 'upcomingVisit');
+/*
+ * It used to stay in Upcoming Visit, flagged. The client asked for the card to move itself, and it now does:
+ * out of the visit list and into its own section, driven by VISIT STATUS. Current Stage is untouched, so the
+ * lead still cannot be quietly written off by a display rule.
+ */
+check('it moves itself out of Upcoming Visit', bucket(canceled), 'needsRebooking');
 check('and reads as cancelled, not as a visit going ahead',
   reason(canceled), 'CANCELED — was booked for Aug 12, 2026 — rebook it or close the lead out');
 check('a past cancelled visit is NOT called overdue',
@@ -236,9 +261,14 @@ check('a nurture lead still owes its gift',
 
 console.log('\n=== One lead, one stage bucket ===');
 // The five stages are mutually exclusive, so this is true by construction rather than by a tie-break.
-const everyStage = ATTENTION_BUCKETS.slice(0, 5).map((b) => bucket({ ...BASE, 'Current Stage': b.stage }));
-check('each stage lands in its own bucket', everyStage, ATTENTION_BUCKETS.slice(0, 5).map((b) => b.key));
+const everyStage = STAGE_BUCKETS.map((b) => bucket({ ...BASE, 'Current Stage': b.stage }));
+check('each stage lands in its own bucket', everyStage, STAGE_BUCKETS.map((b) => b.key));
 check('no stage lands in two', new Set(everyStage).size, 5);
+/*
+ * And the cancelled section cannot be reached by a stage at all — only by Visit Status. Otherwise a lead
+ * would appear twice: once for where it sits in the pipeline and once for being called off.
+ */
+check('no stage routes to the cancelled section', everyStage.includes('needsRebooking'), false);
 
 console.log('\n=== The posted card ===');
 const post = CHAT.slice(CHAT.indexOf('function sendAttentionDigestToChat'));
@@ -490,6 +520,45 @@ check('...and so is whose timezone applies', /SPREADSHEET'S timezone/.test(COMBI
 // Both firings run the same function, so neither can drift into a different format.
 check('both times run the same digest function',
   (COMBINED_H.match(/newTrigger\('sendAttentionDigestToChat'\)/g) || []).length, 1);
+
+console.log('\n=== A cancelled visit MOVES itself out of Upcoming Visit ===');
+/*
+ * The client: "the card should automatic move as well where that should be move, it should be automated
+ * right?"
+ *
+ * Sara Davenport sat under "Upcoming Visit — confirm the visit is going ahead" for a visit that had been
+ * called off, so the section read as three visits coming up when one was off. The distinction that makes
+ * automating this safe is between MOVING a card and CLOSING a deal: the move is driven by Visit Status,
+ * which REI and the team both set, while Current Stage — the field that decides whether a lead is dead — is
+ * still only ever moved by a person.
+ */
+const CHAT_C = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
+check('there is a section for them', /title: 'Cancelled — Rebook or Close Out'/.test(CHAT_C), true);
+check('...and it tells you both options',
+  /Agree a new date with the seller, or move the lead to Lost \/ Closed Out\./.test(CHAT_C), true);
+check('a cancelled visit is routed there, not to its stage bucket',
+  /if \(status === 'Canceled'\) \{\s*\n\s*return \{ key: 'needsRebooking'/.test(CHAT_C), true);
+check('...and so is reschedule-needed',
+  /if \(status === 'Reschedule Needed'\) \{\s*\n\s*return \{ key: 'needsRebooking'/.test(CHAT_C), true);
+/*
+ * The safety line: nothing here writes Current Stage. Moving a card is a display decision; closing a lead
+ * out is a business one, and the automation still refuses the second.
+ */
+check('the move never rewrites Current Stage',
+  /key: 'needsRebooking'[\s\S]{0,400}Current Stage'\] =/.test(CHAT_C), false);
+
+console.log('\n--- and the dashboard moves it the same way ---');
+/*
+ * Both views must tell the same story about one lead. A card that has left Upcoming Visit on the 3pm
+ * message but still sits in it on the board is worse than neither moving.
+ */
+const DASH_C = fs.readFileSync(new URL('../apps-script/Dashboard.html', import.meta.url), 'utf8');
+check('Upcoming Visits excludes cancelled',
+  /r\.stage==='Visit Scheduled' && r\.visitStatus!=='Canceled' && r\.visitStatus!=='Reschedule Needed'/.test(DASH_C), true);
+check('...and there is a section to receive them',
+  /\['Cancelled — Rebook or Close Out',function\(r\)\{/.test(DASH_C), true);
+check('the two views use the same section name',
+  /Cancelled — Rebook or Close Out/.test(CHAT_C) && /Cancelled — Rebook or Close Out/.test(DASH_C), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
