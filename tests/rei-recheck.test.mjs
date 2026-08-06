@@ -280,9 +280,35 @@ const RUNNER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/rec
 // asserted below; here it is enough that the tiers exist and that the address is not tried first.
 check('seller names are tried first', /\['seller name',/.test(RUNNER), true);
 check('the address is only a fallback', /\['property address',/.test(RUNNER), true);
-check('it says which tier matched', /matched \$\{matched\.length\} on \$\{matchedOn\}/.test(RUNNER), true);
+check('it says which tier matched', /matched \$\{matched\.length\} row\(s\): \$\{hitOn\.join/.test(RUNNER), true);
 check('and it stops at the first tier that hits',
-  /if \(matched\.length\) \{ matchedOn = label; break; \}/.test(RUNNER), true);
+  /if \(found\.length\) \{ on = label; break; \}/.test(RUNNER), true);
+
+/*
+ * SEVERAL leads at once. The client, pointing at a card of eight: "the picture only i gave it, that should be
+ * for now, not all." Eight separate commands means eight separate waits for the REI lock, and the eight are
+ * one job.
+ */
+check('--only splits on commas', /ONLY\.split\(','\)/.test(RUNNER), true);
+check('...trimming each part, so "a, b" works', /\.map\(\(part\) => part\.trim\(\)\)/.test(RUNNER), true);
+check('...and a pasted URL still reduces to its contact id',
+  /part\.match\(\/contacts\\\/\(\\d\+\)\\\/\)/.test(RUNNER)
+  || /contacts\\\/\(\\d\+\)/.test(RUNNER), true);
+/*
+ * Merged by row number. A needle matching two rows, or two needles matching one row, must not check a lead
+ * twice — that would double the REI page loads and could report the same change twice in the audit log.
+ */
+check('results are deduped by row', /const byRow = new Map\(\)/.test(RUNNER), true);
+check('...and kept in sheet order', /sort\(\(a, b\) => a\.__rowNumber - b\.__rowNumber\)/.test(RUNNER), true);
+/*
+ * A needle that matched nothing is named on its own. With one needle that was the whole story; with eight it
+ * is the difference between "seven are queued and Chan is not in the tracker" and a bare count that reads as
+ * though everything was found.
+ */
+check('a needle that found nothing is named individually',
+  /NOT FOUND: \$\{missed\.map/.test(RUNNER), true);
+check('...and the advice for a lead that was never logged survives',
+  /add-visit-from-rei\.mjs/.test(RUNNER), true);
 check('eligibility is still enforced', /const why = recheckSkipReason\(row\);/.test(RUNNER), true);
 check('...and it says what it dropped and why', /skipping \$\{row\['Seller Name'\]\} — \$\{why\}/.test(RUNNER), true);
 check('the coverage limit is stated, not buried in a tally',
@@ -311,11 +337,11 @@ console.log('\n--- and a REI contact id can be named directly ---');
 check('the REI id/link tier exists, between seller and address',
   /\['REI contact id \/ link', \(r\) => `\$\{r\['REI BlackBook Link'\] \|\| ''\} \$\{r\['REI Record ID'\] \|\| ''\}`\]/.test(RUNNER), true);
 check('a pasted URL is reduced to its contact id',
-  /const needle = \(ONLY\.match\(\/contacts\\\/\(\\d\+\)\/\) \|\| \[null, ONLY\]\)\[1\]/.test(RUNNER), true);
-check('the tier that matched is named in the output', /matched \$\{matched\.length\} on \$\{matchedOn\}/.test(RUNNER), true);
+  /\.map\(\(part\) => \(part\.match\(\/contacts\\\/\(\\d\+\)\/\) \|\| \[null, part\]\)\[1\]\)/.test(RUNNER), true);
+check('the tier that matched is named in the output',
+  /matched \$\{matched\.length\} row\(s\): \$\{hitOn\.join/.test(RUNNER), true);
 // "not in the tracker" is a different problem from "ineligible", and needs a different action.
-check('a contact that is not tracked at all says so',
-  /NOT FOUND in the tracker/.test(RUNNER), true);
+check('a contact that is not tracked at all says so', /--only → NOT FOUND: /.test(RUNNER), true);
 check('...and names the likely cause rather than leaving it a mystery',
   /the booking email never arrived or never/.test(RUNNER), true);
 check('...and hands over the command that adds it',

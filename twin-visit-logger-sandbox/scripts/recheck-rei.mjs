@@ -6,6 +6,7 @@
  *   node scripts/recheck-rei.mjs --limit 40      <- more per run (default 20)
  *   node scripts/recheck-rei.mjs --limit 200 --wait --yes   <- sweep everything due, queueing for REI
  *   node scripts/recheck-rei.mjs --only "Jose"   <- one lead, matched on seller or address
+ *   node scripts/recheck-rei.mjs --only "Schatz,Thatcher,Toledo" --yes   <- several, one queue for REI
  *
  * Why this exists: the chain was one-way. A booking email arrived, REI was read once, the row and the
  * calendar event were written, and nothing ever looked again — so a visit completed, cancelled or moved
@@ -146,16 +147,52 @@ if (ONLY) {
     ['REI contact id / link', (r) => `${r['REI BlackBook Link'] || ''} ${r['REI Record ID'] || ''}`],
     ['property address', (r) => String(r['Property Address'] || '')]
   ];
-  // A pasted URL is matched on its contact id, so the trailing slash or query string cannot spoil it.
-  const needle = (ONLY.match(/contacts\/(\d+)/) || [null, ONLY])[1];
-  let matched = [];
-  let matchedOn = '';
-  for (const [label, read] of TIERS) {
-    matched = rows.filter((r) => read(r).toLowerCase().includes(needle));
-    if (matched.length) { matchedOn = label; break; }
+  /*
+   * SEVERAL names, comma-separated — because the request is usually a screenshot, not one lead.
+   *
+   * The client, pointing at a card of eight: "the picture only i gave it, that should be for now, not all."
+   * Eight separate commands means eight separate waits for the REI lock, and the eight are one job.
+   *
+   *   --only "Schatz,Thatcher,Toledo"
+   *
+   * A single name behaves exactly as before, so nothing already documented changes. Each part is matched on
+   * its own through the same tiers, and the results are merged by row number so a needle matching two rows,
+   * or two needles matching one, cannot double-check a lead.
+   */
+  const needles = ONLY.split(',')
+    .map((part) => part.trim())
+    // A pasted URL is matched on its contact id, so a trailing slash or query string cannot spoil it.
+    .map((part) => (part.match(/contacts\/(\d+)/) || [null, part])[1])
+    .filter(Boolean);
+  const byRow = new Map();
+  const hitOn = [];
+  const missed = [];
+  for (const needle of needles) {
+    let found = [];
+    let on = '';
+    for (const [label, read] of TIERS) {
+      found = rows.filter((r) => read(r).toLowerCase().includes(needle));
+      if (found.length) { on = label; break; }
+    }
+    if (!found.length) { missed.push(needle); continue; }
+    hitOn.push(`"${needle}" → ${found.length} on ${on}`);
+    for (const r of found) byRow.set(r.__rowNumber, r);
+  }
+  const matched = [...byRow.values()].sort((a, b) => a.__rowNumber - b.__rowNumber);
+  const needle = needles.join(', ');
+  /*
+   * A needle that matched nothing is named individually. With one needle that was the whole story; with eight
+   * it is the difference between "seven leads are queued and Chan is not in the tracker" and a bare count that
+   * looks like everything was found.
+   */
+  if (missed.length) {
+    console.log(`\n--only → NOT FOUND: ${missed.map((m) => `"${m}"`).join(', ')}`);
+    console.log('  No row has that seller name, REI contact id, or address. If one of those is a REI contact');
+    console.log('  you expected to be tracked, it was never logged — the booking email never arrived or never');
+    console.log('  processed. Add it with:  node scripts/add-visit-from-rei.mjs "<the REI contact URL>"');
   }
   if (matched.length) {
-    console.log(`\n--only "${needle}" → matched ${matched.length} on ${matchedOn}`);
+    console.log(`\n--only matched ${matched.length} row(s): ${hitOn.join(' · ')}`);
   } else {
     /*
      * Say that the lead is not in the tracker, rather than "matched 0 on address".
@@ -164,10 +201,7 @@ if (ONLY) {
      * arrived, or it arrived and failed — which is a different problem from a lead being ineligible, and
      * needs a different action.
      */
-    console.log(`\n--only "${needle}" → NOT FOUND in the tracker.`);
-    console.log('  No row has this seller name, REI contact id, or address. If that is a REI contact you');
-    console.log('  expected to be tracked, it was never logged — the booking email never arrived or never');
-    console.log('  processed. Add it with:  node scripts/add-visit-from-rei.mjs "<the REI contact URL>"');
+    console.log(`\n--only "${needle}" → nothing to check.`);
   }
 
   const eligible = [];
