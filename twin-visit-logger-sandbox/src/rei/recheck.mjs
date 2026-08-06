@@ -90,6 +90,32 @@ export const FILL_IF_BLANK = ['Assigned Owner', 'Assigned Visitor', 'Approved Of
    */
   'Gift Approval Owner', 'Gift Approved By', 'Gift Approval Date'];
 
+/*
+ * The sentence the automation writes for a gift, and the only one it is allowed to replace.
+ *
+ * Fill-if-blank is right for a gift reason a person wrote and wrong for one this code wrote badly. Marlene's
+ * said "Gift ordered in REI — ordered 08/04/2026" and could never improve, because by the time the parser
+ * could read her order number and total the cell was no longer empty.
+ */
+const GIFT_REASON_PREFIX = /^gift ordered in REI\b/i;
+
+/**
+ * Whether a gift reason already in the sheet may be replaced by `next`.
+ *
+ * Three conditions, all required: the existing text is the automation's own sentence, the new one is too, and
+ * the new one says strictly more. Anything a human typed fails the first, so it survives untouched — the same
+ * asymmetry that protects a named owner. Equal-length text fails the third, which keeps a re-check idempotent
+ * instead of rewriting the same cell every twenty minutes.
+ */
+export function giftReasonUpgradable(current, next) {
+  const now = String(current == null ? '' : current).trim();
+  const to = String(next == null ? '' : next).trim();
+  if (!now || !to) return false;                    // blank is fill-if-blank's job, not this one
+  if (!GIFT_REASON_PREFIX.test(now)) return false;  // somebody's own words
+  if (!GIFT_REASON_PREFIX.test(to)) return false;
+  return to.length > now.length;
+}
+
 export const STAGE_ADVANCE_FROM = 'Visit Scheduled';
 export const STAGE_ON_COMPLETION = 'Visit Completed — Needs Review';
 
@@ -467,6 +493,23 @@ export function diffFromRei(row, reiFields) {
     const to = text(reiFields[field]);
     if (!to || text(row[field])) continue;
     changes.push({ field, from: '', to, filledBlank: true });
+  }
+
+  /*
+   * The gift reason is allowed to improve on ITSELF, and on nothing else.
+   *
+   * Marlene Martin's read "Gift ordered in REI — ordered 08/04/2026" and stopped there, because the parser
+   * of the day could not see an Amazon-worded order number or total. Once it could, fill-if-blank meant the
+   * complete version — the item, the price, the order number — could never land: the cell was no longer
+   * empty. The card was left announcing a gift it could not name.
+   *
+   * giftReasonUpgradable is why this is not a licence to overwrite. It requires the existing text to be the
+   * automation's own sentence and the replacement to say strictly more. "Cherry approved after the
+   * walkthrough" is somebody's own note and is never touched, exactly as an owner's name is not.
+   */
+  const reason = text(reiFields['Gift Recommendation Reason']);
+  if (giftReasonUpgradable(text(row['Gift Recommendation Reason']), reason)) {
+    changes.push({ field: 'Gift Recommendation Reason', from: text(row['Gift Recommendation Reason']), to: reason });
   }
 
   if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {

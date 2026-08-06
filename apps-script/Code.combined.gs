@@ -3619,7 +3619,14 @@ function giftPending_(rec) {
     var age = Math.round((today_().getTime() - sentOn.getTime()) / 86400000);
     if (age < 0) return 'gift out for delivery on ' + fmt_(sentOn);
     if (age <= GIFT_SENT_VISIBLE_DAYS) {
-      var what = String(rec['Gift Recommendation Reason'] || '').trim();
+      /*
+       * "gift SENT Aug 4 — Gift ordered in REI — ordered 08/04/2026 — nothing to do" was the real line, and
+       * it says "gift ordered in REI" to a reader who has just been told the gift was sent. The reason column
+       * carries that prefix because it has to stand alone in the sheet; on the card it is noise, so it comes
+       * off here rather than being left out of the column.
+       */
+      var what = String(rec['Gift Recommendation Reason'] || '').trim()
+        .replace(/^gift ordered in REI\s*[—-]\s*/i, '');
       return 'gift SENT ' + fmt_(sentOn) + (what ? ' — ' + what : '') + ' — nothing to do, for your awareness';
     }
     return '';

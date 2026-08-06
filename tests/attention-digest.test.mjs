@@ -668,5 +668,28 @@ check('no gift status at all is silent', giftPending({ ...SIGNED }), '');
 check('the visibility window is one named constant',
   /var GIFT_SENT_VISIBLE_DAYS = 3;/.test(CHAT), true);
 
+console.log('\n--- the card does not tell you a sent gift was ordered ---');
+/*
+ * The real line was "gift SENT Aug 4, 2026 — Gift ordered in REI — ordered 08/04/2026 — nothing to do",
+ * which says "gift ordered in REI" to somebody who has just been told the gift was sent. The reason column
+ * carries that prefix because it has to stand alone in the sheet; on the card it is noise.
+ */
+const sentWithPrefix = giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+  'Gift Recommendation Reason': 'Gift ordered in REI — moving-supplies gift · $48.32' });
+check('the prefix is stripped', /Gift ordered in REI/.test(sentWithPrefix), false);
+check('...but what the gift WAS survives', /moving-supplies gift · \$48\.32/.test(sentWithPrefix), true);
+check('the whole line reads cleanly', sentWithPrefix,
+  'gift SENT 2026-08-06 — moving-supplies gift · $48.32 — nothing to do, for your awareness');
+/* A reason a person wrote has no prefix to strip and must come through untouched. */
+check("a person's own wording is untouched",
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+    'Gift Recommendation Reason': 'Cherry sent flowers after the walkthrough' }),
+  'gift SENT 2026-08-06 — Cherry sent flowers after the walkthrough — nothing to do, for your awareness');
+/* Nothing but the prefix leaves no dangling dash. */
+check('a reason that is only the prefix leaves no empty clause',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+    'Gift Recommendation Reason': 'Gift ordered in REI —' }),
+  'gift SENT 2026-08-06 — nothing to do, for your awareness');
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

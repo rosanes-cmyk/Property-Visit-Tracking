@@ -15,8 +15,8 @@
  * gift sent AFTER signing is exactly such a change.
  */
 import { giftFromNotes } from '../twin-visit-logger-sandbox/src/rei/gift.mjs';
-import { ACTIVE_STAGES, FILL_IF_BLANK, recheckSkipReason, reiFieldsFromScrape, diffFromRei }
-  from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
+import { ACTIVE_STAGES, FILL_IF_BLANK, recheckSkipReason, reiFieldsFromScrape, diffFromRei,
+  giftReasonUpgradable } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -283,6 +283,46 @@ check('a second run changes nothing',
     'Gift Approval Owner': 'Juan', 'Gift Approved By': 'Cherry', 'Gift Approval Date': '08/05/2026',
     'Last Contact Date': by('Last Contact Date')?.to || '',
     'Last Contact Result': by('Last Contact Result')?.to || '' }, fields), []);
+
+console.log('\n=== the reason may improve on ITSELF, and on nothing else ===');
+/*
+ * Marlene's landed as "Gift ordered in REI — ordered 08/04/2026" and could never get better. Fill-if-blank
+ * is right for a reason a person wrote and wrong for one this code wrote badly: by the time the parser could
+ * read her order number and total, the cell was no longer empty, so the card was left announcing a gift it
+ * could not name.
+ */
+const MINE = 'Gift ordered in REI — ordered 08/04/2026';
+const FULLER = 'Gift ordered in REI — moving-supplies gift · $48.32 · order #113-5603799-0573039 · ordered 08/04/2026';
+check('a fuller version of the automation\'s own sentence replaces it', giftReasonUpgradable(MINE, FULLER), true);
+check('a shorter one does not', giftReasonUpgradable(FULLER, MINE), false);
+check('an identical one does not — a re-check must stay idempotent', giftReasonUpgradable(MINE, MINE), false);
+/*
+ * The asymmetry that protects a named owner protects this too. Anything a human typed fails the first test,
+ * however short it is beside REI's version.
+ */
+check("a person's own note is never replaced",
+  giftReasonUpgradable('Cherry approved after the walkthrough', FULLER), false);
+check('...not even by a much longer one',
+  giftReasonUpgradable('Sent flowers', FULLER), false);
+check('a blank is fill-if-blank\'s job, not this one', giftReasonUpgradable('', FULLER), false);
+check('and nothing replaces something with nothing', giftReasonUpgradable(MINE, ''), false);
+for (const junk of [null, undefined, 0, false]) {
+  check(`${JSON.stringify(junk)} is safe`, giftReasonUpgradable(junk, junk), false);
+}
+
+console.log('\n--- and it reaches the sheet through diffFromRei ---');
+const marleneRow = { 'Seller Name': 'Marlene Martin', 'Property Address': '2932 Tourbrook Way, Sacramento, CA 95833',
+  'Current Stage': 'Offer Sent', 'Gift Status': 'Sent', 'Gift Sent Date': '08/04/2026',
+  'Gift Recommendation Reason': MINE, 'Gift Approval Owner': 'Cherry', 'Gift Approved By': 'Cherry',
+  'Gift Approval Date': '08/04/2026' };
+const marleneFields = reiFieldsFromScrape({ notes: [MARLENE], visibleText: MARLENE });
+const upgrade = diffFromRei(marleneRow, marleneFields).find((c) => c.field === 'Gift Recommendation Reason');
+check('the reason is upgraded, not skipped as already-filled', !!upgrade, true);
+check('...to the version naming the gift', /moving-supplies gift/.test(upgrade?.to || ''), true);
+check('...and it is not marked as filling a blank', !upgrade?.filledBlank, true);
+check('a second pass changes nothing',
+  diffFromRei({ ...marleneRow, 'Gift Recommendation Reason': upgrade.to }, marleneFields)
+    .some((c) => c.field === 'Gift Recommendation Reason'), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
