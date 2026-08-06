@@ -9,6 +9,7 @@
  * regardless of what the caller assembled.
  */
 import { scrubContactDetails, notifyChat } from '../twin-visit-logger-sandbox/src/utils/notify.mjs';
+import fs from 'node:fs';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -53,6 +54,48 @@ console.log('\n=== No webhook configured means silence, not a crash ===');
 check('an empty webhook is a no-op', await notifyChat('anything', { webhookUrl: '' }), false);
 check('...and returns false rather than throwing',
   await notifyChat('anything', { webhookUrl: 'not-a-url' }), false);
+
+console.log('\n=== CHAT_ALERTS=off, without touching the credential ===');
+/*
+ * The client, after the same false alert arrived twice: "but we need to turn off the auto alert."
+ *
+ * Before this the only way to stop them was to delete CHAT_WEBHOOK_URL, which is a credential — it would
+ * have to be found and pasted back to turn anything on again, and it would also silence the failure notices
+ * that are the reason this automation is allowed to run unattended at all.
+ *
+ * Read from the shipped source rather than by loading config, because config.mjs pulls in dotenv and a
+ * validated .env, which is exactly what keeps this file testable from the repo root.
+ */
+const CFG = fs.readFileSync('twin-visit-logger-sandbox/src/config.mjs', 'utf8');
+const NOTIFY = fs.readFileSync('twin-visit-logger-sandbox/src/utils/notify.mjs', 'utf8');
+check('the switch exists and reads an env var',
+  /chatAlerts:\s*\(process\.env\.CHAT_ALERTS \|\| 'on'\)/.test(CFG), true);
+check('...defaulting to ON, so nobody loses alerts by upgrading',
+  /CHAT_ALERTS \|\| 'on'/.test(CFG), true);
+check("...and only the exact word 'off' turns it off",
+  /!==\s*'off'/.test(CFG), true);
+check('it is validated like every other setting', /chatAlerts: z\.boolean\(\)/.test(CFG), true);
+check('notifyChat honours it', /if \(cfg && !cfg\.chatAlerts\) return false;/.test(NOTIFY), true);
+/*
+ * The order matters: the switch is checked BEFORE the webhook, so turning alerts off works whether or not a
+ * webhook is configured, and cannot depend on one being present.
+ */
+check('...before it even looks at the webhook',
+  NOTIFY.indexOf('!cfg.chatAlerts') < NOTIFY.indexOf('const url = webhookUrl !== null'), true);
+/* An explicit webhookUrl bypasses config entirely — this is how these very tests call it. */
+check('an explicit webhook still bypasses config',
+  await notifyChat('anything', { webhookUrl: '' }), false);
+check('it is documented where somebody would look for it',
+  fs.readFileSync('twin-visit-logger-sandbox/.env.example', 'utf8').includes('CHAT_ALERTS=on'), true);
+/*
+ * The 11am and 3pm work queue must NOT be affected. Apps Script posts that from its own Script Properties,
+ * so the digest keeps arriving while the per-lead interruptions stop — which is the whole point of having a
+ * switch rather than deleting the webhook.
+ */
+check('the digest is posted by Apps Script, not by this notifier',
+  /CHAT_WEBHOOK_PROP/.test(fs.readFileSync('apps-script/ChatNotify.gs', 'utf8')), true);
+check('...and nothing in Apps Script reads CHAT_ALERTS',
+  /CHAT_ALERTS/.test(fs.readFileSync('apps-script/ChatNotify.gs', 'utf8')), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

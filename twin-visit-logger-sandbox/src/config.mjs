@@ -75,6 +75,20 @@ const raw = {
   // anyone holding it post into the space, so it belongs in .env and never in source.
   chatWebhookUrl: (process.env.CHAT_WEBHOOK_URL || '').trim(),
   /*
+   * An off switch for the per-lead Chat alerts, separate from the webhook itself.
+   *
+   * The client, watching the same false alert arrive twice: "but we need to turn off the auto alert." The
+   * only way to stop them before this was to delete CHAT_WEBHOOK_URL — which is a credential, so it would
+   * have to be found and pasted back to turn anything on again, and it would also silence the failure
+   * notices that are the whole reason the automation is allowed to run unattended.
+   *
+   * CHAT_ALERTS=off stops the Node re-check posting about individual leads. It does NOT touch the 11am and
+   * 3pm work queue: those are posted by Apps Script from its own Script Properties, so the digest survives
+   * while the interruptions stop. That is the split the client asked for — "as long as its updating in the
+   * dashboard its fine".
+   */
+  chatAlerts: (process.env.CHAT_ALERTS || 'on').trim().toLowerCase() !== 'off',
+  /*
    * WHATSAPP_ENABLED=false stops the WhatsApp step dead, wherever it is called from.
    *
    * THREE numbers have now been banned or restricted running this: automating WhatsApp Web breaches Meta's
@@ -148,6 +162,7 @@ const schema = z.object({
   // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
   // to `raw` alone silently arrives as undefined.
   chatWebhookUrl: z.string(),
+  chatAlerts: z.boolean(),
   whatsappEnabled: z.boolean(),
   whatsappSkipWarmup: z.boolean(),
   whatsappMinMinutesBetween: z.number().int().nonnegative().max(1440),

@@ -47,9 +47,20 @@ export function scrubContactDetails(text) {
  * distinguishable from a success at a glance, without reading the sentence.
  */
 export async function notifyChat(text, { kind = 'info', webhookUrl = null } = {}) {
-  const url = webhookUrl !== null
-    ? webhookUrl
-    : (await import('../config.mjs')).config.chatWebhookUrl;
+  const cfg = webhookUrl !== null ? null : (await import('../config.mjs')).config;
+  /*
+   * CHAT_ALERTS=off silences these without touching the webhook.
+   *
+   * The client: "but we need to turn off the auto alert." Deleting CHAT_WEBHOOK_URL would have done it, but
+   * that is a credential — it would have to be dug out and pasted back to turn anything on again. The 11am
+   * and 3pm work queue is unaffected: Apps Script posts that from its own Script Properties, so the digest
+   * keeps arriving while the per-lead interruptions stop.
+   *
+   * An explicit webhookUrl bypasses the switch, because that is how the tests exercise this function and how
+   * a one-off diagnostic addresses a different space on purpose.
+   */
+  if (cfg && !cfg.chatAlerts) return false;
+  const url = webhookUrl !== null ? webhookUrl : cfg.chatWebhookUrl;
   if (!url) return false;
 
   const prefix = { ok: '✅', warn: '⚠️', error: '❌', info: 'ℹ️' }[kind] || 'ℹ️';
