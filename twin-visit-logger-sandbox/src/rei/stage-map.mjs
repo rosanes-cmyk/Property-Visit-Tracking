@@ -38,11 +38,35 @@ export const STAGE_ORDER = [
  * and leaves the stage alone, because a wrong stage is worse than a stale one — it moves a lead into a
  * section of the 3pm work queue that tells somebody to do the wrong thing.
  *
- * Left out, each for a reason:
- *   "Follow Up"        ambiguous. Could be before a visit or after an offer; REI uses it for both.
- *   "New Lead"         earlier than anything this tracker holds, and forward-only would ignore it anyway.
- *   "Dead" / "Lost"    handled by stageCloseOut below, which is a backwards move and cannot use this list.
- *   "Nurture"          a downgrade, and forward-only would refuse it.
+ * THE CLIENT'S ACTUAL REI DROPDOWN, sent as a screenshot after I asked what the stages really are:
+ *
+ *   0 Invalid Leads      -> Lost / Closed Out   not a real lead; there is nothing to work
+ *   1 New Lead           -> (nothing)           earlier than this tracker's first stage
+ *   2 Follow Up          -> (nothing)           ambiguous; REI uses it before a visit AND after an offer
+ *   3 Appointment Booked -> Visit Scheduled
+ *   4 Offer Sent         -> Offer Sent
+ *   5 ...                -> unknown, not in the screenshots — see the note below
+ *   6 Cancelled Contract -> (nothing)           REPORTED, see stageBehindTracker
+ *   7 Reinstated         -> (nothing)           reinstated to WHAT? the tracker cannot tell
+ *   8 Clear to Close     -> Contract Signed     unambiguously past signing
+ *   9 Lost / Dead Lead   -> handled by stageCloseOut
+ *  10 Acquired           -> Contract Signed     the deal completed; the furthest stage the tracker has
+ *
+ * Before this list arrived only three of the eleven mapped — 3, 4 and 9 — and the patterns were guesses at
+ * wordings REI does not use ("Verbal Agreement", "Under Contract", "Negotiating"). Those guesses are kept
+ * because they cost nothing and cover a stage list that may grow, but the numbered entries above are the ones
+ * that actually fire on this account.
+ *
+ * 5 IS MISSING and no guess is being made about it. It sits between "4 Offer Sent" and "6 Cancelled Contract",
+ * so it is almost certainly a contract stage — but "almost certainly" is how a lead ends up in the wrong
+ * section of the work queue being told to do the wrong thing.
+ *
+ * Deliberately unmapped, each for a reason:
+ *   "6 Cancelled Contract"  a contract that fell through could be back in negotiation, dead, or being
+ *                           rewritten. Three different actions, so it is reported rather than guessed.
+ *   "7 Reinstated"          reinstated from cancelled — to contract sent? signed? REI does not say.
+ *   "2 Follow Up"           genuinely means two different places in the pipeline.
+ *   "1 New Lead"            before anything the tracker tracks.
  */
 const REI_STAGE_PATTERNS = [
   [/appointment\s*(?:booked|set|scheduled)/i, 'Visit Scheduled'],
@@ -51,9 +75,26 @@ const REI_STAGE_PATTERNS = [
   [/offer\s*(?:sent|submitted|presented|made)/i, 'Offer Sent'],
   [/(?:negotiat|counter)/i, 'Active Negotiation'],
   [/verbal\s*(?:agreement|yes|accept)/i, 'Verbal Agreement'],
+  /*
+   * "Cancelled Contract" must not reach the Contract Sent pattern below, and would not — that one requires
+   * sent/out/pending after the word. Asserted in the tests, because the failure would be silent and wrong in
+   * the most expensive direction: a dead contract reading as a live one.
+   */
   [/contract\s*(?:sent|out|pending)/i, 'Contract Sent'],
-  [/(?:contract\s*signed|under\s*contract|executed)/i, 'Contract Signed']
+  [/(?:contract\s*signed|under\s*contract|executed)/i, 'Contract Signed'],
+  /* From the real list: both mean the deal is past signing, and Contract Signed is as far as the tracker goes. */
+  [/clear\s*to\s*close/i, 'Contract Signed'],
+  [/\bacquired\b/i, 'Contract Signed']
 ];
+
+/*
+ * "0 Invalid Leads" closes a lead out as surely as "9 Lost / Dead Lead" does.
+ *
+ * It is not in REI_LOST_STAGE's lost|dead wording, so it was being ignored entirely. An invalid lead is one
+ * there is nothing to work — a wrong number, a duplicate, a property that was never for sale — and leaving it
+ * sitting in an active section is the same fault as leaving a dead one there.
+ */
+const REI_INVALID_STAGE = /\binvalid\b/i;
 
 const text = (v) => String(v == null ? '' : v).trim();
 
@@ -138,7 +179,8 @@ const NEVER_CLOSE_FROM = ['Verbal Agreement', 'Contract Sent', 'Contract Signed'
 
 /** Whether REI's stage field says this lead is lost or dead. */
 export function reiSaysLost(reiStage) {
-  return REI_LOST_STAGE.test(text(reiStage));
+  const stage = text(reiStage);
+  return REI_LOST_STAGE.test(stage) || REI_INVALID_STAGE.test(stage);
 }
 
 /**
@@ -153,6 +195,34 @@ export function stageCloseOut(currentStage, reiStage) {
   if (!current) return '';
   if (NEVER_CLOSE_FROM.indexOf(current) >= 0) return '';
   return STAGE_LOST;
+}
+
+/**
+ * A stage conflict REI cannot settle: REI is BEHIND the tracker. Reported, never written.
+ *
+ * The client: "how about the lead stage?" — a fair question, because the answer for every other field today was
+ * "REI wins". This one keeps its exception, and the reason is not caution for its own sake: the tracker holds
+ * Contract Sent Date, Contract Signed Date and Transaction Handoff Status, and REI has no equivalent. So a lead
+ * the tracker has at Contract Signed and REI still has at Offer Sent is not a stale cell being corrected — it
+ * is REI missing information the tracker has, and rewinding it would drop a signed deal back into offer
+ * follow-up and erase the dates that prove otherwise.
+ *
+ * Silence is not the alternative though. If the two systems disagree about where a deal IS, somebody needs to
+ * know, and one of the two is wrong. So it is surfaced exactly like closeOutRefusal — reported, logged as an
+ * EXCEPTION, and left for a person.
+ *
+ * Returns '' when there is no conflict: REI ahead (stageAdvance handles it), equal, unmapped, or off-pipeline.
+ */
+export function stageBehindTracker(currentStage, reiStage) {
+  const target = mapReiStage(reiStage);
+  if (!target) return '';                              // ambiguous or unmapped: REI has not said anything
+  const to = STAGE_ORDER.indexOf(target);
+  const from = STAGE_ORDER.indexOf(text(currentStage));
+  if (to < 0 || from < 0) return '';                   // one of them is off the pipeline entirely
+  if (to >= from) return '';                           // REI is level or ahead — not this function's business
+  return `REI has this lead at "${text(reiStage)}" (${target}) while the tracker has it further on at `
+    + `"${text(currentStage)}". Nothing was changed — moving it back would erase the contract dates the `
+    + 'tracker holds and REI does not. One of the two is wrong.';
 }
 
 /**

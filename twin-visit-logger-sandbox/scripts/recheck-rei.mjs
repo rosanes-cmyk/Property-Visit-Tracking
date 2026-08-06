@@ -36,7 +36,7 @@ import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '../src/google/owner-map.mjs';
-import { closeOutRefusal } from '../src/rei/stage-map.mjs';
+import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
@@ -281,6 +281,8 @@ const unanswered = [];
  * and each one is somebody's decision about a real deal.
  */
 const closeOutConflicts = [];
+/* Leads where REI's stage is BEHIND the tracker's — a disagreement about where the deal is, for a person. */
+const stageConflicts = [];
 // Leads REI has already written off. Reported to a person, never acted on.
 const deadFlagged = [];
 /*
@@ -363,6 +365,24 @@ try {
       closeOutConflicts.push({ row, reason: refusal });
       auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
         message: `${row['Seller Name'] || '(no name)'} · ${row['Property Address'] || ''} — ${refusal}` });
+    }
+
+    /*
+     * REI BEHIND the tracker on stage. Reported, never written — "how about the lead stage?"
+     *
+     * Every other field now takes REI's answer. This one cannot, because the tracker holds Contract Sent Date,
+     * Contract Signed Date and Transaction Handoff Status and REI has no equivalent: a lead the tracker has at
+     * Contract Signed and REI still has at Offer Sent is REI missing information, not the tracker being stale.
+     * Moving it back would erase the dates that prove it.
+     *
+     * Reporting it is the point. If the two systems disagree about where a deal is, one of them is wrong and
+     * somebody has to say which.
+     */
+    const behind = stageBehindTracker(row['Current Stage'], reiFields['Current Stage']);
+    if (behind) {
+      stageConflicts.push({ row, reason: behind });
+      auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
+        message: `${row['Seller Name'] || '(no name)'} · ${row['Property Address'] || ''} — ${behind}` });
     }
 
     /*
@@ -608,6 +628,14 @@ if (failures.length) {
   for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
     console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);
   }
+}
+
+if (stageConflicts.length) {
+  console.log(`\n${stageConflicts.length} lead(s) where REI's stage is BEHIND the tracker:`);
+  for (const { row, reason } of stageConflicts) {
+    console.log(`  row ${row.__rowNumber}  ${row['Seller Name'] || '(no name)'} — ${reason}`);
+  }
+  console.log('Nothing was changed. Either advance the stage in REI, or correct it on the dashboard.');
 }
 
 if (closeOutConflicts.length) {

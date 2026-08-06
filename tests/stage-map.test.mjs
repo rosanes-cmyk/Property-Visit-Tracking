@@ -19,7 +19,9 @@
  * Moving a stage from a web page is the most dangerous thing in this project, so most of what follows
  * tests the refusals: forward only, never onto a closed lead, never on ambiguous wording.
  */
-import { STAGE_ORDER, mapReiStage, stageAdvance, nextActionReplaceable, parseReiMoney, AUTOMATION_NEXT_ACTIONS }
+import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseOut, closeOutRefusal,
+  reiSaysLost, nextActionReplaceable, parseReiMoney,
+  AUTOMATION_NEXT_ACTIONS }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
 import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
@@ -45,6 +47,59 @@ check('"Under Contract"', mapReiStage('7 Under Contract'), 'Contract Signed');
 check('every mapped value is a real dropdown value',
   ['4 Offer Sent', '3 Appointment Booked', '5 Negotiating', 'Contract Signed']
     .every((s) => STAGE_ORDER.includes(mapReiStage(s))), true);
+
+console.log("\n=== THE CLIENT'S ACTUAL REI DROPDOWN, every value ===");
+/*
+ * Sent as a screenshot after I asked what REI's stages really are, and it changed the picture: only THREE of the
+ * eleven were being mapped, and the patterns were guesses at wordings this account does not use.
+ *
+ * Every value is asserted here, including the ones that map to nothing, so a future edit that starts matching
+ * "Cancelled Contract" as a live contract fails loudly instead of quietly moving a dead deal into the pipeline.
+ */
+const REI_DROPDOWN = [
+  ['0 Invalid Leads', '', true],
+  ['1 New Lead', '', false],
+  ['2 Follow Up', '', false],
+  ['3 Appointment Booked', 'Visit Scheduled', false],
+  ['4 Offer Sent', 'Offer Sent', false],
+  ['6 Cancelled Contract', '', false],
+  ['7 Reinstated', '', false],
+  ['8 Clear to Close', 'Contract Signed', false],
+  ['9 Lost / Dead Lead', '', true],
+  ['10 Acquired', 'Contract Signed', false]
+];
+for (const [reiStage, expected, closes] of REI_DROPDOWN) {
+  check(`"${reiStage}" -> ${expected || '(nothing)'}`, mapReiStage(reiStage), expected);
+  check(`   ...closes the lead out: ${closes}`, reiSaysLost(reiStage), closes);
+}
+/*
+ * "6 Cancelled Contract" must NOT reach the Contract Sent pattern. That failure would be silent and wrong in
+ * the most expensive direction — a dead contract reading as a live one, in the section that says a deal is in
+ * motion.
+ */
+check('"Cancelled Contract" is never read as a live contract',
+  ['Contract Sent', 'Contract Signed'].includes(mapReiStage('6 Cancelled Contract')), false);
+/*
+ * "0 Invalid Leads" was being ignored entirely: it is not in the lost|dead wording. An invalid lead — wrong
+ * number, duplicate, a property never for sale — needs closing out as surely as a dead one.
+ */
+check('an invalid lead closes out from an active stage',
+  stageCloseOut('Offer Sent', '0 Invalid Leads'), 'Lost / Closed Out');
+check('...but is still refused at contract stage, like any close-out',
+  stageCloseOut('Contract Signed', '0 Invalid Leads'), '');
+check('...and that refusal is reported',
+  /too far along to close out/.test(closeOutRefusal('Contract Signed', '0 Invalid Leads')), true);
+/*
+ * 5 IS MISSING from the screenshots and no guess is made about it. It sits between "4 Offer Sent" and
+ * "6 Cancelled Contract", so it is probably a contract stage — and "probably" is how a lead ends up in the
+ * wrong section being told to do the wrong thing. It maps to nothing until somebody says what it is.
+ */
+check('an unknown numbered stage maps to nothing', mapReiStage('5 Something Unknown'), '');
+check('...and closes nothing out', reiSaysLost('5 Something Unknown'), false);
+/* Acquired is the end of the pipeline, so it can only ever be a forward move or no move. */
+check('Acquired advances a live deal to Contract Signed',
+  stageAdvance('Offer Sent', '10 Acquired'), 'Contract Signed');
+check('...and does nothing to one already there', stageAdvance('Contract Signed', '10 Acquired'), '');
 
 console.log('\n--- and the wordings deliberately NOT mapped ---');
 /*
@@ -168,6 +223,46 @@ const completed = diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Visit Scheduled
   { ...FROM_REI, 'Visit Status': 'Completed' });
 check('a completed visit goes to Needs Review, not Offer Sent',
   completed.find((c) => c.field === 'Current Stage')?.to, 'Visit Completed — Needs Review');
+
+console.log("\n=== \"how about the lead stage?\" — REI behind the tracker is REPORTED ===");
+/*
+ * Every other field now takes REI's answer. Current Stage cannot, and the reason is specific rather than
+ * cautious: the tracker holds Contract Sent Date, Contract Signed Date and Transaction Handoff Status, and REI
+ * has no equivalent. A lead the tracker has at Contract Signed while REI still says Offer Sent is REI missing
+ * information, not the tracker being stale — and moving it back would erase the dates that prove it.
+ *
+ * Silence is not the alternative. One of the two systems is wrong and somebody has to say which.
+ */
+check('REI behind the tracker is reported',
+  /Nothing was changed — moving it back would erase the contract dates/
+    .test(stageBehindTracker('Contract Signed', '4 Offer Sent')), true);
+check('...naming both positions',
+  /"4 Offer Sent" \(Offer Sent\)[\s\S]*"Contract Signed"/.test(stageBehindTracker('Contract Signed', '4 Offer Sent')), true);
+/* REI level or ahead is not this function's business — stageAdvance handles those. */
+check('REI level with the tracker reports nothing', stageBehindTracker('Offer Sent', '4 Offer Sent'), '');
+check('REI ahead reports nothing', stageBehindTracker('Offer Preparation', '4 Offer Sent'), '');
+check('...and stageAdvance moves that one instead', stageAdvance('Offer Preparation', '4 Offer Sent'), 'Offer Sent');
+/* An ambiguous REI stage has said nothing, so there is nothing to disagree about. */
+check('"2 Follow Up" reports nothing', stageBehindTracker('Contract Signed', '2 Follow Up'), '');
+check('a blank REI stage reports nothing', stageBehindTracker('Contract Signed', ''), '');
+/* Off-pipeline on either side: a closed-out or nurture lead is where a person put it. */
+check('a closed-out tracker stage reports nothing',
+  stageBehindTracker('Lost / Closed Out', '4 Offer Sent'), '');
+check('a nurture tracker stage reports nothing',
+  stageBehindTracker('Long-Term Nurture', '4 Offer Sent'), '');
+check('a blank tracker stage reports nothing — stageAdvance fills it',
+  stageBehindTracker('', '4 Offer Sent'), '');
+/* And it writes nothing, which is the whole point. */
+check('no stage change is produced for a backwards REI stage',
+  diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Contract Signed' }, FROM_REI)
+    .some((c) => c.field === 'Current Stage'), false);
+const RUNNER_STAGE = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
+check('the runner reports it in the summary',
+  /where REI's stage is BEHIND the tracker/.test(RUNNER_STAGE), true);
+check('...and logs it as an EXCEPTION so it survives the window closing',
+  /stageConflicts\.push\(\{ row, reason: behind \}\)/.test(RUNNER_STAGE), true);
+check('...and says what to do about it',
+  /Either advance the stage in REI, or correct it on the dashboard/.test(RUNNER_STAGE), true);
 
 console.log('\n=== Approved Offer Amount comes from REI, and a blank never clears it ===');
 check('it is a REI-wins field', REI_WINS.includes('Approved Offer Amount'), true);
