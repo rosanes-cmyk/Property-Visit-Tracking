@@ -1315,5 +1315,38 @@ for (const line of ['MY TASKS ALL TASKS', 'These are your current assigned tasks
   check(`"${line || '(empty)'}" is not a task`, parseTaskTitle(line), null);
 }
 
+console.log('\n=== A visit with no calendar event at all gets one ===');
+/*
+ * The client: "i have suggested task, its still not updating in the calendar."
+ *
+ * The calendar was only ever touched when Visit Date, Time or Status CHANGED. So a row that already held the
+ * right date and had no Calendar Event ID never got an event — nothing changes, nothing syncs, and the visit
+ * exists on the board and in nobody's day. That is most of the 373 imported rows: they arrived with visit
+ * dates and no events, and no booking email ever came for them.
+ */
+check('a missing event is detected', /const missingEvent = !String\(row\['Calendar Event ID'\] \|\| ''\)\.trim\(\)/.test(RUNNER), true);
+check('...and syncs even when nothing changed',
+  /if \(\(calendarAffected\(changes\) \|\| missingEvent\)/.test(RUNNER), true);
+check('...saying so, rather than writing to the calendar silently',
+  /no calendar event for an upcoming visit — creating one/.test(RUNNER), true);
+/*
+ * FUTURE OR TODAY ONLY, and this guard is the whole reason it is safe. Without it the first run would create
+ * events for every historical visit in the import — two hundred entries appearing in Juan's past, which is
+ * worse than the gap it fixes.
+ */
+check('only for a visit that has not happened yet',
+  /const upcoming = startsAt && !Number\.isNaN\(startsAt\.getTime\(\)\)\s*\n\s*&& dayKeyOf\(startsAt\) >= dayKeyOf\(new Date\(\)\)/.test(RUNNER), true);
+check('...and missingEvent requires it', /!String\(row\['Calendar Event ID'\] \|\| ''\)\.trim\(\) && upcoming/.test(RUNNER), true);
+/*
+ * The day comparison is timezone-anchored to the VISIT's zone, not the machine's. A timer running on a box set
+ * to UTC must not decide that this afternoon's visit in California already happened — the same bug that made
+ * parseSheetDate read a serial as a year and a task date land a day early.
+ */
+check('the day comparison uses the visit timezone',
+  /timeZone: config\.calendarTimezone, year: 'numeric', month: '2-digit', day: '2-digit'/.test(RUNNER), true);
+/* A row that already HAS an event is left to the change-driven path, so nothing is rewritten every run. */
+check('a row with an event id does not re-sync on its own',
+  /calendarAffected\(changes\) \|\| missingEvent/.test(RUNNER), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

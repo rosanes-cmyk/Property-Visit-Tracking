@@ -71,6 +71,14 @@ const WAIT = args.includes('--wait');
  */
 const INCLUDE_CLOSED = args.includes('--include-closed');
 
+/*
+ * Midnight-to-midnight in the VISIT's timezone, so "has this already happened" does not depend on where the
+ * machine running the timer happens to be set. The same reasoning as sheetDayKey in recheck.mjs.
+ */
+const dayKeyOf = (d) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: config.calendarTimezone, year: 'numeric', month: '2-digit', day: '2-digit'
+}).format(d);
+
 const STATE_FILE = path.resolve('./data/rei-recheck.json');
 
 /*
@@ -506,7 +514,30 @@ try {
      * REI has dropped the appointment fields, leaving a live, reminder-firing event on Juan's day.
      */
     const cancelling = changes.some((c) => c.field === 'Visit Status' && c.to === 'Canceled');
-    if (calendarAffected(changes) && (cancelling || scraped.appointmentStartIso)) {
+    /*
+     * A visit with no event at all gets one, even when nothing CHANGED.
+     *
+     * The client: "i have suggested task, its still not updating in the calendar." The calendar was only ever
+     * touched when Visit Date, Time or Status changed — so a row that already held the right date and had no
+     * Calendar Event ID never got an event. Nothing changes, nothing syncs, and the visit exists on the board
+     * and nowhere in anybody's day. That is most of the 373 imported rows: they arrived with visit dates and
+     * no events, and no booking email ever came for them.
+     *
+     * FUTURE OR TODAY ONLY, and this guard is the whole reason it is safe. Without it the first run would
+     * create events for every historical visit in the import — two hundred entries appearing in Juan's past,
+     * which is worse than the gap it fixes. A visit that has already happened does not need a diary entry.
+     *
+     * syncCalendarEvent searches by REI record id before creating, so a lead whose event exists under an id
+     * the sheet lost is found rather than duplicated.
+     */
+    const startsAt = scraped.appointmentStartIso ? new Date(scraped.appointmentStartIso) : null;
+    const upcoming = startsAt && !Number.isNaN(startsAt.getTime())
+      && dayKeyOf(startsAt) >= dayKeyOf(new Date());
+    const missingEvent = !String(row['Calendar Event ID'] || '').trim() && upcoming;
+    if (missingEvent && !calendarAffected(changes)) {
+      console.log('    no calendar event for an upcoming visit — creating one');
+    }
+    if ((calendarAffected(changes) || missingEvent) && (cancelling || scraped.appointmentStartIso)) {
       try {
         // Returns the event id — the SAME one when it updates in place, which is what must happen for a
         // moved visit. A second event on Juan's calendar for one property is the failure to avoid here.
