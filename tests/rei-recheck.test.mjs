@@ -1056,5 +1056,38 @@ check('the stage goes to Lost / Closed Out',
 check('...and not to Needs Review',
   deadAndVisited.some((c) => c.to === 'Visit Completed — Needs Review'), false);
 
+console.log('\n=== a scrape that returns NOTHING is a failure, not a quiet agreement ===');
+/*
+ * The client, on a log full of them: "but we need to fix those asap."
+ *
+ * "REI returned NOTHING to compare — no appointment date and no contact fields" was honest about not knowing,
+ * and then the run moved on and counted the lead as checked. So it went to the back of a 20-minute queue
+ * having been looked at not at all, and the closing summary could still report the run as clean.
+ *
+ * Zero fields is not something REI can legitimately produce for a contact that exists — even a lead with no
+ * appointment has a name and a phone number — so it means the page had not finished rendering.
+ */
+check('the message still distinguishes nothing-to-compare from agreement',
+  describeChanges({ 'Seller Name': 'Fandy', 'Property Address': '212 Orland St, Las Vegas, NV 89107' }, [], {}),
+  'Fandy · 212 Orland St, Las Vegas, NV 89107 · REI returned NOTHING to compare — no appointment date and no '
+  + 'contact fields. The page may not have rendered, or the contact has no appointment in REI.');
+check('an empty scrape is retried once', /Retrying once/.test(RUNNER), true);
+check('...after a pause, because the cause is a page still rendering',
+  /setTimeout\(resolve, 4000\)/.test(RUNNER), true);
+check('a second empty result is recorded as unreadable',
+  /failures\.push\(\{ row, reason: 'REI returned no fields at all, twice/.test(RUNNER), true);
+check('...and logged as an EXCEPTION in the workbook',
+  /returned no `\s*\+ 'fields at all on two attempts/.test(RUNNER), true);
+/*
+ * The lead must NOT be stamped as checked. state[key].lastCheckedAt is what puts it to the back of the queue,
+ * so the `continue` has to happen before that write — otherwise a lead nothing read waits 20 minutes to be
+ * ignored again.
+ */
+check('the failure path skips the lead before it is marked checked',
+  RUNNER.indexOf("still nothing. Recorded as UNREADABLE") < RUNNER.indexOf('lastCheckedAt: new Date()'), true);
+/* And failures already veto the all-clear, which is what makes recording it worth anything. */
+check('failures still veto the closing all-clear',
+  /!changedRows\.length && !unanswered\.length && !failures\.length/.test(RUNNER), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

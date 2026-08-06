@@ -256,7 +256,43 @@ try {
       continue;
     }
 
-    const reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
+    let reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
+
+    /*
+     * A scrape that yields NOTHING is a failure, not a quiet agreement — and it gets one second chance.
+     *
+     * "REI returned NOTHING to compare — no appointment date and no contact fields. The page may not have
+     * rendered, or the contact has no appointment in REI." That message was honest about not knowing, and then
+     * the run moved on and counted the lead as checked. So the lead went to the back of a 20-minute queue
+     * having been looked at not at all, and the closing summary could still say the run was clean.
+     *
+     * The client, on a log full of them: "but we need to fix those asap."
+     *
+     * Zero fields is not a state REI can legitimately produce for a contact that exists — even a lead with no
+     * appointment has a name and a phone number. So it means the page had not finished rendering. One retry
+     * after a pause fixes exactly that; if the second attempt is also empty, it is recorded as unreadable,
+     * which vetoes the all-clear at the end of the run.
+     */
+    if (!Object.keys(reiFields).length) {
+      console.log('    REI returned nothing — the page may not have rendered. Retrying once…');
+      await new Promise((resolve) => { setTimeout(resolve, 4000); });
+      try {
+        scraped = await scrapeReiVisit(context, link);
+        reiFields = reiFieldsFromScrape(scraped, { zone: config.calendarTimezone });
+      } catch (error) {
+        console.log(`    the retry failed too: ${error.message}`);
+      }
+      if (!Object.keys(reiFields).length) {
+        console.log('    still nothing. Recorded as UNREADABLE — this lead was NOT checked.');
+        failures.push({ row, reason: 'REI returned no fields at all, twice — the page never rendered' });
+        auditRows.push({ level: 'EXCEPTION', id: String(row['Property ID'] || ''),
+          message: `REI page for row ${row.__rowNumber} — ${row['Seller Name'] || '(no name)'} — returned no `
+            + 'fields at all on two attempts. The lead was NOT checked; nothing was written.' });
+        continue;
+      }
+      console.log('    the retry worked — the page had not finished rendering.');
+    }
+
     const changes = diffFromRei(row, reiFields);
     console.log(`    ${describeChanges(row, changes, reiFields, scraped)}`);
 
