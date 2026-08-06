@@ -20,7 +20,7 @@
  */
 import { stageAdvance, nextActionReplaceable, parseReiMoney } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
-import { latestReiNote, contactResultReplaceable } from './notes.mjs';
+import { latestReiNote, latestReiNoteDate, contactResultReplaceable } from './notes.mjs';
 import { giftFromNotes } from './gift.mjs';
 
 const ZONE = 'America/Los_Angeles';
@@ -398,6 +398,16 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE } = {}) {
    * date. Cherry's 3pm work queue has a section for gifts — "we want to track sending gifts to them as part
    * of follow up" — and it can only be as good as these columns.
    */
+  /*
+   * When REI last recorded contact. Advanced only — see diffFromRei.
+   *
+   * Without this the board showed the right conversation and the wrong silence: Amelia's card read "no
+   * contact for 4 day(s)" on a day REI held both an email update and a call summary from that morning. The
+   * count comes from the sheet's Days Since Last Activity, computed from this column.
+   */
+  const contactDate = latestReiNoteDate(scraped.notes);
+  if (contactDate) out['Last Contact Date'] = contactDate;
+
   const gift = giftFromNotes(scraped.notes);
   if (gift.status) out['Gift Status'] = gift.status;
   if (gift.sentDate) out['Gift Sent Date'] = gift.sentDate;
@@ -490,6 +500,18 @@ export function diffFromRei(row, reiFields) {
   if (noteFromRei && noteFromRei !== text(row['Last Contact Result'])
       && contactResultReplaceable(row['Last Contact Result'])) {
     changes.push({ field: 'Last Contact Result', from: text(row['Last Contact Result']), to: noteFromRei });
+  }
+
+  /*
+   * Last Contact Date moves FORWARD only.
+   *
+   * An older REI note must never undo a more recent contact somebody logged by hand — that would make a
+   * live lead look neglected and push it up the work queue for no reason. A later date is new information;
+   * an earlier one is REI being behind.
+   */
+  const contactFromRei = text(reiFields['Last Contact Date']);
+  if (contactFromRei && sheetDayKey(contactFromRei) > sheetDayKey(row['Last Contact Date'] || '')) {
+    changes.push({ field: 'Last Contact Date', from: text(row['Last Contact Date']), to: contactFromRei });
   }
 
   const nextFromRei = text(reiFields['Next Action']);

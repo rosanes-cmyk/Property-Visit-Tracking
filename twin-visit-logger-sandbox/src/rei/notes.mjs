@@ -13,6 +13,9 @@
  * Pure and importless so the choosing rule is testable against real REI note text.
  */
 
+// Same zone the rest of the project uses: "today" must not depend on the server's clock setting.
+const ZONE = 'America/Los_Angeles';
+
 const text = (v) => String(v == null ? '' : v).trim();
 
 /*
@@ -104,4 +107,50 @@ const AUTOMATION_CONTACT_RESULT = /^auto-logged from rei task email/i;
 export function contactResultReplaceable(current) {
   const c = text(current);
   return !c || AUTOMATION_CONTACT_RESULT.test(c);
+}
+
+/**
+ * The date of the newest REI note, as 'MM/DD/YYYY' — for Last Contact Date.
+ *
+ * The 3pm card told the client "Amelia Middel · $930,000 · sent date not recorded · no contact for 4 day(s)"
+ * on a day REI held an email update AND a call summary from that same morning. "No contact for 4 days" was
+ * simply false, and it is the kind of false that changes behaviour: it reads as a lead going cold when
+ * somebody had spoken to her hours earlier.
+ *
+ * The count comes from the sheet's Days Since Last Activity, which is computed from Last Contact Date — a
+ * column nothing was filling from REI. Syncing the note text without the date left the board showing the
+ * right conversation and the wrong silence.
+ */
+export function latestReiNoteDate(notes, { now = new Date() } = {}) {
+  const blocks = (Array.isArray(notes) ? notes : String(notes || '').split(/\n{2,}/))
+    .map((b) => String(b || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  /*
+   * A contact date can never be in the FUTURE, and notes are full of future dates.
+   *
+   * Caught by this project's own tests: Rob Walker's gift note reads "Deliver on 08/06/2026", and taking the
+   * newest date in the text put a delivery still to happen into Last Contact Date. Due dates, follow-up
+   * dates and delivery dates are all ahead of today and none of them is a conversation — so anything after
+   * today is skipped, which for Rob leaves the note's own header stamp of Aug 5.
+   */
+  const todayKey = Number(new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(now).replace(/-/g, ''));
+  let best = 0;
+  /*
+   * Per DATE, not per block. noteDateKey returns the newest date in a block, so a block carrying both
+   * "Aug 5" and "Deliver on 08/06" would return the 6th, be rejected as future, and lose the 5th with it.
+   * Splitting on whitespace-separated date candidates keeps every date eligible on its own.
+   */
+  for (const b of blocks) {
+    for (const piece of b.split(/(?=\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d)|(?=\b\d{1,2}\/\d{1,2}\/\d{4})|(?=\b\d{4}-\d{2}-\d{2})/i)) {
+      const key = noteDateKey(piece);
+      if (key > best && key <= todayKey) best = key;
+    }
+  }
+  if (!best) return '';
+  const y = Math.floor(best / 10000);
+  const m = Math.floor((best % 10000) / 100);
+  const d = best % 100;
+  return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${y}`;
 }

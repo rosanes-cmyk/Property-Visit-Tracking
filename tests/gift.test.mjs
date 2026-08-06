@@ -201,7 +201,8 @@ const ROB_ROW = {
   'Seller Name': 'Rob Walker', 'Property Address': '492 Umland Drive, Santa Rosa, CA 95401',
   'REI BlackBook Link': 'https://my.reiblackbook.com/contacts/20487447',
   'Current Stage': 'Contract Signed', 'Visit Status': 'Completed',
-  'Gift Status': '', 'Gift Sent Date': '', 'Gift Recommendation Reason': '', 'Last Contact Result': ''
+  'Gift Status': '', 'Gift Sent Date': '', 'Gift Recommendation Reason': '',
+  'Last Contact Result': '', 'Last Contact Date': ''
 };
 check('Contract Signed is re-checkable', recheckSkipReason(ROB_ROW), '');
 check('...and is in ACTIVE_STAGES', ACTIVE_STAGES.includes('Contract Signed'), true);
@@ -238,6 +239,7 @@ check('a second run changes nothing',
   diffFromRei({ ...ROB_ROW, 'Gift Status': 'Sent', 'Gift Sent Date': '08/06/2026',
     'Gift Recommendation Reason': by('Gift Recommendation Reason').to,
     'Gift Approval Owner': 'Juan', 'Gift Approved By': 'Cherry', 'Gift Approval Date': '08/05/2026',
+    'Last Contact Date': by('Last Contact Date')?.to || '',
     'Last Contact Result': by('Last Contact Result')?.to || '' }, fields), []);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
