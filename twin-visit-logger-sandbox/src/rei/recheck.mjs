@@ -18,8 +18,8 @@
  * tests run from anywhere. This one needs date maths and one timezone-aware format, and Intl does both
  * in the standard library — so the decisions stay testable without the sandbox's node_modules.
  */
-import { stageAdvance, stageCloseOut, nextActionReplaceable, parseReiMoney, DISPOSITION_LOST }
-  from './stage-map.mjs';
+import { stageAdvance, stageCloseOut, stageContractCancelled, dispositionFromRei, nextActionReplaceable,
+  parseReiMoney, DISPOSITION_LOST } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 import { latestReiNote, latestReiNoteDate, contactResultReplaceable } from './notes.mjs';
 import { giftFromNotes } from './gift.mjs';
@@ -679,6 +679,21 @@ export function diffFromRei(row, reiFields) {
         changes.push({ field: 'Closeout Reason', from: '', to: `Closed out from REI — ${why}`.slice(0, 500), filledBlank: true });
       }
     }
+  } else if (stageContractCancelled(row['Current Stage'], reiFields['Current Stage'])) {
+    /*
+     * A CANCELLED or REINSTATED contract, ordered ahead of everything except the close-out.
+     *
+     * The team's cheat sheet: "ACTIVE — Still working the lead. There is still opportunity. Stages 1-8", and 6
+     * is Cancelled Contract. So this is live work, and the board must stop showing the deal as signed — that
+     * would be claiming a contract that no longer exists.
+     *
+     * Ahead of the completion move and the forward advance because both would refuse it: it is a BACKWARD step,
+     * from Contract Signed to Active Negotiation, and stageAdvance exists to prevent exactly that. This is the
+     * third and last place a backward move is allowed, and like the other two it is driven by REI stating a
+     * fact rather than by REI merely being different.
+     */
+    const renegotiating = stageContractCancelled(row['Current Stage'], reiFields['Current Stage']);
+    changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: renegotiating });
   } else if (text(reiFields['Visit Status']) === 'Completed' && text(row['Current Stage']) === STAGE_ADVANCE_FROM) {
     changes.push({ field: 'Current Stage', from: text(row['Current Stage']), to: STAGE_ON_COMPLETION });
   } else {
@@ -725,6 +740,21 @@ export function diffFromRei(row, reiFields) {
   const contactFromRei = text(reiFields['Last Contact Date']);
   if (contactFromRei && sheetDayKey(contactFromRei) > sheetDayKey(row['Last Contact Date'] || '')) {
     changes.push({ field: 'Last Contact Date', from: text(row['Last Contact Date']), to: contactFromRei });
+  }
+
+  /*
+   * "10 Acquired" is WON, and Final Disposition is the column that says so.
+   *
+   * Current Stage stops at Contract Signed, so the stage alone cannot distinguish a deal that completed from
+   * one merely signed — and the cheat sheet makes WON its own category, separate from ACTIVE. 'Contracted' is
+   * the workbook's own word and a legal value of that dropdown.
+   *
+   * Fill-if-blank, unlike the rest of REI_WINS: a disposition somebody chose is the closest thing this sheet
+   * has to a final judgement on a deal, and REI's stage is one step removed from it.
+   */
+  const won = dispositionFromRei(reiFields['Current Stage']);
+  if (won && !text(row['Final Disposition'])) {
+    changes.push({ field: 'Final Disposition', from: '', to: won, filledBlank: true });
   }
 
   return changes;

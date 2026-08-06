@@ -135,7 +135,14 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
 
   Still never written: `Visit Notes`, `Seller Motivation`, `Seller Timeline`, `Asking Price`,
   `Seller Concerns` — written by whoever stood in the property, with no REI equivalent to copy from.
-- `Current Stage` is the team's, not the automation's, and is NOT in `REI_WINS`. There are now TWO
+- **REI's Lead Stage values are documented, all eleven, in `src/rei/stage-map.mjs`** — from the client's own
+  *CRM Cheat Sheet*, which is the authority on them. Its categories are `ACTIVE = 1–8`, `LOST = 0, 9`,
+  `WON = 10`. Two consequences worth keeping in mind: **`6 Cancelled Contract` is ACTIVE, not dead** (stage 7
+  `Reinstated` exists because these come back), and **`10 Acquired` is WON**, which `Current Stage` cannot
+  express because it stops at `Contract Signed` — so `Final Disposition` = `Contracted` carries it.
+  `2 Follow Up` stays unmapped on purpose: the cheat sheet gives it its own *Follow-Up Reason* field precisely
+  because the stage alone does not say where the lead is.
+- `Current Stage` is the team's, not the automation's, and is NOT in `REI_WINS`. There are now THREE
   exceptions and no more.
   1. `Visit Scheduled` → `Visit Completed — Needs Review` when REI shows the appointment task complete,
      because the workbook makes that same move itself and a Sheets API write does not fire `onEdit`.
@@ -149,6 +156,15 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
      nearly-done deal automatically could bury it; and `Long-Term Nurture` or an already-closed lead is
      left alone. `Final Disposition` = `Lost` and a `Closeout Reason` quoting REI go with it, fill-if-blank,
      so the board can say *why* a lead is dead.
+  3. → `Active Negotiation` when REI says `6 Cancelled Contract` or `7 Reinstated` (`stageContractCancelled`).
+     Also a backward move, and necessary: the lead was at `5 Under Contract` so the tracker reads
+     `Contract Signed`, and a board still showing a signed deal after the contract collapsed is claiming a
+     contract that does not exist. The contract DATES are never cleared — they are the history of a contract
+     that really was signed and then cancelled. Refused onto `Lost / Closed Out` or `Long-Term Nurture`.
+
+  When REI's stage is *earlier* than the tracker's and none of the three applies, `stageBehindTracker` reports
+  and logs it rather than rewinding: the tracker holds Contract Sent/Signed Date and Transaction Handoff Status
+  and REI has no equivalent, so REI being behind means REI is missing information.
 - **Chat notifications are a shorter list than the changes.** A visit that MOVES updates the row, the
   dashboard and Juan's calendar event and posts **nothing** — the client's instruction: *"i dont want the
   update for this in the chat, it will confuse my teammate; as long as its updating in the dashboard its

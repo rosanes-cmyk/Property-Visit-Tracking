@@ -20,6 +20,7 @@
  * tests the refusals: forward only, never onto a closed lead, never on ambiguous wording.
  */
 import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseOut, closeOutRefusal,
+  stageContractCancelled, dispositionFromRei,
   reiSaysLost, nextActionReplaceable, parseReiMoney,
   AUTOMATION_NEXT_ACTIONS }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
@@ -64,7 +65,7 @@ const REI_DROPDOWN = [
   ['4 Offer Sent', 'Offer Sent', false],
   ['5 Under Contract', 'Contract Signed', false],
   ['6 Cancelled Contract', '', false],
-  ['7 Reinstated', '', false],
+  ['7 Reinstated', '', false],   // both handled by stageContractCancelled, not mapReiStage
   ['8 Clear to Close', 'Contract Signed', false],
   ['9 Lost / Dead Lead', '', true],
   ['10 Acquired', 'Contract Signed', false]
@@ -231,6 +232,80 @@ const completed = diffFromRei({ ...AMELIA_ROW, 'Current Stage': 'Visit Scheduled
   { ...FROM_REI, 'Visit Status': 'Completed' });
 check('a completed visit goes to Needs Review, not Offer Sent',
   completed.find((c) => c.field === 'Current Stage')?.to, 'Visit Completed — Needs Review');
+
+console.log('\n=== The CRM cheat sheet: ACTIVE is stages 1-8, and 6 is one of them ===');
+/*
+ * The client sent the team's own cheat sheet, and it corrected me on two stages.
+ *
+ *   ACTIVE = 1-8   "Still working the lead. There is still opportunity."
+ *   LOST   = 0, 9
+ *   WON    = 10
+ *
+ * "6 Cancelled Contract" is ACTIVE. I had been reporting it and leaving the stage alone, which would have left
+ * the board showing a deal as SIGNED after the contract collapsed — claiming a contract that does not exist,
+ * which is worse than any staleness. Stage 7 "Reinstated" exists precisely because these come back.
+ */
+check('a cancelled contract moves the deal back to negotiation',
+  stageContractCancelled('Contract Signed', '6 Cancelled Contract'), 'Active Negotiation');
+check('...and so does a reinstated one', stageContractCancelled('Offer Sent', '7 Reinstated'), 'Active Negotiation');
+check('...from any live stage', stageContractCancelled('Contract Sent', '6 Cancelled Contract'), 'Active Negotiation');
+check('...and fills a blank stage', stageContractCancelled('', '6 Cancelled Contract'), 'Active Negotiation');
+/* Idempotent: once there, it stops. Otherwise the same cell is rewritten every twenty minutes. */
+check('a lead already renegotiating is left alone',
+  stageContractCancelled('Active Negotiation', '6 Cancelled Contract'), '');
+/*
+ * And NOT onto a lead somebody finished with. If the team decided a cancelled contract was the end of it, REI
+ * still holding stage 6 must not drag it back into the work queue — the same rule that protects a close-out.
+ */
+check('a closed-out lead is not dragged back',
+  stageContractCancelled('Lost / Closed Out', '6 Cancelled Contract'), '');
+check('nor is one parked in nurture',
+  stageContractCancelled('Long-Term Nurture', '6 Cancelled Contract'), '');
+check('an unrelated REI stage does nothing',
+  stageContractCancelled('Contract Signed', '4 Offer Sent'), '');
+check('...nor does a live contract', stageContractCancelled('Offer Sent', '5 Under Contract'), '');
+/* It must reach the sheet, and it must beat the forward-only rule that would otherwise refuse it. */
+const cancelledRow = { 'Seller Name': 'X', 'Property Address': '1 A St', 'Current Stage': 'Contract Signed',
+  'Visit Status': 'Completed' };
+check('the change reaches diffFromRei',
+  diffFromRei(cancelledRow, { 'Current Stage': '6 Cancelled Contract' })
+    .find((c) => c.field === 'Current Stage')?.to, 'Active Negotiation');
+/*
+ * Ordering: a cancelled contract on a lead whose visit REI has ticked off must NOT be read as a completed
+ * visit. Both rules can fire on the same row and the contract is the more recent fact.
+ */
+check('...ahead of the completed-visit rule',
+  diffFromRei({ ...cancelledRow, 'Current Stage': 'Visit Scheduled' },
+    { 'Current Stage': '6 Cancelled Contract', 'Visit Status': 'Completed' })
+    .find((c) => c.field === 'Current Stage')?.to, 'Active Negotiation');
+/*
+ * But a close-out still beats it. "9 Lost / Dead Lead" and "6 Cancelled Contract" cannot both be REI's stage,
+ * so this is belt and braces on the ordering rather than a real case.
+ */
+check('...and behind the close-out',
+  diffFromRei({ ...cancelledRow, 'Current Stage': 'Offer Sent' }, { 'Current Stage': '9 Lost / Dead Lead' })
+    .find((c) => c.field === 'Current Stage')?.to, 'Lost / Closed Out');
+
+console.log('\n--- and "10 Acquired" is WON, which Current Stage cannot say ---');
+/*
+ * Current Stage stops at Contract Signed, so the stage alone cannot tell a completed deal from a signed one —
+ * and the cheat sheet makes WON its own category. Final Disposition 'Contracted' is the workbook's own word,
+ * and a legal value of that dropdown: anything outside it fails the whole row write.
+ */
+check('Acquired sets the disposition', dispositionFromRei('10 Acquired'), 'Contracted');
+check('...and nothing else does', ['5 Under Contract', '8 Clear to Close', '9 Lost / Dead Lead', '']
+  .map((v) => dispositionFromRei(v)), ['', '', '', '']);
+check("'Contracted' is a legal Final Disposition",
+  ['Contracted', 'Lost', 'Long-Term Nurture', 'Closed Out'].includes(dispositionFromRei('10 Acquired')), true);
+const acquired = diffFromRei({ 'Seller Name': 'X', 'Property Address': '1 A St', 'Current Stage': 'Offer Sent' },
+  { 'Current Stage': '10 Acquired' });
+check('the stage advances and the disposition is set',
+  acquired.map((c) => [c.field, c.to]), [['Current Stage', 'Contract Signed'], ['Final Disposition', 'Contracted']]);
+/* Fill-if-blank: a disposition somebody chose is the closest thing this sheet has to a final judgement. */
+check("a disposition already chosen is not overwritten",
+  diffFromRei({ 'Seller Name': 'X', 'Property Address': '1 A St', 'Current Stage': 'Contract Signed',
+    'Final Disposition': 'Closed Out' }, { 'Current Stage': '10 Acquired' })
+    .some((c) => c.field === 'Final Disposition'), false);
 
 console.log("\n=== \"how about the lead stage?\" — REI behind the tracker is REPORTED ===");
 /*

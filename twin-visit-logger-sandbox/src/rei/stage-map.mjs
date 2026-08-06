@@ -46,11 +46,11 @@ export const STAGE_ORDER = [
  *   3 Appointment Booked -> Visit Scheduled
  *   4 Offer Sent         -> Offer Sent
  *   5 Under Contract     -> Contract Signed     both parties have signed; the deal is executed
- *   6 Cancelled Contract -> (nothing)           REPORTED, see stageBehindTracker
- *   7 Reinstated         -> (nothing)           reinstated to WHAT? the tracker cannot tell
+ *   6 Cancelled Contract -> Active Negotiation  still ACTIVE — see stageContractCancelled
+ *   7 Reinstated         -> Active Negotiation  still ACTIVE, back in play
  *   8 Clear to Close     -> Contract Signed     unambiguously past signing
  *   9 Lost / Dead Lead   -> handled by stageCloseOut
- *  10 Acquired           -> Contract Signed     the deal completed; the furthest stage the tracker has
+ *  10 Acquired           -> Contract Signed + Final Disposition 'Contracted'  — WON
  *
  * Before this list arrived only three of the eleven mapped — 3, 4 and 9. The other patterns were guesses at
  * wordings, and one of them turned out to be exactly right: "5 Under Contract" was already handled by the
@@ -62,12 +62,28 @@ export const STAGE_ORDER = [
  * means both parties have signed, while the tracker's Contract Sent means it has gone out for signature. Sent
  * and executed are different weeks of work and different sections of the board.
  *
+ * THE CHEAT SHEET SETTLED 6 AND 7, and I had them wrong.
+ *
+ * The client sent the team's own CRM cheat sheet, which says outright:
+ *
+ *   ACTIVE  = stages 1-8   ("Still working the lead. There is still opportunity.")
+ *   LOST    = stages 0, 9
+ *   WON     = stage 10
+ *
+ * So "6 Cancelled Contract" is an ACTIVE lead, not a dead one — its dispositions are "Seller Backed Out" and
+ * "Price Disagreement", and stage 7 "Reinstated" exists precisely because these come back. I had been treating
+ * a cancelled contract as something to report and leave alone, which would have left the board showing a deal
+ * as signed after it had collapsed. That is the most expensive kind of wrong: a contract that is not there.
+ *
+ * Both map to Active Negotiation, whose action line is "Decide the counter response and keep it moving" —
+ * which is exactly what stage 6 and stage 7 leads need. The tracker has no finer distinction to offer, and
+ * inventing one would be worse than sharing a stage.
+ *
  * Deliberately unmapped, each for a reason:
- *   "6 Cancelled Contract"  a contract that fell through could be back in negotiation, dead, or being
- *                           rewritten. Three different actions, so it is reported rather than guessed.
- *   "7 Reinstated"          reinstated from cancelled — to contract sent? signed? REI does not say.
- *   "2 Follow Up"           genuinely means two different places in the pipeline.
- *   "1 New Lead"            before anything the tracker tracks.
+ *   "2 Follow Up"   genuinely means two different places in the pipeline — before a visit and after an offer.
+ *                   The cheat sheet confirms it: Follow Up is the only stage with its own "Follow-Up Reason"
+ *                   field, because the stage alone does not say where the lead is.
+ *   "1 New Lead"    before anything this tracker tracks. Its first stage is a booked visit.
  */
 const REI_STAGE_PATTERNS = [
   [/appointment\s*(?:booked|set|scheduled)/i, 'Visit Scheduled'],
@@ -196,6 +212,51 @@ export function stageCloseOut(currentStage, reiStage) {
   if (!current) return '';
   if (NEVER_CLOSE_FROM.indexOf(current) >= 0) return '';
   return STAGE_LOST;
+}
+
+/*
+ * A CANCELLED CONTRACT is the third guarded backward move, and the cheat sheet is why it exists.
+ *
+ * "ACTIVE — Still working the lead. There is still opportunity. Stages 1-8" — and 6 is Cancelled Contract.
+ * A lead whose contract fell through is live work, not a dead deal, which is why stage 7 Reinstated exists.
+ *
+ * It has to move BACKWARD to be honest. The lead was at 5 Under Contract, so the tracker says Contract Signed;
+ * the contract is now cancelled, and a board still showing it as signed is claiming a deal that does not exist.
+ * That is worse than any staleness, so this is allowed to rewind where stageAdvance refuses.
+ *
+ * The dates are NOT cleared. Contract Sent Date and Contract Signed Date record that a contract really was
+ * signed and then cancelled, which is the history somebody will need. Only the stage moves.
+ */
+const REI_CANCELLED_CONTRACT = /cancell?ed\s*contract|\breinstated\b/i;
+export const STAGE_RENEGOTIATING = 'Active Negotiation';
+
+/** 'Active Negotiation' when REI says the contract was cancelled or reinstated, otherwise ''. */
+export function stageContractCancelled(currentStage, reiStage) {
+  if (!REI_CANCELLED_CONTRACT.test(text(reiStage))) return '';
+  const current = text(currentStage);
+  if (!current) return STAGE_RENEGOTIATING;
+  if (current === STAGE_RENEGOTIATING) return '';                 // already there
+  /*
+   * Not onto a lead somebody closed out or parked. If the team decided a cancelled contract was the end of it,
+   * REI still holding stage 6 must not drag it back into the work queue.
+   */
+  if (current === STAGE_LOST || current === 'Long-Term Nurture') return '';
+  return STAGE_RENEGOTIATING;
+}
+
+/*
+ * "10 Acquired" is WON, and the tracker has a column for exactly that.
+ *
+ * Current Stage only reaches Contract Signed, so the stage alone cannot say a deal completed — and the cheat
+ * sheet makes WON its own category. Final Disposition 'Contracted' is the workbook's own word for it and a
+ * legal value of that dropdown.
+ */
+const REI_ACQUIRED = /\bacquired\b/i;
+export const DISPOSITION_WON = 'Contracted';
+
+/** 'Contracted' when REI says the deal was acquired, otherwise ''. */
+export function dispositionFromRei(reiStage) {
+  return REI_ACQUIRED.test(text(reiStage)) ? DISPOSITION_WON : '';
 }
 
 /**
