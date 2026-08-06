@@ -691,5 +691,37 @@ check('a reason that is only the prefix leaves no empty clause',
     'Gift Recommendation Reason': 'Gift ordered in REI —' }),
   'gift SENT 2026-08-06 — nothing to do, for your awareness');
 
+console.log('\n--- the sent line does not print the same date twice ---');
+/*
+ * The client, on a real line: "gift SENT 2026-08-04 — ordered 08/04/2026 — nothing to do, for your awareness."
+ * That is one date in two formats, and it never says what was sent. The column keeps the order date — ordered
+ * and delivered are different facts — but a card that already leads with the sent date does not need it.
+ */
+check('an order date on the end is dropped',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+    'Gift Recommendation Reason': 'Gift ordered in REI — moving-supplies gift · $48.32 · ordered 08/04/2026' }),
+  'gift SENT 2026-08-06 — moving-supplies gift · $48.32 — nothing to do, for your awareness');
+/* Marlene's, exactly as the sheet holds it: prefix plus order date and nothing else in between. */
+check('a reason that is ONLY prefix and order date leaves a clean line',
+  giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-04',
+    'Gift Recommendation Reason': 'Gift ordered in REI — ordered 08/04/2026' }),
+  'gift SENT 2026-08-04 — nothing to do, for your awareness');
+/* An order date in the MIDDLE is not touched — only a trailing clause is noise. */
+check('a date that is part of the description survives',
+  /ordered 08\/04\/2026/.test(giftPending({ ...SIGNED, 'Gift Status': 'Sent', 'Gift Sent Date': '2026-08-06',
+    'Gift Recommendation Reason': 'Gift ordered in REI — ordered 08/04/2026 · basket' })), true);
+
+console.log('\n=== the preview prints the same dates the card does ===');
+/*
+ * The preview exists so Cherry can see exactly what will post. It was formatting dates as "Aug 4, 2026" while
+ * the workbook's fmt_ produces "2026-08-04", so on every date it was showing something the card would not —
+ * and the client spotted it on a real line before I did.
+ */
+const PREVIEW_SRC = read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs');
+check("the workbook's fmt_ is yyyy-MM-dd",
+  /function fmt_\(d\)[^\n]*'yyyy-MM-dd'/.test(read('apps-script/Code.combined.gs')), true);
+check('...and the preview matches it', /\$\{x\.getFullYear\(\)\}-\$\{String\(x\.getMonth\(\) \+ 1\)/.test(PREVIEW_SRC), true);
+check('...and no longer prints a month name', /month: 'short'/.test(PREVIEW_SRC), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

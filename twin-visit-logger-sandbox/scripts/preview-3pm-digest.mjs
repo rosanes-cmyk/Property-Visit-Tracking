@@ -22,7 +22,21 @@ import { config } from '../src/config.mjs';
 const SAVE = process.argv.includes('--save');
 
 /* ---- fmt_ and today_, the two helpers the lifted rules call ---- */
-const fmt_ = (d) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+/*
+ * The SAME format the workbook uses, which is not the friendly one.
+ *
+ * Code.combined.gs: fmt_(d) = Utilities.formatDate(..., 'yyyy-MM-dd'). This printed "Aug 4, 2026" instead,
+ * so a preview whose entire job is to show exactly what will post was showing a different date format from
+ * the card — and the client spotted it on a real line before I did.
+ *
+ * Changed here rather than in the workbook on purpose: fmt_ is used by the daily report, the exception queue
+ * and the dashboard as well, so making it friendlier is a separate decision about every date in the system,
+ * not a fix to this preview.
+ */
+const fmt_ = (d) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
 const today_ = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
 
 /* ====== VERBATIM FROM apps-script/ChatNotify.gs — do not edit here ====== */
@@ -298,7 +312,18 @@ function giftPending_(rec) {
        * off here rather than being left out of the column.
        */
       var what = String(rec['Gift Recommendation Reason'] || '').trim()
-        .replace(/^gift ordered in REI\s*[—-]\s*/i, '');
+        .replace(/^gift ordered in REI\s*[—-]\s*/i, '')
+        /*
+         * And the "ordered 08/04/2026" clause, because the line has already given a date.
+         *
+         * Marlene's read "gift SENT 2026-08-04 — ordered 08/04/2026 — nothing to do", which is the same date
+         * twice in two formats and says nothing about what was actually sent. The column keeps the order date
+         * — ordered and delivered are genuinely different facts on the record — but on a card that already
+         * leads with the sent date it is noise.
+         */
+        .replace(/\s*·?\s*\bordered\s+\d{1,2}\/\d{1,2}\/\d{4}\s*$/i, '')
+        .replace(/^·\s*/, '')
+        .trim();
       return 'gift SENT ' + fmt_(sentOn) + (what ? ' — ' + what : '') + ' — nothing to do, for your awareness';
     }
     return '';

@@ -3626,7 +3626,18 @@ function giftPending_(rec) {
        * off here rather than being left out of the column.
        */
       var what = String(rec['Gift Recommendation Reason'] || '').trim()
-        .replace(/^gift ordered in REI\s*[—-]\s*/i, '');
+        .replace(/^gift ordered in REI\s*[—-]\s*/i, '')
+        /*
+         * And the "ordered 08/04/2026" clause, because the line has already given a date.
+         *
+         * Marlene's read "gift SENT 2026-08-04 — ordered 08/04/2026 — nothing to do", which is the same date
+         * twice in two formats and says nothing about what was actually sent. The column keeps the order date
+         * — ordered and delivered are genuinely different facts on the record — but on a card that already
+         * leads with the sent date it is noise.
+         */
+        .replace(/\s*·?\s*\bordered\s+\d{1,2}\/\d{1,2}\/\d{4}\s*$/i, '')
+        .replace(/^·\s*/, '')
+        .trim();
       return 'gift SENT ' + fmt_(sentOn) + (what ? ' — ' + what : '') + ' — nothing to do, for your awareness';
     }
     return '';
