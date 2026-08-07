@@ -461,9 +461,22 @@ const auth = await authorizeGoogle();
 const sheets = google.sheets({ version: 'v4', auth });
 
 const book = await sheets.spreadsheets.get({ spreadsheetId: config.spreadsheetId });
+/*
+ * UNFORMATTED_VALUE, so dates arrive as SERIAL NUMBERS — the shape dateCell_ understands.
+ *
+ * The default is FORMATTED_VALUE, which hands back the string "2026-08-01". dateCell_ accepts a Date (what
+ * Apps Script's getValues() returns) or a serial number, and correctly rejects a string — so every lead read
+ * "no visit date set — nothing is actually booked", including one booked twenty minutes earlier and one the
+ * card had shown as OVERDUE that morning. The rules were right; the preview was feeding them the wrong shape.
+ *
+ * This is what getValues() gives Apps Script, so it is the faithful choice as well as the working one. The
+ * copied rules stay untouched: the fix belongs where the difference is, which is how the sheet is READ.
+ */
 const res = await sheets.spreadsheets.values.get({
   spreadsheetId: config.spreadsheetId,
-  range: `${config.trackerSheet}`
+  range: `${config.trackerSheet}`,
+  valueRenderOption: 'UNFORMATTED_VALUE',
+  dateTimeRenderOption: 'SERIAL_NUMBER'
 });
 const grid = res.data.values || [];
 const headers = (grid[config.trackerHeaderRow - 1] || []).map((h) => String(h).trim());

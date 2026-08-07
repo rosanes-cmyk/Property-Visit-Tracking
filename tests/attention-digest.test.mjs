@@ -462,6 +462,21 @@ check('it posts nothing to Chat', /chatPost_|UrlFetchApp/.test(PREVIEW), false);
 check('it writes nothing to the sheet', /values\.update|values\.append|batchUpdate/.test(PREVIEW), false);
 check('it counts gifts apart from leads too', /const gifts = found\.giftFollowUp\.length/.test(PREVIEW), true);
 /*
+ * The preview must read the sheet in the SHAPE the rules expect.
+ *
+ * dateCell_ accepts a Date — what Apps Script's getValues() returns — or a serial number, and rejects a
+ * string. The API's default is FORMATTED_VALUE, which hands back "2026-08-01", so every lead read "no visit
+ * date set — nothing is actually booked": Upcoming Visit showed 0 on a day with a visit booked for tomorrow.
+ * Carrying the rules verbatim is not enough if they are fed a different shape of value.
+ */
+check('the preview asks for unformatted values',
+  /valueRenderOption: 'UNFORMATTED_VALUE'/.test(PREVIEW), true);
+check('...and dates as serial numbers',
+  /dateTimeRenderOption: 'SERIAL_NUMBER'/.test(PREVIEW), true);
+/* dateCell_ handles exactly those two shapes, and that is why the option above is the right fix. */
+check('dateCell_ takes a Date or a serial, not a string',
+  /if \(raw instanceof Date\)[\s\S]{0,120}typeof raw === 'number'/.test(CHAT), true);
+/*
  * Every Script Property the copied rules read must be DEFINED in the preview.
  *
  * In Apps Script CFG comes from Config.gs. The preview has no Config.gs, so it has to supply one — and did
