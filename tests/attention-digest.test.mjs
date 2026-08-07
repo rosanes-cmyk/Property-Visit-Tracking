@@ -29,8 +29,13 @@ function check(name, got, want) {
 
 const CHAT = read('apps-script/ChatNotify.gs');
 const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
-// From GIFT_SENT_VISIBLE_DAYS, so the constant is lifted with the rules that read it rather than injected.
-const source = slice('var GIFT_SENT_VISIBLE_DAYS', '/**\n * Post the 3pm work queue');
+/*
+ * Starts at DIGEST_LINES_PER_SECTION rather than GIFT_SENT_VISIBLE_DAYS so that shortAddress_ and
+ * clipReason_ — which decide how long a line reads on a phone — are inside the region proved identical.
+ * They were added just above the old start marker, which left the preview free to print full addresses
+ * while the card printed short ones.
+ */
+const source = slice('var DIGEST_LINES_PER_SECTION', '/**\n * Post the 3pm work queue');
 
 /*
  * A FIXED today, so a gift's visibility window is tested rather than the wall clock. Without this, "sent
@@ -38,9 +43,11 @@ const source = slice('var GIFT_SENT_VISIBLE_DAYS', '/**\n * Post the 3pm work qu
  */
 const TODAY_FIXED = new Date(2026, 7, 7);
 
-const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS } = new Function(
+const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS,
+  shortAddress_, clipReason_, DIGEST_REASON_MAX } = new Function(
   'fmt_', 'CFG', 'today_',
-  `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS };`
+  `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS,
+    shortAddress_, clipReason_, DIGEST_REASON_MAX };`
 )(
   (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
   { DIGEST_INCLUDE_IMPORTED: false },
@@ -529,6 +536,59 @@ const order = [
 check('overdue and cancelled first, then soonest',
   order, ['OVERDUE — vi', 'CANCELED — w', 'visit Aug 6,', 'visit Aug 20']);
 
+console.log('\n=== A line short enough to scan on a phone ===');
+/*
+ * The client: "we need to lessen in the notf." The line that prompted it was
+ *
+ *   Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES · Owner: Juan · OVERDUE …
+ *
+ * and half of it is postcode, state and country. This is the same complaint as the five-per-section cap
+ * below — the message is unreadable when it is long — so the two are tested together.
+ */
+check('country, state and postcode come off the end',
+  shortAddress_('2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES'),
+  '2145 Capitol Ave, East Palo Alto');
+check('state and postcode written as one part come off too',
+  shortAddress_('492 Umland Dr, Santa Rosa, CA 95401'), '492 Umland Dr, Santa Rosa');
+check('ZIP+4 is recognised', shortAddress_('1 Main St, Reno, NV, 89501-1234'), '1 Main St, Reno');
+/*
+ * Only from the END, and only parts that ARE one of those things. A flat number is part of the address —
+ * dropping it would send somebody to the wrong door, which is worse than a long line.
+ */
+check('a flat number is kept',
+  shortAddress_('340 Vallejo Dr, Apt 83, Millbrae, CA, 94030'), '340 Vallejo Dr, Apt 83, Millbrae');
+check('an address in any other shape is left alone',
+  shortAddress_('1390 Estudillo Ave, San Leandro'), '1390 Estudillo Ave, San Leandro');
+check('a one-part address survives', shortAddress_('94303'), '94303');
+check('a blank stays blank', shortAddress_(''), '');
+/* Real rows from the tracker, so this is not only tested against addresses I invented. */
+check('the tracker\'s own rows shorten as expected', [
+  shortAddress_('1390 Estudillo Ave, San Leandro, CA 94577'),
+  shortAddress_('7331 Terrace Dr, El Cerrito, CA, 94530, UNITED STATES')
+], ['1390 Estudillo Ave, San Leandro', '7331 Terrace Dr, El Cerrito']);
+
+/*
+ * The reason is one line of a scan, not a paragraph. REI notes run to hundreds of characters and one of
+ * them wraps to five lines on a phone, pushing the sections below it off the screen entirely.
+ */
+check('a short reason is untouched', clipReason_('visit Aug 12, 2026'), 'visit Aug 12, 2026');
+const longReason = 'Seller called back after the walkthrough and said the family are still discussing whether to sell now or wait until the spring market improves, and wants another offer';
+const clipped = clipReason_(longReason);
+check('a long one is cut to the limit', clipped.length <= DIGEST_REASON_MAX, true);
+check('...and marked as cut', /…$/.test(clipped), true);
+/*
+ * Cut at a word boundary — a reason ending mid-word reads like the message itself broke. The proof is that
+ * the kept text is a prefix of the original and the original's very next character is a space, so no word
+ * was sliced through.
+ */
+const kept = clipped.slice(0, -1);
+check('...at a word boundary',
+  longReason.startsWith(kept) && /\s/.test(longReason.charAt(kept.length)), true);
+check('...keeping the front of the sentence', clipped.startsWith('Seller called back after the walkthrough'), true);
+/* Newlines in a note would otherwise break the card's line structure entirely. */
+check('newlines collapse to spaces', clipReason_('called seller\n\n  no answer'), 'called seller no answer');
+check('a blank reason stays blank', clipReason_(''), '');
+
 console.log('\n=== Five leads per section, not eight ===');
 /*
  * Cherry: "it only should have 5 person or lead should be included". Eight pushed the later sections
@@ -545,6 +605,13 @@ check('the heading counts every lead, not just the listed ones',
   /\(' \+ arr\.length \+ '\)/.test(post), true);
 check('the preview uses the same cap',
   /arr\.slice\(0, DIGEST_LINES_PER_SECTION\)/.test(read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs')), true);
+/* Defining the shorteners is not the same as calling them — the card and the preview must both do it. */
+check('the card shortens the address', /shortAddress_\(rec\['Property Address'\]\)/.test(post), true);
+check('...and clips the reason', /clipReason_\(reason\)/.test(post), true);
+const PREVIEW_LINE = read('twin-visit-logger-sandbox/scripts/preview-3pm-digest.mjs');
+check('the preview shortens the address too',
+  /address: shortAddress_\(rec\['Property Address'\]\)/.test(PREVIEW_LINE), true);
+check('...and clips the reason too', /reason: clipReason_\(reason\)/.test(PREVIEW_LINE), true);
 
 console.log('\n=== The work queue posts TWICE a day ===');
 /*

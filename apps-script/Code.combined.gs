@@ -3359,6 +3359,48 @@ function removeChatNewBookingTrigger() {
 var DIGEST_LINES_PER_SECTION = 5;
 
 /*
+ * Shorter lines, at the client's request: "we need to lessen in the notf."
+ *
+ * A line read like this on a phone:
+ *
+ *   Jose Anguiano · 2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES · Owner: Juan · OVERDUE ...
+ *
+ * Half of it is postcode, state and country. Nobody scanning a work queue needs any of the three: they know
+ * which state they work in, and the street and town identify the property. Cherry's original complaint about
+ * this message was that she could not see what to start on without scrolling, and length is what caused it.
+ *
+ * Dropped from the END only, and only when a part IS one of those things — so "340 Vallejo Dr, Apt 83,
+ * Millbrae" keeps its flat number, and an address written in any other shape is left exactly as it is.
+ */
+function shortAddress_(address) {
+  var parts = String(address || '').split(',').map(function (p) { return p.trim(); }).filter(Boolean);
+  var junk = /^(?:usa|us|united states)$/i;                       // country
+  var zip = /^\d{5}(?:-\d{4})?$/;                                 // 94303 or 94303-1234
+  var state = /^[A-Z]{2}$/;                                       // CA
+  var stateZip = /^[A-Z]{2}\s+\d{5}(?:-\d{4})?$/;                // "CA 95401", written as one part
+  while (parts.length > 1) {
+    var last = parts[parts.length - 1];
+    if (junk.test(last) || zip.test(last) || state.test(last) || stateZip.test(last)) { parts.pop(); continue; }
+    break;
+  }
+  return parts.join(', ');
+}
+
+/*
+ * A reason is one line of a scan, not a paragraph.
+ *
+ * REI's notes run to hundreds of characters — call transcripts, order summaries, escrow instructions — and one
+ * of them wraps to five lines on a phone and pushes the sections below it off the screen. The full text is in
+ * the sheet, where there is room for it; this is the version somebody reads while deciding what to pick up.
+ */
+var DIGEST_REASON_MAX = 120;
+
+function clipReason_(reason) {
+  var text = String(reason || '').replace(/\s+/g, ' ').trim();
+  return text.length > DIGEST_REASON_MAX ? text.slice(0, DIGEST_REASON_MAX - 1).replace(/\s+\S*$/, '') + '…' : text;
+}
+
+/*
  * How long a gift stays visible after it has been sent.
  *
  * Three days: long enough that it appears on at least one 11am and one 3pm card, short enough that the
@@ -3733,8 +3775,8 @@ function sendAttentionDigestToChat() {
     HEADERS.forEach(function (h) { var c = idx[h]; rec[h] = c ? v[c - 1] : ''; });
     var owner = String(rec['Assigned Owner'] || '').trim();
     var line = function (reason) {
-      return '<b>' + (rec['Seller Name'] || '(no name)') + '</b> · ' + rec['Property Address'] +
-        ' · Owner: ' + (owner || '<b>UNASSIGNED</b>') + ' · <i>' + reason + '</i>';
+      return '<b>' + (rec['Seller Name'] || '(no name)') + '</b> · ' + shortAddress_(rec['Property Address']) +
+        ' · Owner: ' + (owner || '<b>UNASSIGNED</b>') + ' · <i>' + clipReason_(reason) + '</i>';
     };
 
     var hit = attentionBucket_(rec, today);
