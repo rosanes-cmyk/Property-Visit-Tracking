@@ -10,8 +10,9 @@ echo paused %DATE% %TIME% > data\PAUSED
 echo.
 echo   AUTOMATION PAUSED.
 echo.
-echo   The scheduled runs will start, see this, and stop without reading or writing anything.
-echo   Nothing is posted to Chat by the Node side either.
+echo   PAUSED: the REI re-check, the hourly notes audit, and the WhatsApp watcher.
+echo   STILL RUNNING: new booking emails - tracker row - Juan's calendar - dashboard.
+echo                  A visit booked today still lands where it should.
 echo.
 echo   To run one command anyway:  add --force
 echo      node scripts\recheck-rei.mjs --only "Walker" --yes --force

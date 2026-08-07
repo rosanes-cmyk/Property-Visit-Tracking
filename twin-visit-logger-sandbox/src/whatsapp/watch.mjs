@@ -32,6 +32,9 @@ import { haltForPause } from '../utils/paused.mjs';
 import { notifyChat } from '../utils/notify.mjs';
 import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, localDay } from './plan.mjs';
 
+// Paused before anything is read. WhatsApp is off by default anyway; this stops the timer too.
+if (haltForPause({ force: process.argv.includes('--force') })) process.exit(0);
+
 /*
  * Bump this on every change shipped as a zip.
  *
@@ -689,9 +692,6 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
  * that would look like a random failure rather than two runs colliding. Its own named lock, separate
  * from the REI scrape's, so the two schedules never block each other.
  */
-// Paused before the lock. WhatsApp is off by default anyway; this stops the timer too.
-if (haltForPause({ force: process.argv.includes('--force') })) process.exit(0);
-
 const release = await acquireLock('whatsapp');
 if (!release) {
   console.log('Another WhatsApp run is still going — exiting so the two do not collide.');

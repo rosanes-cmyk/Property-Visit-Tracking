@@ -34,6 +34,7 @@ import { config } from '../src/config.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { visitOutcomeFromNotes } from '../src/rei/cancel-signal.mjs';
 import { STAGE_ADVANCE_FROM, STAGE_ON_COMPLETION } from '../src/rei/recheck.mjs';
+import { haltForPause } from '../src/utils/paused.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -51,6 +52,15 @@ const LIMIT = (() => {
  * cancellation arrived through the REI note sync rather than being typed by hand.
  */
 const NOTE_COLUMNS = ['Visit Notes', 'Automation Note', 'Latest Activity', 'Next Action', 'Seller Motivation'];
+
+/*
+ * Paused before anything is read or written.
+ *
+ * This one writes Visit Status and Current Stage from the tracker's own note columns, hourly, on a schedule
+ * — and it was the only auto-update with no pause on it, so a paused system was still moving stages. The
+ * client asked to stop "the check in REI auto update", and this is that, done from the sheet side.
+ */
+if (haltForPause({ force: args.includes('--force') })) process.exit(0);
 
 const auth = await authorizeGoogle();
 const sheets = google.sheets({ version: 'v4', auth });

@@ -6,7 +6,11 @@
 # with none of them, and failing because one was already gone would be unhelpful.
 $ErrorActionPreference = "Continue"
 
-foreach ($name in @("Twin Visit Logger Sandbox", "Twin Visit Logger WhatsApp")) {
+# ALL FOUR the installer creates. This listed two, so "Nothing is scheduled any more" was untrue: the REI
+# re-check and the hourly notes audit carried on running, and the notes audit writes Visit Status and
+# Current Stage. Somebody who ran this to stop the automation still had their sheet changing under them.
+foreach ($name in @("Twin Visit Logger Sandbox", "Twin Visit Logger WhatsApp",
+                    "Twin Visit Logger REI Recheck", "Twin Visit Logger Notes Audit")) {
   & schtasks.exe /Query /TN $name > $null 2>&1
   if ($LASTEXITCODE -ne 0) {
     Write-Host "  not present: $name"

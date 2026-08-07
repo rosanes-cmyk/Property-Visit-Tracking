@@ -77,12 +77,57 @@ console.log('\n=== every entry point honours it, before the lock and before any 
  * open or the sheet is read — a pause that still opens REI and still holds the lock is not a pause.
  */
 const read = (p) => fs.readFileSync(path.resolve('twin-visit-logger-sandbox', p), 'utf8');
-for (const file of ['scripts/recheck-rei.mjs', 'src/run-once.mjs', 'src/whatsapp/watch.mjs']) {
+for (const file of ['scripts/recheck-rei.mjs', 'scripts/audit-notes.mjs', 'src/whatsapp/watch.mjs']) {
   const src = read(file);
   check(`${file} checks the pause`, /haltForPause\(/.test(src), true);
   check(`${file} honours --force`, /--force/.test(src), true);
-  check(`${file} checks it BEFORE taking the lock`,
-    src.indexOf('haltForPause(') < src.indexOf('await acquireLock'), true);
+  /*
+   * Only where there IS a lock. audit-notes takes none — it opens no browser and reads the sheet in one
+   * API call — so asserting an order against a lock it does not have would fail on a file that is correct.
+   */
+  if (src.includes('await acquireLock')) {
+    check(`${file} checks it BEFORE taking the lock`,
+      src.indexOf('haltForPause(') < src.indexOf('await acquireLock'), true);
+  }
+  /* Universal version of the same rule: nothing may be read or written before the pause is consulted. */
+  const firstIO = ['authorizeGoogle()', 'launchReiContext(', 'page.goto(']
+    .map((m) => src.indexOf(m)).filter((i) => i >= 0).sort((a, b) => a - b)[0];
+  if (firstIO !== undefined) {
+    check(`${file} checks it before touching anything`, src.indexOf('haltForPause(') < firstIO, true);
+  }
+}
+
+console.log('\n--- what the pause must NOT stop ---');
+/*
+ * The client, after seeing it stop everything: "i said you only pause the check in REI auto update, not the
+ * auto add in calendar and check in email and auto update the dashboard, right?"
+ *
+ * Right, and I had over-scoped it. run-once is the INTAKE — a colleague books a visit, the email arrives, the
+ * row is created and the calendar event goes on Juan's day. Pausing that means a visit booked today exists
+ * nowhere but REI, and the whole team works off the calendar. The pause is for the jobs that go BACK to
+ * already-tracked leads and rewrite them, which is what "the check in REI" means.
+ */
+const INTAKE = read('src/run-once.mjs');
+check('the email intake is NOT paused', /haltForPause/.test(INTAKE), false);
+check('...and does not import the switch', /paused\.mjs/.test(INTAKE), false);
+
+/*
+ * The notes audit was the gap. It writes Visit Status and Current Stage from the tracker's own note columns,
+ * hourly, on its own scheduled task — and had no pause on it at all, so a "paused" system was still moving
+ * stages. It is an auto-update of already-tracked leads, so it pauses.
+ */
+check('the hourly notes audit IS paused', /haltForPause/.test(read('scripts/audit-notes.mjs')), true);
+
+/*
+ * And the uninstaller has to remove every task the installer creates. It listed two of four, so "Nothing is
+ * scheduled any more" was untrue — the REI re-check and the notes audit carried on.
+ */
+const UNINSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/uninstall-windows-task.ps1'), 'utf8');
+const INSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/install-windows-task.ps1'), 'utf8');
+const created = [...INSTALL.matchAll(/New-VisitTask -Name "([^"]+)"/g)].map((m) => m[1]);
+check('the installer creates four tasks', created.length, 4);
+for (const name of created) {
+  check(`uninstall removes "${name}"`, UNINSTALL.includes(`"${name}"`), true);
 }
 
 console.log('\n--- the commands a non-developer actually runs ---');

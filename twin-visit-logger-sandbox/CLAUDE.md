@@ -172,9 +172,14 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
 
 ## Pausing
 
-`AUTOMATION_PAUSED=true`, or a file at `./data/PAUSED` (written by `scripts\pause.cmd`), stops every
-scheduled entry point — the re-check, `run-once`, the WhatsApp watcher — before the lock and before any
-Gmail, REI or Sheets access. Either one pauses; BOTH must be cleared to resume, and `resume.cmd` says so
+`AUTOMATION_PAUSED=true`, or a file at `./data/PAUSED` (written by `scripts\pause.cmd`), stops the jobs that
+go BACK to already-tracked leads and rewrite them — the REI re-check, the hourly notes audit, the WhatsApp
+watcher — before the lock and before any REI or Sheets access.
+
+**It does NOT stop the intake.** `run-once` (a booking email → tracker row → Juan's calendar) keeps running,
+at the client's correction: *"i said you only pause the check in REI auto update, not the auto add in
+calendar and check in email and auto update the dashboard, right?"* Pausing intake means a visit booked
+today exists nowhere but REI, and the team works off the calendar. Either one pauses; BOTH must be cleared to resume, and `resume.cmd` says so
 when it removes the file but `.env` still holds the flag.
 
 Asked for by the client while debugging: *"can we stop the auto update, we need to pause this for now, we

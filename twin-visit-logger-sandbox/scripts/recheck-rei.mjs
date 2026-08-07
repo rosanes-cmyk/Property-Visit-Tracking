@@ -63,6 +63,16 @@ const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? String(a
  * the same situation and now says so explicitly rather than being inferred.
  */
 const WAIT = args.includes('--wait');
+
+/*
+ * Paused stops here: before the lock, before the browser, and before the sheet is read.
+ *
+ * It sat just above the lock, which is after the tracker has been fetched and the candidates picked — so a
+ * paused run printed "378 live row(s) in the tab" and its whole skip breakdown before admitting it was
+ * paused, directly under a message claiming nothing had been read. Harmless in itself, since that is a read,
+ * but a pause has to be the first thing that happens or the log is telling two different stories.
+ */
+if (haltForPause({ force: args.includes('--force') })) process.exit(0);
 /*
  * --include-closed: sweep the leads somebody parked, too.
  *
@@ -261,14 +271,6 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
  * losing the race three times in a row is how this actually went. Waiting is chosen by --only, which is
  * already the flag that means "I am doing this by hand, now".
  */
-/*
- * Paused stops here — before the lock, before the browser, before a single Sheets read.
- *
- * The client, mid-debugging: "can we stop the auto update, we need to pause this for now." A pause that
- * still opened REI and still held the lock would not be a pause.
- */
-if (haltForPause({ force: args.includes('--force') })) process.exit(0);
-
 const release = (ONLY || WAIT)
   ? await acquireLockWaiting('run', {
     onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
