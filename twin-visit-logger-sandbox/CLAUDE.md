@@ -170,6 +170,26 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
   update for this in the chat, it will confuse my teammate; as long as its updating in the dashboard its
   fine."* Only a `Visit Status` change and a new gift post. Do not add notifications without asking.
 
+## Pausing
+
+`AUTOMATION_PAUSED=true`, or a file at `./data/PAUSED` (written by `scripts\pause.cmd`), stops every
+scheduled entry point — the re-check, `run-once`, the WhatsApp watcher — before the lock and before any
+Gmail, REI or Sheets access. Either one pauses; BOTH must be cleared to resume, and `resume.cmd` says so
+when it removes the file but `.env` still holds the flag.
+
+Asked for by the client while debugging: *"can we stop the auto update, we need to pause this for now, we
+have bug in the system."*
+
+It is in the code, not the scheduler, for the reason already learned over WhatsApp: a disabled scheduled
+task is not an off switch, and on this machine `schtasks /Change /DISABLE` answered "Access is denied" for
+one of the two tasks, so the documented workaround did not even work.
+
+`--force` runs one command anyway. Pausing is about the automation acting unattended; it must not stop the
+person debugging it from checking a lead.
+
+**Not covered:** the 11am/3pm Chat digest, which Apps Script posts from Google's own timers. Stopping that
+means deleting its triggers in the Apps Script editor, and `pause.cmd` says so on screen.
+
 ## Calendar behavior
 
 - Timezone: `America/Los_Angeles` unless `.env` explicitly changes it.

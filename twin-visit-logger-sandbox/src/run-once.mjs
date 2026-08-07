@@ -3,10 +3,14 @@ import { authorizeGoogle } from './google/auth.mjs';
 import { config } from './config.mjs';
 import { processInbox } from './services/process.mjs';
 import { acquireLock } from './utils/lock.mjs';
+import { haltForPause } from './utils/paused.mjs';
 import { createLogger } from './utils/logger.mjs';
 
 export async function runOnce() {
   const logger = createLogger(config.logLevel);
+  // Paused before the lock and before Gmail is touched — see src/utils/paused.mjs.
+  if (haltForPause({ force: process.argv.includes('--force') })) return;
+
   const release = await acquireLock();
   if (!release) {
     logger.warn('Another run is active. This run was skipped to prevent duplicate browser and calendar work.');

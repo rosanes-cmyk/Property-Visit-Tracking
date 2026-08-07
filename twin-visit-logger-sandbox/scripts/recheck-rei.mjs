@@ -39,6 +39,7 @@ import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
+import { haltForPause } from '../src/utils/paused.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, REI_WINS, RECHECK_PER_RUN
@@ -260,6 +261,14 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
  * losing the race three times in a row is how this actually went. Waiting is chosen by --only, which is
  * already the flag that means "I am doing this by hand, now".
  */
+/*
+ * Paused stops here — before the lock, before the browser, before a single Sheets read.
+ *
+ * The client, mid-debugging: "can we stop the auto update, we need to pause this for now." A pause that
+ * still opened REI and still held the lock would not be a pause.
+ */
+if (haltForPause({ force: args.includes('--force') })) process.exit(0);
+
 const release = (ONLY || WAIT)
   ? await acquireLockWaiting('run', {
     onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
