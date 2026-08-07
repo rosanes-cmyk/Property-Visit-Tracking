@@ -71,6 +71,38 @@ const OPENABLE = /^(tasks?|appointments?|notes?|activity|timeline|history|proper
 
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/*
+ * The tab strip, addressed by the company it keeps.
+ *
+ * REI's contact page carries the word "Notes" TWICE: once in the tab strip, and once as a field label on the
+ * About panel — "Notes / The lead gave the name and number of his cousin". The text fallback below takes
+ * .last(), so it clicked the field label, reported `clicked an element whose text is exactly "Notes"`, and
+ * left the page on About. Every note then read as nothing, for every contact, and the message said the click
+ * had worked.
+ *
+ * The tabs are siblings of each other — About · Chat · Activities · Notes · Tasks · Files · Workflows ·
+ * Properties — and no About field label has "About" for a sibling. So "the element next to About" identifies
+ * the strip without depending on class names, which REI scrambles to css-0 anyway.
+ *
+ * Both directions, because a strip could put a tab before About in the DOM even when it renders after.
+ */
+export function tabStripXPath(name) {
+  const quoted = xpathLiteral(String(name).trim());
+  return 'xpath=//*[normalize-space(.)="About"]/following-sibling::*[normalize-space(.)=' + quoted + ']'
+    + ' | //*[normalize-space(.)="About"]/preceding-sibling::*[normalize-space(.)=' + quoted + ']';
+}
+
+/*
+ * XPath has no escape character, so a value containing a quote has to be built with concat(). No REI tab
+ * name contains one, and a helper that silently breaks on the day one does is worse than four lines here.
+ */
+export function xpathLiteral(value) {
+  const s = String(value);
+  if (!s.includes('"')) return `"${s}"`;
+  if (!s.includes("'")) return `'${s}'`;
+  return `concat("${s.split('"').join('", \'"\', "')}")`;
+}
+
 /**
  * Open a panel on the contact page by its visible name, so its contents render. Read-only otherwise.
  *
@@ -101,6 +133,21 @@ export async function openPanel(page, labels = [], { timeout = 4000 } = {}) {
      * role at all — and REI's class names are scrambled (css-0), so there is no class to fall back on either.
      * Either shape is invisible to the two roles this tried.
      */
+    /*
+     * The tab strip FIRST, before the roles and before the text fallback.
+     *
+     * Not an optimisation — a correctness fix. On Jose Anguiano's page the roles matched nothing and the text
+     * fallback clicked the About panel's "Notes" field label, so the page stayed on About and every note read
+     * as nothing while the log said the click had succeeded.
+     */
+    const inStrip = page.locator(tabStripXPath(name)).first();
+    if (await inStrip.count().catch(() => 0)) {
+      await inStrip.click({ timeout }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+      return { opened: true, how: `clicked "${name}" in the tab strip` };
+    }
+
     for (const role of ['tab', 'button', 'link', 'menuitem']) {
       const target = page.getByRole(role, { name: exact }).first();
       if (!(await target.count().catch(() => 0))) continue;

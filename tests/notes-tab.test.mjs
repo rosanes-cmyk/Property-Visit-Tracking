@@ -16,6 +16,7 @@
  */
 import { parseNotesPanel, readNotesTab, NOTES_KEPT } from '../twin-visit-logger-sandbox/src/rei/notes-tab.mjs';
 import { latestReiNote } from '../twin-visit-logger-sandbox/src/rei/notes.mjs';
+import { tabStripXPath, xpathLiteral } from '../twin-visit-logger-sandbox/src/rei/tasks.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -197,6 +198,35 @@ check('Marichu\'s cell would now carry the deed question',
   /deed is held in a trust/.test(latestReiNote(notes.map((n) => n.body))), true);
 check('...and not the older call summary',
   /transferred for Cherry/.test(latestReiNote(notes.map((n) => n.body))), false);
+
+console.log('\n=== the RIGHT "Notes" is clicked ===');
+/*
+ * REI's contact page carries the word "Notes" twice: the tab, and a field label on the About panel —
+ * "Notes / The lead gave the name and number of his cousin". The text fallback takes .last(), so it clicked
+ * the FIELD LABEL, reported `clicked an element whose text is exactly "Notes"`, and left the page on About.
+ * The doctor printed the proof: the tab strip at lines 40-47 and a second "Notes" at line 55, with About's
+ * own content following it.
+ *
+ * The tabs are siblings of each other and no About field label has "About" for a sibling, so "the element
+ * next to About" identifies the strip — without depending on class names, which REI scrambles to css-0.
+ */
+const XP = tabStripXPath('Notes');
+check('it is anchored to the tab strip, not to any element saying Notes', /"About"/.test(XP), true);
+check('...as a sibling relationship', /following-sibling|preceding-sibling/.test(XP), true);
+check('...in both directions', /following-sibling/.test(XP) && /preceding-sibling/.test(XP), true);
+check('...matching the whole text, so "Notes (29)" cannot match',
+  /normalize-space\(\.\)="Notes"/.test(XP), true);
+check('it is an xpath locator', XP.startsWith('xpath='), true);
+/* Quoting, so a label can never break out of the expression. */
+check('a plain label is double-quoted', xpathLiteral('Notes'), '"Notes"');
+check('a label with a quote falls back to single quotes', xpathLiteral('Say "hi"'), "'Say \"hi\"'");
+check('one with both is built with concat', /^concat\(/.test(xpathLiteral(`he said "no" it's fine`)), true);
+
+const TASKS = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/tasks.mjs'), 'utf8');
+/* Order matters: the strip must be tried BEFORE the .last() text fallback that caused this. */
+check('the strip is tried before the text fallback',
+  TASKS.indexOf('tabStripXPath(name)') < TASKS.indexOf(".filter({ hasText: exact }).last()"), true);
+check('...and it says which way it got in', /clicked "\$\{name\}" in the tab strip/.test(TASKS), true);
 
 console.log('\n=== the scraper actually opens the tab ===');
 const SCRAPER = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/scraper.mjs'), 'utf8');
