@@ -115,7 +115,7 @@ export function xpathLiteral(value) {
  * third one's "tasks" were NOTES whose text happened to contain the phrase. No real REI task row had ever
  * actually been read, and an empty result was being reported as "REI holds no appointment".
  */
-export async function openPanel(page, labels = [], { timeout = 4000 } = {}) {
+export async function openPanel(page, labels = [], { timeout = 4000, nth = 0 } = {}) {
   for (const label of labels) {
     const name = String(label).trim();
     if (!OPENABLE.test(name)) continue;
@@ -140,12 +140,28 @@ export async function openPanel(page, labels = [], { timeout = 4000 } = {}) {
      * fallback clicked the About panel's "Notes" field label, so the page stayed on About and every note read
      * as nothing while the log said the click had succeeded.
      */
-    const inStrip = page.locator(tabStripXPath(name)).first();
-    if (await inStrip.count().catch(() => 0)) {
-      await inStrip.click({ timeout }).catch(() => {});
+    /*
+     * `nth` exists because a click can report success and not move the page.
+     *
+     * The scraper expands eleven sidebar notes BEFORE opening a tab, which the doctor does after — and with
+     * the page in that state this matched something that was not the tab. Three contacts came back with the
+     * About page still showing, under a message saying the tab strip had been clicked.
+     *
+     * So the caller retries with nth = 1, 2 and keeps whichever actually switched. Trying candidates and
+     * verifying by outcome beats guessing which element is the real tab, which is the guess that has now
+     * failed twice.
+     */
+    const strip = page.locator(tabStripXPath(name));
+    const stripCount = await strip.count().catch(() => 0);
+    if (stripCount > nth) {
+      await strip.nth(nth).click({ timeout }).catch(() => {});
       await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
       await page.waitForTimeout(2000);
-      return { opened: true, how: `clicked "${name}" in the tab strip` };
+      return {
+        opened: true,
+        how: `clicked "${name}" in the tab strip`
+          + (stripCount > 1 ? ` (match ${nth + 1} of ${stripCount})` : '')
+      };
     }
 
     for (const role of ['tab', 'button', 'link', 'menuitem']) {

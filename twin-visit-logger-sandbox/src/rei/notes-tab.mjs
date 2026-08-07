@@ -147,7 +147,7 @@ export const NOTES_KEPT = 8;
  */
 export async function readNotesTab(page, { openPanel, expandTruncatedText, labels = ['Notes'], keep = NOTES_KEPT } = {}) {
   try {
-    const opened = await openPanel(page, labels);
+    let opened = await openPanel(page, labels, { nth: 0 });
     if (!opened || !opened.opened) return { notes: [], how: opened?.how || 'no Notes tab found' };
 
     /*
@@ -171,11 +171,14 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
       if (attempts) {
         await page.waitForTimeout(1500);
         /*
-         * Clicked AGAIN, not merely waited for. A click that reports success and does not switch the panel
-         * is indistinguishable from one that switched it slowly, and re-clicking a tab is harmless — it is
-         * the same navigation a person would repeat if the page had not moved.
+         * A DIFFERENT candidate each time, not the same click repeated.
+         *
+         * The first version waited and re-clicked the same element, and all three contacts still came back
+         * with the About page showing under a message saying the tab strip had been clicked. More than one
+         * element can match, and only one of them is the tab, so the retries walk through them and the loop
+         * keeps whichever actually produced notes. Verifying by outcome beats guessing which is the tab.
          */
-        await openPanel(page, labels);
+        opened = await openPanel(page, labels, { nth: attempts }) || opened;
       }
       const expanded = await expandTruncatedText(page);
       clicked += expanded?.clicked || 0;

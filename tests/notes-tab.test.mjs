@@ -228,6 +228,26 @@ const reclick = await readNotesTab(
   });
 check('the tab is re-opened on each retry', opens, 3);
 check('...and it still gave up cleanly', reclick.notes, []);
+/*
+ * And a DIFFERENT candidate each time. Waiting and re-clicking the same element was the first attempt at
+ * this and all three contacts still came back showing the About page under a message saying the tab strip
+ * had been clicked. More than one element can match; only one is the tab.
+ */
+const tried = [];
+await readNotesTab(
+  { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) },
+  {
+    openPanel: async (_p, _l, opts) => { tried.push(opts?.nth); return { opened: true, how: 'clicked' }; },
+    expandTruncatedText: async () => ({ clicked: 0 })
+  });
+check('each retry tries the next match', tried, [0, 1, 2]);
+
+/* And openPanel must actually honour nth rather than always taking the first. */
+const OPEN = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/tasks.mjs'), 'utf8');
+check('openPanel takes an nth', /openPanel\(page, labels = \[\], \{ timeout = 4000, nth = 0 \} = \{\}\)/.test(OPEN), true);
+check('...and uses it on the tab strip', /strip\.nth\(nth\)\.click/.test(OPEN), true);
+check('...and says which match it took when there is more than one',
+  /match \$\{nth \+ 1\} of \$\{stripCount\}/.test(OPEN), true);
 
 console.log('\n--- a tab that will not open loses nothing ---');
 /*
