@@ -195,6 +195,39 @@ function dateCell_(raw) {
   return null;
 }
 
+/*
+ * A TIME cell, rendered as a time.
+ *
+ * "visit TODAY at Sat Dec 30 1899 16:00:00 GMT-0800". A time-only cell is a Date on the spreadsheet epoch —
+ * 30 December 1899 — and this was doing String() on it. The bug was always here; it only became visible once
+ * dates parsed, because until then no line ever got as far as printing a time.
+ *
+ * Three shapes, because three things reach this: a Date from Apps Script's getValues(), a fraction of a day
+ * from the Sheets API, and plain text like "10:30 AM" from a cell somebody typed. Anything unrecognised is
+ * returned untouched rather than blanked — an odd-looking time still tells the reader more than nothing.
+ */
+function clock_(hours, minutes) {
+  var h = ((hours % 12) + 12) % 12;
+  return (h === 0 ? 12 : h) + ':' + (minutes < 10 ? '0' : '') + minutes + ' ' + (hours % 24 < 12 ? 'AM' : 'PM');
+}
+
+function timeCell_(raw) {
+  if (raw instanceof Date) return clock_(raw.getHours(), raw.getMinutes());
+  if (typeof raw === 'number' && isFinite(raw)) {
+    // The Sheets API sends a time as a fraction of a day: 0.5 is noon.
+    var mins = Math.round((raw - Math.floor(raw)) * 1440);
+    if (!mins) return '';
+    return clock_(Math.floor(mins / 60) % 24, mins % 60);
+  }
+  var s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  var m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/.exec(s);
+  if (!m) return s;
+  var h = Number(m[1]);
+  if (m[3]) { h = h % 12; if (/p/i.test(m[3])) h += 12; }
+  return clock_(h % 24, Number(m[2]));
+}
+
 /** Is this lead finished, or not a lead at all? Nothing excluded here ever reaches the notification. */
 function excludedFromDigest_(rec) {
   var stage = String(rec['Current Stage'] || '').trim();
@@ -321,7 +354,7 @@ function attentionBucket_(rec, today) {
             + ' — nobody has recorded what happened' };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
-      var time = String(rec['Visit Time'] || '').trim();
+      var time = timeCell_(rec['Visit Time']);
       return { key: b.key, sort: at, reason: 'visit ' + when + (time ? ' at ' + time : '') };
     }
 

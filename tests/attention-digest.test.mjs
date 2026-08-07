@@ -44,10 +44,10 @@ const source = slice('var DIGEST_LINES_PER_SECTION', '/**\n * Post the 3pm work 
 const TODAY_FIXED = new Date(2026, 7, 7);
 
 const { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS,
-  shortAddress_, clipReason_, DIGEST_REASON_MAX } = new Function(
+  shortAddress_, clipReason_, DIGEST_REASON_MAX, timeCell_ } = new Function(
   'fmt_', 'CFG', 'today_',
   `${source}\nreturn { attentionBucket_, giftPending_, excludedFromDigest_, digestMoney_, ATTENTION_BUCKETS,
-    shortAddress_, clipReason_, DIGEST_REASON_MAX };`
+    shortAddress_, clipReason_, DIGEST_REASON_MAX, timeCell_ };`
 )(
   (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
   { DIGEST_INCLUDE_IMPORTED: false },
@@ -123,6 +123,37 @@ check('every bucket names one action', ATTENTION_BUCKETS.every((b) => /\.$/.test
 const STAGES = (read('apps-script/Config.gs').match(/'Current Stage':\s*\[([^\]]+)\]/) || [])[1] || '';
 check('every stage exists in the Current Stage dropdown',
   STAGE_BUCKETS.every((b) => STAGES.includes(`'${b.stage}'`)), true);
+
+console.log('\n=== a TIME cell is rendered as a time ===');
+/*
+ * The card posted: "visit TODAY at Sat Dec 30 1899 16:00:00 GMT-0800".
+ *
+ * A time-only cell is a Date on the spreadsheet epoch — 30 December 1899 — and the reason line was doing
+ * String() on it. The bug was always here; it only became visible once dates parsed, because until then no
+ * line ever got as far as printing a time.
+ */
+check('a spreadsheet time Date', timeCell_(new Date(1899, 11, 30, 16, 0)), '4:00 PM');
+check('...in the morning', timeCell_(new Date(1899, 11, 30, 10, 30)), '10:30 AM');
+check('midnight is 12 AM', timeCell_(new Date(1899, 11, 30, 0, 5)), '12:05 AM');
+check('noon is 12 PM', timeCell_(new Date(1899, 11, 30, 12, 0)), '12:00 PM');
+/* The Sheets API sends a time as a fraction of a day. */
+check('a fraction of a day', timeCell_(0.5), '12:00 PM');
+check('...and a quarter past four', timeCell_(0.6875), '4:30 PM');
+/* Text a person typed is normalised rather than reformatted into something else. */
+check('text stays readable', timeCell_('10:30 AM'), '10:30 AM');
+check('24-hour text becomes 12-hour', timeCell_('16:00'), '4:00 PM');
+/* Nothing recognisable is returned untouched — an odd time tells the reader more than a blank. */
+check('unparseable text is kept', timeCell_('TBC'), 'TBC');
+check('blank stays blank', timeCell_(''), '');
+check('null is safe', timeCell_(null), '');
+/* And the whole line, which is what the client actually saw go wrong. */
+check('the visit line reads properly',
+  reason({ ...BASE, 'Visit Date': TODAY, 'Visit Time': new Date(1899, 11, 30, 16, 0) }),
+  'visit TODAY at 4:00 PM');
+check('no 1899 can reach the card',
+  /1899/.test(reason({ ...BASE, 'Visit Date': TODAY, 'Visit Time': new Date(1899, 11, 30, 16, 0) })), false);
+/* The rules must not go back to stringifying the cell. */
+check('the reason line uses timeCell_', /var time = timeCell_\(rec\['Visit Time'\]\);/.test(source), true);
 
 console.log('\n=== a date stored as TEXT is still a date ===');
 /*
