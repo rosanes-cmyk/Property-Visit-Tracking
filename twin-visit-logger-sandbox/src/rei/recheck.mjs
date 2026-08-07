@@ -769,7 +769,16 @@ export function diffFromRei(row, reiFields) {
    * walkthrough" is somebody's own note and is never touched, exactly as an owner's name is not.
    */
   const reason = text(reiFields['Gift Recommendation Reason']);
-  if (giftReasonUpgradable(text(row['Gift Recommendation Reason']), reason)) {
+  /*
+   * Only if the REI_WINS loop above has not already recorded it.
+   *
+   * 'Gift Recommendation Reason' is in REI_WINS *and* has this upgrade rule, so Rob Walker's run listed the
+   * same change twice on one line and reported "wrote 6 cell(s)" for five distinct fields. The write is
+   * harmless — the same value lands in the same cell — but a person reading the run cannot tell a duplicate
+   * from two genuine edits, and the Automation Log gets two rows for one change.
+   */
+  if (!changes.some((c) => c.field === 'Gift Recommendation Reason')
+    && giftReasonUpgradable(text(row['Gift Recommendation Reason']), reason)) {
     changes.push({ field: 'Gift Recommendation Reason', from: text(row['Gift Recommendation Reason']), to: reason });
   }
 

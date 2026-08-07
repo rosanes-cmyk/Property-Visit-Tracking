@@ -89,6 +89,19 @@ const raw = {
    */
   chatAlerts: (process.env.CHAT_ALERTS || 'on').trim().toLowerCase() !== 'off',
   /*
+   * The full PROPERTY INSPECTION briefing in Google Chat. OFF.
+   *
+   * It went to Chat when WhatsApp was switched off, on the reasoning that the briefing was the valuable part
+   * and should survive. The client has now seen it land there and decided otherwise: "it should be in the
+   * whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable
+   * again."
+   *
+   * Nothing is lost by it. A new booking still creates the row, the dashboard entry and Juan's calendar
+   * event, and still appears on the 11am/3pm work queue under Upcoming Visit. What stops is a second, longer
+   * copy of the same visit in the alerts channel.
+   */
+  chatVisitBriefing: bool(process.env.CHAT_VISIT_BRIEFING, false),
+  /*
    * WHATSAPP_ENABLED=false stops the WhatsApp step dead, wherever it is called from.
    *
    * THREE numbers have now been banned or restricted running this: automating WhatsApp Web breaches Meta's

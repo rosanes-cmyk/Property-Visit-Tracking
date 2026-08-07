@@ -181,7 +181,18 @@ export async function processInbox(auth, logger) {
         });
 
         /*
-         * The FULL briefing goes to Google Chat, not just "a visit was logged".
+         * The FULL briefing belongs to the WhatsApp group, and is OFF in Chat.
+         *
+         * It was routed here when WhatsApp was switched off, on the reasoning that the briefing was the
+         * valuable part and should survive. The client has now seen it land in the alerts channel and
+         * decided otherwise: "it should be in the whatsapp only, so we dont need that in the alert gc, and
+         * should be only in the whatsapp if we enable again." CHAT_VISIT_BRIEFING=true puts it back.
+         *
+         * Nothing is lost by that. The booking still creates the row, the dashboard entry and Juan's
+         * calendar event, and still appears on the 11am/3pm work queue under Upcoming Visit — so Chat still
+         * tells the team about the visit, once, in the place they already read.
+         *
+         * The original reasoning, kept because it is still true of the briefing itself:
          *
          * The WhatsApp number used for this got banned — automating WhatsApp Web breaches their terms and Meta
          * detects it, which was a stated risk from the start and has now happened. But the valuable thing was
@@ -191,7 +202,7 @@ export async function processInbox(auth, logger) {
          *
          * Seller phone and email are stripped by notifyChat regardless of what is assembled here.
          */
-        if (!config.dryRun) {
+        if (!config.dryRun && config.chatVisitBriefing) {
           const briefing = buildInspectionNote({
             propertyAddress: partialVisit.propertyAddress,
             sellerName: partialVisit.sellerName,

@@ -254,7 +254,13 @@ start of the project and it happened. No technique removes that risk, and the of
 API has no group management at all, so there is no compliant way to automate the group. Do not re-enable it or
 propose a "safer" scraping approach; the honest answer is that one does not exist.
 
-The briefing now goes to Google Chat (`CHAT_WEBHOOK_URL`), which is the client's own Workspace and permitted to
+The briefing is a WhatsApp thing and does NOT go to Google Chat. It was routed there when WhatsApp was
+switched off; the client saw it land in the alerts channel and decided otherwise — *"it should be in the
+whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable again."*
+`CHAT_VISIT_BRIEFING` defaults to `false`. Nothing is lost: a booking still creates the row, the dashboard
+entry and Juan's calendar event, and still appears on the 11am/3pm work queue under Upcoming Visit.
+
+Google Chat (`CHAT_WEBHOOK_URL`) remains the client's own Workspace and permitted to
 automate. That was always the valuable part — the visitor having the property, the drive plan, the numbers and
 the call in front of them before setting off. The group itself is created by hand, as the team did before.
 

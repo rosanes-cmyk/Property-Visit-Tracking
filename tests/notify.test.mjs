@@ -97,5 +97,33 @@ check('the digest is posted by Apps Script, not by this notifier',
 check('...and nothing in Apps Script reads CHAT_ALERTS',
   /CHAT_ALERTS/.test(fs.readFileSync('apps-script/ChatNotify.gs', 'utf8')), false);
 
+console.log('\n=== the visit briefing is a WhatsApp thing, not a Chat thing ===');
+/*
+ * The client, after seeing a full PROPERTY INSPECTION card arrive in the alerts channel: "it should be in
+ * the whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable
+ * again."
+ *
+ * It was routed to Chat when WhatsApp was switched off — the briefing was the valuable part and the group
+ * was not. That reasoning holds for the briefing; it does not make the alerts channel the right home for it.
+ *
+ * Nothing is lost: the booking still creates the row, the dashboard entry and Juan's calendar event, and
+ * still appears on the 11am/3pm work queue under Upcoming Visit.
+ */
+const PROCESS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/services/process.mjs', import.meta.url), 'utf8');
+check('the briefing post is gated',
+  /if \(!config\.dryRun && config\.chatVisitBriefing\) \{\s*\n\s*const briefing = buildInspectionNote/.test(PROCESS), true);
+const CONFIG = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/config.mjs', import.meta.url), 'utf8');
+check('...and defaults to OFF',
+  /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, false\)/.test(CONFIG), true);
+/*
+ * Its own switch, not borrowed from CHAT_ALERTS. Those are different decisions: CHAT_ALERTS silences the
+ * per-lead interruptions, this one decides where the briefing lives. Folding them together would mean
+ * turning the briefing off could only be done by silencing everything.
+ */
+check('it is a separate switch from CHAT_ALERTS',
+  CONFIG.includes('CHAT_VISIT_BRIEFING') && CONFIG.includes('CHAT_ALERTS'), true);
+check('...and the briefing gate does not read chatAlerts',
+  /config\.chatAlerts[\s\S]{0,80}buildInspectionNote/.test(PROCESS), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
