@@ -461,6 +461,23 @@ check('it is marked as a copy, not a second implementation', /VERBATIM FROM apps
 check('it posts nothing to Chat', /chatPost_|UrlFetchApp/.test(PREVIEW), false);
 check('it writes nothing to the sheet', /values\.update|values\.append|batchUpdate/.test(PREVIEW), false);
 check('it counts gifts apart from leads too', /const gifts = found\.giftFollowUp\.length/.test(PREVIEW), true);
+/*
+ * Every Script Property the copied rules read must be DEFINED in the preview.
+ *
+ * In Apps Script CFG comes from Config.gs. The preview has no Config.gs, so it has to supply one — and did
+ * not, so the script died with "CFG is not defined" the first time it was pointed at the live sheet. A
+ * missing key is worse than a crash: it would read as undefined and quietly flip a rule.
+ */
+const cfgKeys = [...new Set([...source.matchAll(/CFG\.([A-Z_]+)/g)].map((m) => m[1]))];
+check('the rules read at least one Script Property', cfgKeys.length > 0, true);
+for (const key of cfgKeys) {
+  check(`the preview defines CFG.${key}`, new RegExp(`${key}\\s*:`).test(PREVIEW), true);
+  /* And with the same value the workbook uses, or the preview approves a card that is not the one shipping. */
+  const inConfig = (read('apps-script/Config.gs').match(new RegExp(`${key}\\s*:\\s*([^,\n]+)`)) || [])[1];
+  const inPreview = (PREVIEW.match(new RegExp(`${key}\\s*:\\s*([^,\n/]+)`)) || [])[1];
+  check(`...with Config.gs's value (${String(inConfig).trim()})`,
+    String(inPreview).trim(), String(inConfig).trim());
+}
 
 console.log('\n=== The file people paste has no duplicate function names ===');
 /*

@@ -39,6 +39,18 @@ const fmt_ = (d) => {
 };
 const today_ = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
 
+/*
+ * The Script Properties the copied rules read.
+ *
+ * In Apps Script CFG comes from Config.gs; here there is no Config.gs, so the preview has to supply it — and
+ * did not, which is why this script died with "CFG is not defined" the first time it was run against the
+ * live sheet. The values MUST match apps-script/Config.gs or the preview approves a card that differs from
+ * the one that posts; tests/attention-digest checks every CFG key the rules read is defined here.
+ */
+const CFG = {
+  DIGEST_INCLUDE_IMPORTED: false        // apps-script/Config.gs
+};
+
 /* ====== VERBATIM FROM apps-script/ChatNotify.gs — do not edit here ====== */
 /*
  * How many leads each section lists before "…and N more".
