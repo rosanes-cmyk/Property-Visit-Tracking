@@ -31,6 +31,21 @@ const text = (v) => String(v == null ? '' : v);
  */
 const NOTE_HEAD = /^\s*Note(?:\s+updated)?\s+by\s+(.+?)\s*$/i;
 
+/*
+ * The same header when the page splits it across lines.
+ *
+ * "Note" is bold in REI's markup and the author is not, so whether innerText keeps them on one line depends
+ * on how those elements are styled — and a screenshot cannot tell you which. The first live run found zero
+ * notes on all three contacts, which is what a missed boundary looks like. Both shapes are accepted rather
+ * than betting on one:
+ *
+ *   Note by Theavil Marie          <- one line
+ *   Note                           <- two lines
+ *   by Theavil Marie
+ */
+const NOTE_HEAD_BARE = /^\s*Note(?:\s+updated)?\s*$/i;
+const NOTE_AUTHOR_ONLY = /^\s*by\s+(.+?)\s*$/i;
+
 /* "Aug 06 2026, 4:37 PM" — the timestamp REI prints on the right of each note's header. */
 const NOTE_STAMP = /^\s*([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4}),\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*$/i;
 
@@ -84,7 +99,19 @@ export function parseNotesPanel(panelText) {
       current = { author: head[1].trim(), at: 0, body: [] };
       continue;
     }
+    if (NOTE_HEAD_BARE.test(line)) {
+      if (current) notes.push(current);
+      current = { author: '', at: 0, body: [], awaitingAuthor: true };
+      continue;
+    }
     if (!current) continue;                       // anything above the first note is the tab's header
+
+    /* The author line of a split header, taken only when the very next line is one. */
+    if (current.awaitingAuthor) {
+      current.awaitingAuthor = false;
+      const who = NOTE_AUTHOR_ONLY.exec(line);
+      if (who) { current.author = who[1].trim(); continue; }
+    }
 
     if (!current.at) {
       const key = stampKey(line);

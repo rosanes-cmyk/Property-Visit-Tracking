@@ -98,6 +98,34 @@ check('...and its date', jose[0].at, 202608061924);
 check('the postponement is captured',
   /POSTPONED to the BEGINNING OF THE YEAR/.test(jose[0].body), true);
 
+console.log('\n=== a header split across two lines is still one header ===');
+/*
+ * "Note" is bold in REI's markup and the author is not, so whether innerText keeps them on one line depends
+ * on how those elements are styled — and a screenshot cannot tell you which. The first live run of the
+ * reader found ZERO notes on all three contacts, which is exactly what a missed boundary looks like, so
+ * both shapes are accepted rather than betting on one.
+ */
+const SPLIT = parseNotesPanel(['Note', 'by Theavil Marie', 'Aug 07 2026, 8:50 AM', 'Description:',
+  'EMAIL RECEIVED – August 7, 2026', 'Note', 'by Cherry Ann', 'Aug 06 2026, 2:35 PM', 'CALL SUMMARY'].join('\n'));
+check('two notes are found', SPLIT.length, 2);
+check('the author is read off the following line', SPLIT[0].author, 'Theavil Marie');
+check('...for the second too', SPLIT[1].author, 'Cherry Ann');
+check('the body is intact', SPLIT[0].body, 'EMAIL RECEIVED – August 7, 2026');
+check('and the split header itself is not in the body', /^by /.test(SPLIT[0].body), false);
+/*
+ * The author line is taken ONLY when it immediately follows the header. A note whose text happens to start
+ * "by the way..." two lines down must keep those words.
+ */
+const NOT_AUTHOR = parseNotesPanel(['Note by Theavil Marie', 'Aug 07 2026, 8:50 AM',
+  'by the way, she called back'].join('\n'));
+check('a "by ..." line inside a note stays in the body',
+  NOT_AUTHOR[0].body, 'by the way, she called back');
+check('...and does not overwrite the author', NOT_AUTHOR[0].author, 'Theavil Marie');
+/* A bare "Note" with nothing usable after it must not swallow the note that follows. */
+check('an updated split header works too',
+  parseNotesPanel(['Note updated', 'by Theavil Marie', 'Aug 06 2026, 7:24 PM', 'CALL SUMMARY'].join('\n'))[0].author,
+  'Theavil Marie');
+
 console.log('\n=== ordering, and what happens without a timestamp ===');
 check('newest first regardless of page order',
   parseNotesPanel(['Note by A', 'Aug 01 2026, 9:00 AM', 'older one',

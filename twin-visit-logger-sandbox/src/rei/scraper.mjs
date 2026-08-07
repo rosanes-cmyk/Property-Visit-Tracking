@@ -272,9 +272,18 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
      * text this has been reading all along.
      */
     const notesTab = await readNotesTab(page, { openPanel, expandTruncatedText });
-    if (notesTab.notes.length) {
-      console.log(`   Read ${notesTab.notes.length} note(s) from the Notes tab (${notesTab.how})`);
-    }
+    /*
+     * Reported whether it worked or not.
+     *
+     * This logged only on success, and the first live run of it returned nothing for all three contacts and
+     * said so nowhere — the output was indistinguishable from a run where the tab did not exist. "We looked
+     * and found nothing" and "we never managed to look" are different faults with different fixes, and a
+     * reader of the log has to be able to tell them apart.
+     */
+    console.log(notesTab.notes.length
+      ? `   Read ${notesTab.notes.length} note(s) from the Notes tab (${notesTab.how})`
+      : `   Notes tab gave nothing — ${notesTab.how}. Falling back to the contact page.`
+        + ' Diagnose with: node scripts/notes-doctor.mjs "' + effectiveLink + '"');
     const notes = notesTab.notes.length ? notesTab.notes.map((n) => n.body) : longTextItems(pairs);
 
     // Cancellation is signalled by the notification (subject/title) or a "Canceled Appointment"
