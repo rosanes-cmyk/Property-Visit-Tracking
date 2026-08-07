@@ -35,6 +35,29 @@ for (const label of [
   check(`"${label.replace(/\n/g, '\\n')}" is clickable`, isSafeExpander(label), true);
 }
 
+/*
+ * REI's real wording, taken off a live note.
+ *
+ * Rob Walker's gift note reached the sheet ending "...arrived in good shape ...Show More" — the ellipsis and
+ * the label are ONE element, and the anchored match failed on the leading dots, so the note was never
+ * expanded and everything past that point was lost.
+ */
+for (const label of ['...Show More', '…Show more', '... Show more', '...See all', '…More']) {
+  check(`"${label}" — REI's own wording — is clickable`, isSafeExpander(label), true);
+}
+/* Stripping the dots must not disarm the denylist, or "...Delete" would become clickable. */
+for (const label of ['...Delete', '…Remove', '...Send all', '…Mark complete']) {
+  check(`"${label}" is still refused`, isSafeExpander(label), false);
+}
+/*
+ * LEADING only. A trailing "..." is the opposite convention — "More...", "Show more..." are the desktop
+ * idiom for "opens a dialog", and on a CRM contact page that dialog is where Delete lives. "More..." is
+ * already refused below alongside "More options"; stripping both ends would have quietly allowed it.
+ */
+check('"Show more..." is refused — trailing dots mean a dialog', isSafeExpander('Show more...'), false);
+check('a bare "..." still survives the stripping', isSafeExpander('...'), true);
+check('...and a bare "…" too', isSafeExpander('…'), true);
+
 console.log('\n=== what is NOT, and must never be clicked ===');
 /*
  * The destructive controls named in the project's own safety rules, plus the ones REI actually puts on a
@@ -100,6 +123,20 @@ for (const forbidden of ['.fill(', '.type(', '.press(', '.selectOption(', '.setC
 check('it does click', SRC.includes('.click('), true);
 /* The guard must be applied to every candidate, not merely defined. */
 check('isSafeExpander gates the click', /candidates\.find\([\s\S]{0,140}?isSafeExpander/.test(SRC), true);
+/*
+ * The candidate list must not be narrowed back to buttons and roles.
+ *
+ * That is the bug this file was fixed for: REI's control is on an element the role-based lookup could not
+ * see, so Rob Walker's note came back ending "...Show More" and everything past it was lost. tasks.mjs had
+ * the identical bug with the Tasks tab, which is an <a>. What an element IS matters less than what it SAYS.
+ */
+const SELECTOR = (SRC.match(/page\.\$\$eval\(\s*\n?\s*'([^']+)'/) || [])[1] || '';
+for (const tag of ['button', 'a', 'span', 'div', 'p', 'li', '[role]']) {
+  check(`${tag} elements are candidates`, SELECTOR.split(',').map((s) => s.trim()).includes(tag), true);
+}
+/* textContent, not innerText — innerText forces a layout pass per element and the list is now the page. */
+check('the scan is cheap', /textContent \|\| ''/.test(SRC), true);
+check('...and long text can never look like a label', /c\.text\.length <= 16/.test(SRC), true);
 check('failures are swallowed, never thrown at the caller', /catch\s*{/.test(SRC), true);
 
 console.log('\n=== the scraper actually runs it, before reading the page ===');

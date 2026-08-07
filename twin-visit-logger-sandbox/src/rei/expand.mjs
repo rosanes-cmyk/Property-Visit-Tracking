@@ -46,7 +46,20 @@ const FORBIDDEN = /\b(delete|remove|trash|archive|discard|cancel|edit|save|send|
 
 /** Whether an element's own text makes it a safe "reveal the rest of this text" control. */
 export function isSafeExpander(label) {
-  const text = String(label == null ? '' : label).replace(/\s+/g, ' ').trim();
+  const raw = String(label == null ? '' : label).replace(/\s+/g, ' ').trim();
+  /*
+   * REI writes the control as "...Show More", ellipsis and label in one element, which is how Rob Walker's
+   * gift note reached the sheet reading "...arrived in good shape ...Show More". The old anchored match
+   * failed on the leading dots and the note was never expanded.
+   *
+   * Stripped only when something is left afterwards, so a control labelled with a bare "..." — already
+   * allowed below — does not strip itself down to nothing and stop being recognised.
+   *
+   * LEADING only. A trailing "..." is the opposite convention: "More...", "Show more..." are the desktop
+   * idiom for "opens a dialog", and on a CRM contact page that dialog is where Delete lives. Those stay
+   * refused, alongside "More options" and "More actions".
+   */
+  const text = raw.replace(/^(?:\.{3}|…)\s*/, '').trim() || raw;
   if (!text || text.length > 12) return false;
   if (FORBIDDEN.test(text)) return false;
   return EXPAND_LABELS.some((re) => re.test(text));
@@ -77,9 +90,23 @@ export async function expandTruncatedText(page, { max = MAX_EXPANDS } = {}) {
   for (let round = 0; round < max; round += 1) {
     let candidates = [];
     try {
+      /*
+       * Every element, not only buttons, anchors and role="button".
+       *
+       * REI's own markup is why. The Tasks panel turned out to be an <a>, which the role-based lookup in
+       * tasks.mjs could not see, and this had the same shape of bug one layer down: Rob Walker's note came
+       * back ending "...Show More" — the control was on the page, was safe, and was never a candidate
+       * because of its tag. What an element IS matters less than what it SAYS, and what it says is guarded
+       * strictly by isSafeExpander below.
+       *
+       * textContent, not innerText: innerText forces a layout pass per element and this list is now the
+       * whole page. The length cap keeps a container's concatenated text from ever looking like a label.
+       */
       candidates = await page.$$eval(
-        'button, a, span[role="button"], div[role="button"]',
-        (els) => els.map((el, i) => ({ i, text: (el.innerText || el.textContent || '').trim() }))
+        'button, a, span, div, p, li, [role]',
+        (els) => els
+          .map((el, i) => ({ i, text: (el.textContent || '').replace(/\s+/g, ' ').trim() }))
+          .filter((c) => c.text && c.text.length <= 16)
       );
     } catch {
       return out;                                     // page navigated or closed: report what was done
