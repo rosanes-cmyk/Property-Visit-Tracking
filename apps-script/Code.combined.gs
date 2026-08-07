@@ -3466,6 +3466,28 @@ function dateCell_(raw) {
     var u = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 864e5);
     return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
   }
+  /*
+   * A date written as TEXT, which is what most of these cells actually hold.
+   *
+   * This accepted a Date or a serial and rejected everything else, and the preview reported "no visit date
+   * set — nothing is actually booked" for four leads including one booked for the next day and one the card
+   * had shown as OVERDUE that morning. The sheet was right: Jose Anguiano's row holds Visit Date 2026-08-01.
+   *
+   * The automation writes dates as strings, so those cells are TEXT, not dates — which means this affected
+   * the live 3pm card too, not just the preview. Every row written by the automation rather than typed by a
+   * person was invisible to every date rule here.
+   *
+   * Both shapes the sheet contains: ISO from the automation, US from the workbook's own formatting. Built
+   * from the parts rather than via new Date(string), which reads "2026-08-01" as UTC midnight and lands on
+   * July 31 for anyone west of Greenwich — the same one-day shift that put a task on the wrong day once
+   * already.
+   */
+  var s = String(raw == null ? '' : raw).trim();
+  if (!s) return null;
+  var iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  var us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (us) return new Date(Number(us[3]), Number(us[1]) - 1, Number(us[2]));
   return null;
 }
 

@@ -124,6 +124,44 @@ const STAGES = (read('apps-script/Config.gs').match(/'Current Stage':\s*\[([^\]]
 check('every stage exists in the Current Stage dropdown',
   STAGE_BUCKETS.every((b) => STAGES.includes(`'${b.stage}'`)), true);
 
+console.log('\n=== a date stored as TEXT is still a date ===');
+/*
+ * The preview reported "no visit date set — nothing is actually booked" for four leads, including Pam Long
+ * booked for the next day and Jose Anguiano, whom the card had shown as OVERDUE that morning. The sheet was
+ * right: Jose's row holds Visit Date 2026-08-01.
+ *
+ * dateCell_ took a Date — what Apps Script's getValues() returns for a real date cell — or a serial number,
+ * and rejected everything else. But the automation WRITES dates as strings, so those cells are TEXT. Every
+ * row the automation created rather than a person typing was invisible to every date rule here, in the LIVE
+ * card as well as the preview. Asking the API for unformatted values did not help and could not: a text cell
+ * is text however you request it.
+ */
+const dateBucket = (v) => bucket({ ...BASE, 'Visit Date': v });
+const dateReason = (v) => reason({ ...BASE, 'Visit Date': v });
+check('an ISO string, as the automation writes it', dateBucket('2026-08-12'), 'upcomingVisit');
+check('...and it reads the right day', dateReason('2026-08-12'), 'visit Aug 12, 2026');
+check('a US string, as the workbook formats it', dateBucket('08/12/2026'), 'upcomingVisit');
+check('...and it reads the right day too', dateReason('08/12/2026'), 'visit Aug 12, 2026');
+/* An ISO datetime, which is what a calendar-sourced value looks like. */
+check('an ISO date with a time on it', dateReason('2026-08-12T14:30:00.000Z'), 'visit Aug 12, 2026');
+/*
+ * Built from the PARTS, never new Date(string). new Date("2026-08-01") is UTC midnight, which is July 31 for
+ * anyone west of Greenwich — the same one-day shift that put a task on the wrong day once already. Jose's
+ * Aug 1 must read as Aug 1, and as OVERDUE rather than as a visit still to come.
+ */
+check("Jose's Aug 1 reads as Aug 1, overdue",
+  dateReason('2026-08-01'),
+  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled — nobody has recorded what happened');
+check('...and lands in Follow Up', dateBucket('2026-08-01'), 'pendingFollowUp');
+/* A serial and a real Date still work — this widened what is accepted, it did not replace it. */
+check('a serial still works', dateBucket(46246), 'upcomingVisit');
+check('a real Date still works', dateBucket(day(2026, 8, 12)), 'upcomingVisit');
+/* And nothing that is not a date may become one. */
+for (const junk of ['', '   ', 'TBC', 'not scheduled', 'n/a', '-']) {
+  check(`"${junk}" is still no date`,
+    /no visit date set/.test(dateReason(junk)), true);
+}
+
 console.log('\n=== 1. Upcoming Visit ===');
 check('a visit booked for next week', bucket(BASE), 'upcomingVisit');
 check('the reason gives the date', reason(BASE), 'visit Aug 12, 2026');
