@@ -172,6 +172,46 @@ check('...expanders are clicked on it', readAll.expanded, 3);
 check('...and the list is capped', readAll.notes.length, NOTES_KEPT);
 check('the newest survives the cap', readAll.notes[0].body, 'note number 20');
 
+console.log('\n--- it reads again when the tab has not painted yet ---');
+/*
+ * notes-doctor pulled 15 notes off Jose Anguiano's tab, and the scraper — same code, same click, same
+ * reported `how` — got none on the very next run. The click was not the variable; time was. The doctor
+ * reads a page that has just settled; the scraper arrives ten seconds and a lot of DOM churn later, and REI
+ * paints the tab's contents after the click returns.
+ *
+ * So the reader stops trusting "the click succeeded" and checks for the notes themselves.
+ */
+let served = 0;
+const slowPage = {
+  waitForTimeout: async () => {},
+  locator: () => ({ innerText: async () => {
+    served += 1;
+    return served < 3 ? 'All Notes\nCreated at' : 'Note by Theavil Marie\nAug 07 2026, 8:50 AM\nthe note';
+  } })
+};
+const late = await readNotesTab(slowPage, {
+  openPanel: async () => ({ opened: true, how: 'clicked "Notes" in the tab strip' }),
+  expandTruncatedText: async () => ({ clicked: 1 })
+});
+check('a late-painting tab is still read', late.notes.map((n) => n.body), ['the note']);
+check('...after more than one attempt', late.attempts, 3);
+check('...and it says which attempt worked', /on attempt 3/.test(late.how), true);
+/* Expanders re-run each attempt: every note carries its own, and none exist until the tab has painted. */
+check('...having expanded each time', late.expanded, 3);
+
+/*
+ * And when it really is empty, the message carries evidence. "Notes tab gave nothing" on its own sends the
+ * next person back to the browser to find out what "nothing" meant — which is exactly what happened.
+ */
+const emptyPage = { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) };
+const empty = await readNotesTab(emptyPage, {
+  openPanel: async () => ({ opened: true, how: 'clicked "Notes" in the tab strip' }),
+  expandTruncatedText: async () => ({ clicked: 0 })
+});
+check('it gives up after three tries', empty.attempts, 3);
+check('...and reports the character count it saw', /held 9 characters/.test(empty.how), true);
+check('...and that it found no headers', /no note headers/.test(empty.how), true);
+
 console.log('\n--- a tab that will not open loses nothing ---');
 /*
  * The contact-page fallback is why this returns empty rather than throwing. A contact whose Notes tab is

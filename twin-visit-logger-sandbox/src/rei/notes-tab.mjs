@@ -149,11 +149,40 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
   try {
     const opened = await openPanel(page, labels);
     if (!opened || !opened.opened) return { notes: [], how: opened?.how || 'no Notes tab found' };
-    /* Expanded AFTER the tab is open: every note on it has its own Show More, and none existed until now. */
-    const expanded = await expandTruncatedText(page);
-    const body = await page.locator('body').innerText().catch(() => '');
-    const notes = parseNotesPanel(body).slice(0, keep);
-    return { notes, how: opened.how, expanded: expanded?.clicked || 0 };
+
+    /*
+     * Read until the notes are actually there, up to three times.
+     *
+     * notes-doctor pulled 15 notes off Jose Anguiano's tab, and the scraper — same code, same click, same
+     * reported `how` — got none on the very next run. The click is not the variable; what is left is time.
+     * The doctor reads a page that has just loaded and settled, while the scraper arrives ten seconds and a
+     * lot of DOM churn later, and REI renders the tab's contents after the click returns.
+     *
+     * So this stops trusting "the click succeeded" and checks for the notes themselves, which is the thing
+     * that actually matters. Expanders are re-run each attempt because every note carries its own Show More
+     * and none of them exist until the tab has painted.
+     */
+    let notes = [];
+    let attempts = 0;
+    let chars = 0;
+    let clicked = 0;
+    for (; attempts < 3 && !notes.length; attempts += 1) {
+      if (attempts) await page.waitForTimeout(1500);
+      const expanded = await expandTruncatedText(page);
+      clicked += expanded?.clicked || 0;
+      const body = await page.locator('body').innerText().catch(() => '');
+      chars = body.length;
+      notes = parseNotesPanel(body).slice(0, keep);
+    }
+
+    /*
+     * The failure message carries evidence, because the last one did not. "Notes tab gave nothing" with
+     * nothing else said sends the next person back to the browser to find out what "nothing" meant.
+     */
+    const how = notes.length
+      ? `${opened.how}${attempts > 1 ? `, on attempt ${attempts}` : ''}`
+      : `${opened.how} — but after ${attempts} attempt(s) the page held ${chars} characters and no note headers`;
+    return { notes, how, expanded: clicked, attempts };
   } catch {
     return { notes: [], how: 'the Notes tab could not be read' };
   }
