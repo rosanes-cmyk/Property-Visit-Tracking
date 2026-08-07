@@ -13,7 +13,7 @@
  * — the line written the day her row was created — while REI held that morning's call summary and an email
  * update confirming the $930,000 terms had been sent and acknowledged.
  */
-import { latestReiNote, latestReiNoteDate, noteDateKey, contactResultReplaceable }
+import { latestReiNote, latestReiNoteDate, noteDateKey, contactResultReplaceable, stripNoteChrome }
   from '../twin-visit-logger-sandbox/src/rei/notes.mjs';
 import { reiFieldsFromScrape, diffFromRei } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
@@ -197,6 +197,69 @@ check('a blank date is filled',
 check('an ISO sheet value compares against a US one without shifting',
   diffFromRei({ ...AMELIA_ROW, 'Last Contact Date': '2026-08-05' }, FIELDS)
     .some((c) => c.field === 'Last Contact Date'), false);
+
+console.log("\n=== REI's own interface furniture is not a contact result ===");
+/*
+ * Rob Walker's gift note reached the tracker ending:
+ *
+ *   ...arrived in good shape ...Show MoreAug 06, 2026Theavil Marie
+ *
+ * I read that as a truncation and it was not one. The client's screenshot of the same note, expanded, has
+ * all seven bullets — every one of them already in the cell. "...Show More" is the expander's own label and
+ * "Aug 06, 2026Theavil Marie" is the byline REI prints under it. Nothing was lost; two pieces of page
+ * decoration were gained, and in a spreadsheet cell they read as if somebody had said them.
+ */
+const ROB = 'REI BlackBook Note — Gift Basket Delivered (Order #104240205) Note updated: Aug 6, 2026 — 4:36 PM PT '
+  + 'Order # 104240205 — Gourmet Get-Together Gift Basket (SendFlowers) Delivery confirmation email received 4:31 PM PT '
+  + 'Received by: Rob Walker Order addressed to Juan on the SendFlowers account '
+  + 'Tracking page had not updated — email confirmed ahead of it '
+  + 'Next step: confirm with recipient that it arrived in good shape ...Show MoreAug 06, 2026Theavil Marie';
+const ROB_CLEAN = latestReiNote(ROB);
+check("Rob's note ends on his own words", /good shape$/.test(ROB_CLEAN), true);
+check('...with no expander label', /show\s*(more|less)/i.test(ROB_CLEAN), false);
+check('...and no byline', /Theavil Marie/.test(ROB_CLEAN), false);
+/* Every one of the seven bullets survives. Stripping decoration must not cost a single fact. */
+for (const fact of ['Order # 104240205', 'Gourmet Get-Together Gift Basket', 'Delivery confirmation email received 4:31 PM PT',
+  'Received by: Rob Walker', 'Order addressed to Juan on the SendFlowers account',
+  'Tracking page had not updated', 'Next step: confirm with recipient']) {
+  check(`"${fact.slice(0, 34)}" is kept`, ROB_CLEAN.includes(fact), true);
+}
+
+/* "Show Less" is the same control after somebody clicked it, and appears on Marlene's note. */
+check('Show Less goes too', stripNoteChrome('Basket delivered Show Less'), 'Basket delivered');
+check('...and the ellipsis form', stripNoteChrome('Basket delivered ...Show More'), 'Basket delivered');
+check('a single-dot ellipsis is not one', stripNoteChrome('Delivered .Show More'), 'Delivered .');
+/*
+ * The byline is stripped only at the END. A date and a name mid-note is content — "spoke to Aug 6, 2026
+ * about..." is contrived, but "Aug 5, 2026 Juan Diaz called" opening a note is not, and losing it would
+ * lose who did what.
+ */
+check('a byline mid-note is left alone',
+  stripNoteChrome('Aug 05, 2026Juan Diaz called the seller and left a message'),
+  'Aug 05, 2026Juan Diaz called the seller and left a message');
+/* Nothing recognised, nothing touched. */
+check('an ordinary note is returned unchanged',
+  stripNoteChrome('Seller wants 500k, will not budge.'), 'Seller wants 500k, will not budge.');
+check('a blank stays blank', stripNoteChrome(''), '');
+check('null does not throw', stripNoteChrome(null), '');
+/*
+ * Stripped AFTER ranking, so a note whose only date is its byline is still placed in time. Removing the
+ * byline first would score it undated and hand the cell to an older note.
+ */
+check('a note dated only by its byline still outranks an older one',
+  latestReiNote(['Called seller, no answer. Jul 01, 2026 Cherry Ann',
+    'Seller confirmed the walkthrough. Aug 06, 2026 Theavil Marie'].join('\n\n')),
+  'Seller confirmed the walkthrough.');
+/*
+ * A byline REI has glued straight onto the name — "2026Theavil" — scores nothing, because the date pattern
+ * needs a word boundary after the year and there is none between "6" and "T". Recorded as the limitation it
+ * is rather than left to be discovered: a note whose ONLY date is a glued byline ranks as undated, and falls
+ * back to page order. Every note seen so far also carries a date in its body, which is why it has not bitten.
+ */
+check('a byline glued to the name is not read as a date',
+  noteDateKey('Seller confirmed the walkthrough. Aug 06, 2026Theavil Marie'), 0);
+check('...and the same byline with a space is', 
+  noteDateKey('Seller confirmed the walkthrough. Aug 06, 2026 Theavil Marie'), 20260806);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

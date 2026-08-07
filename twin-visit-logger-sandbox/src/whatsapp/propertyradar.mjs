@@ -14,6 +14,8 @@
  * text. Instead: find the label, then take the first value-shaped token after it.
  */
 
+import { stripNoteChrome } from '../rei/notes.mjs';
+
 /** First token matching `token` within `window` characters after `label`. '' if absent. */
 function after(text, label, token, window = 90) {
   const source = String(text || '');
@@ -104,10 +106,14 @@ export function tidyReiNotes(text) {
   // 2. The engagement-counter strip REI puts above the notes. Ends at the RVM counter.
   t = t.replace(/Latest Engagement Insights[\s\S]*?RVM-*/gi, '');
 
-  // 3. Expander links, and the byline REI appends after them.
-  t = t.replace(/\.{2,}\s*Show (More|Less)/gi, '');
-  t = t.replace(/Show (More|Less)/gi, '');
-  t = t.replace(/[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\s*$/,  '');
+  /*
+   * 3. Expander links, and the byline REI appends after them — one shared copy with the tracker.
+   *
+   * These regexes lived here only, so the same note came out clean in the briefing and littered with
+   * "...Show MoreAug 06, 2026Theavil Marie" in the tracker's Last Contact Result. stripNoteChrome is now
+   * the single definition and both paths call it.
+   */
+  t = stripNoteChrome(t);
 
   /*
    * 4. Put a line break before the headings REI glues to the previous value. Only these three, matched
