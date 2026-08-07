@@ -38,6 +38,11 @@ param(
   # minute to minute, and it is the only job here that can touch all 378 rows rather than the 102 with a
   # REI link. It is how "Cancelled the property visit" and "Pending reschedule" reached the board at all.
   [int]$NotesIntervalMinutes = 60,
+  # The hourly sweep of the leads on the 3pm card. These are the ones somebody is actually working, so a
+  # stale row costs something; the rest rotate through the ordinary re-check. The client: "we need to
+  # prioritise those 8 buckets... time to time check in the REI of those every hour."
+  [int]$BucketIntervalMinutes = 60,
+  [switch]$SkipBuckets,
   [switch]$SkipNotes,
   [switch]$SkipRecheck,
   [switch]$SkipWhatsApp
@@ -96,6 +101,11 @@ if (-not $SkipRecheck) {
 }
 
 if (-not $SkipNotes) {
+if (-not $SkipBuckets) {
+  New-VisitTask -Name "Twin Visit Logger Bucket Sweep" -Runner "recheck-buckets.cmd" `
+    -Minutes $BucketIntervalMinutes
+}
+
   New-VisitTask -Name "Twin Visit Logger Notes Audit" -Runner "audit-notes.cmd" `
     -Every $NotesIntervalMinutes -What "read the tracker's own notes for visit outcomes"
 } else {

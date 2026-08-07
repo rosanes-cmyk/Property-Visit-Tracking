@@ -125,7 +125,11 @@ check('the hourly notes audit IS paused', /haltForPause/.test(read('scripts/audi
 const UNINSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/uninstall-windows-task.ps1'), 'utf8');
 const INSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/install-windows-task.ps1'), 'utf8');
 const created = [...INSTALL.matchAll(/New-VisitTask -Name "([^"]+)"/g)].map((m) => m[1]);
-check('the installer creates four tasks', created.length, 4);
+/*
+ * Five now, with the hourly bucket sweep. The COUNT is asserted so that adding a sixth is a deliberate act
+ * that updates this line, rather than a task nobody notices is running.
+ */
+check('the installer creates five tasks', created.length, 5);
 for (const name of created) {
   check(`uninstall removes "${name}"`, UNINSTALL.includes(`"${name}"`), true);
 }

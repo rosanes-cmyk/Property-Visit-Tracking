@@ -40,6 +40,7 @@ import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
+import { onTheCard, bucketOf } from '../src/rei/attention-rules.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
   diffFromRei, calendarAffected, describeChanges, RECHECKABLE, REI_WINS, RECHECK_PER_RUN
@@ -63,6 +64,19 @@ const ONLY = (() => { const i = args.indexOf('--only'); return i >= 0 ? String(a
  * the same situation and now says so explicitly rather than being inferred.
  */
 const WAIT = args.includes('--wait');
+
+/*
+ * --buckets: only the leads on the 3pm card, for the hourly sweep.
+ *
+ * The client: "we need to prioritise those 8 buckets in updating and checking… that is the main goal, time
+ * to time check in the REI of those every hour." Those leads are the ones somebody is actually working, so
+ * they are the ones where a stale row costs something. Everything else keeps rotating through the ordinary
+ * twenty-minute run, so the dashboard still fills in for the whole book — just slower.
+ *
+ * Membership comes from src/rei/attention-rules.mjs, which carries the card's OWN rules verbatim rather than
+ * a translation of them, so the sweep cannot chase a different set of leads from the one Cherry can see.
+ */
+const BUCKETS_ONLY = args.includes('--buckets');
 
 /*
  * Paused stops here: before the lock, before the browser, and before the sheet is read.
@@ -152,6 +166,33 @@ console.log(`\n${eligibleCount} of ${rows.length} row(s) can ever be re-checked`
 
 const state = await readState();
 let candidates = pickRecheckCandidates(rows, state, { now: new Date(), limit: LIMIT, includeClosed: INCLUDE_CLOSED });
+
+/*
+ * The hourly sweep: the leads on the card, and only those.
+ *
+ * Applied to the ROWS rather than to the picked candidates, because the ordinary pick is a rotation with a
+ * per-run cap — filtering after it would give whichever card leads happened to come up this time, which is
+ * the opposite of the point. A card lead must be checked every hour whether or not the rotation reached it.
+ *
+ * The per-run limit still applies. If the card ever grew past it the extras would wait for the next hour, and
+ * the run says so rather than pretending it covered everything.
+ */
+if (BUCKETS_ONLY) {
+  const today = new Date();
+  const onCard = rows.filter((r) => onTheCard(r, today));
+  console.log(`\n--buckets: ${onCard.length} lead(s) on the 3pm card right now`);
+  const bySection = {};
+  for (const r of onCard) {
+    const key = bucketOf(r, today);
+    bySection[key] = (bySection[key] || 0) + 1;
+  }
+  for (const [key, n] of Object.entries(bySection)) console.log(`    ${key}: ${n}`);
+  candidates = onCard.slice(0, LIMIT);
+  if (onCard.length > LIMIT) {
+    console.log(`  ${onCard.length - LIMIT} beyond this run's limit of ${LIMIT} — they wait for the next hour.`);
+    console.log('  Raise it with --limit if the card is regularly bigger than this.');
+  }
+}
 if (ONLY) {
   /*
    * --only ignores the SCHEDULE, never the eligibility rules.
