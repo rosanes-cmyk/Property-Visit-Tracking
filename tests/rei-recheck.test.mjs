@@ -1474,6 +1474,26 @@ check('the visit date is not cleared',
 check('Current Stage is not moved',
   goneChanges.some((c) => c.field === 'Current Stage' && c.to !== 'Visit Scheduled'), false);
 
+console.log('\n--- and only while the lead is still AT the visit stage ---');
+/*
+ * Amelia Middel exposed this on the first live --buckets run. REI has no appointment for her — her visit
+ * happened days ago — and the rule proposed "Visit Status: Scheduled -> Reschedule Needed" on a lead whose
+ * seller had just ACCEPTED the offer that same morning. Telling the team to rebook a visit on a deal going
+ * under contract is worse than the stale "Scheduled" it was fixing, because somebody might act on it.
+ *
+ * A missing appointment means "nothing is booked". At Visit Scheduled that means the visit never happened.
+ * At Offer Sent or beyond it means the visit is done and REI has tidied up — a different fact, and not one
+ * to write.
+ */
+for (const stage of ['Offer Sent', 'Offer Preparation', 'Active Negotiation', 'Verbal Agreement',
+  'Contract Signed', 'Long-Term Nurture', 'Lost / Closed Out']) {
+  check(`a lead at "${stage}" is left alone`,
+    diffFromRei({ ...JOSE_ROW, 'Current Stage': stage }, goneFields)
+      .some((c) => c.field === 'Visit Status'), false);
+}
+check('...while one still at Visit Scheduled is corrected',
+  diffFromRei(JOSE_ROW, goneFields).find((c) => c.field === 'Visit Status')?.to, 'Reschedule Needed');
+
 console.log('\n--- a person\'s own answer is never overwritten by an absence ---');
 for (const status of ['Completed', 'Canceled', 'Skipped — Offer Made', 'Reschedule Needed']) {
   check(`"${status}" is left alone`,

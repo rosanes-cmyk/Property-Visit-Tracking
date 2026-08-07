@@ -1004,7 +1004,20 @@ export function diffFromRei(row, reiFields) {
    * absence in REI must never overwrite a person's answer. Reported through appointmentGone so the run says
    * it out loud rather than changing a visit quietly.
    */
-  if (reiFields.__appointmentGone && text(row['Visit Status']) === 'Scheduled'
+  /*
+   * Only while the lead is still AT the visit stage.
+   *
+   * Amelia Middel exposed this. REI has no appointment for her — the visit happened days ago — and the rule
+   * proposed "Visit Status: Scheduled -> Reschedule Needed" on a lead whose seller had just ACCEPTED the
+   * offer. Telling the team to rebook a visit on a deal going under contract is worse than the stale
+   * "Scheduled" it was fixing, because somebody might act on it.
+   *
+   * A missing appointment means "there is nothing booked". On a lead still sitting at Visit Scheduled that
+   * means the visit never happened and needs rebooking. On a lead that has moved to Offer Sent or beyond it
+   * means the visit is finished and REI has tidied up — a different fact entirely, and not one to write.
+   */
+  if (reiFields.__appointmentGone && text(row['Current Stage']) === 'Visit Scheduled'
+    && text(row['Visit Status']) === 'Scheduled'
     && !text(reiFields['Visit Status'])) {
     changes.push({
       field: 'Visit Status',
