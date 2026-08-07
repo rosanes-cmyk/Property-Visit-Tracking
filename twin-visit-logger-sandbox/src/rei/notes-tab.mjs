@@ -169,7 +169,23 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
     let head = '';
     for (; attempts < 3 && !notes.length; attempts += 1) {
       if (attempts) {
-        await page.waitForTimeout(1500);
+        /*
+         * RELOAD, then click. This is the fix, and the reason is a wording difference in one live message.
+         *
+         * The scraper reported `clicked an element whose text is exactly "Notes"` where notes-doctor, on the
+         * same contact, reported `clicked "Notes" in the tab strip`. So in the scraper the tab-strip locator
+         * matched NOTHING and it fell through to the old text fallback, which takes .last() and lands on the
+         * About panel's "Notes" FIELD LABEL. That is why the page never moved.
+         *
+         * The one difference is that the scraper has already expanded eleven sidebar notes by then, and the
+         * doctor has not. Rather than keep theorising about what that does to the markup, a reload puts the
+         * page in exactly the state the doctor succeeds from. It costs one page load per lead, only on a
+         * contact whose notes did not come back the first time, and it removes the dependency on whatever
+         * happened to the DOM earlier in the visit.
+         */
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        await page.waitForTimeout(2500);
         /*
          * A DIFFERENT candidate each time, not the same click repeated.
          *
@@ -178,7 +194,11 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
          * element can match, and only one of them is the tab, so the retries walk through them and the loop
          * keeps whichever actually produced notes. Verifying by outcome beats guessing which is the tab.
          */
-        opened = await openPanel(page, labels, { nth: attempts }) || opened;
+        /*
+         * nth still walks the candidates, because a reload alone does not settle which element is the tab
+         * when more than one matches — that guess has failed twice, with .last() and with .first().
+         */
+        opened = await openPanel(page, labels, { nth: attempts - 1 }) || opened;
       }
       const expanded = await expandTruncatedText(page);
       clicked += expanded?.clicked || 0;

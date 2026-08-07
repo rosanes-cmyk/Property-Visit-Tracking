@@ -184,6 +184,8 @@ console.log('\n--- it reads again when the tab has not painted yet ---');
 let served = 0;
 const slowPage = {
   waitForTimeout: async () => {},
+  reload: async () => {},
+  waitForLoadState: async () => {},
   locator: () => ({ innerText: async () => {
     served += 1;
     return served < 3 ? 'All Notes\nCreated at' : 'Note by Theavil Marie\nAug 07 2026, 8:50 AM\nthe note';
@@ -203,7 +205,8 @@ check('...having expanded each time', late.expanded, 3);
  * And when it really is empty, the message carries evidence. "Notes tab gave nothing" on its own sends the
  * next person back to the browser to find out what "nothing" meant — which is exactly what happened.
  */
-const emptyPage = { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) };
+const emptyPage = { waitForTimeout: async () => {}, reload: async () => {}, waitForLoadState: async () => {},
+  locator: () => ({ innerText: async () => 'All Notes' }) };
 const empty = await readNotesTab(emptyPage, {
   openPanel: async () => ({ opened: true, how: 'clicked "Notes" in the tab strip' }),
   expandTruncatedText: async () => ({ clicked: 0 })
@@ -221,12 +224,16 @@ check('...and the first lines it saw, so the page can be identified',
 /* Re-clicked, not merely waited for: a click that reports success and does not switch looks the same. */
 let opens = 0;
 const reclick = await readNotesTab(
-  { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) },
+  { waitForTimeout: async () => {}, reload: async () => {}, waitForLoadState: async () => {},
+    locator: () => ({ innerText: async () => 'All Notes' }) },
   {
     openPanel: async () => { opens += 1; return { opened: true, how: 'clicked "Notes" in the tab strip' }; },
     expandTruncatedText: async () => ({ clicked: 0 })
   });
 check('the tab is re-opened on each retry', opens, 3);
+/* And the page is reloaded before the retry, to reach the state the doctor succeeds from. */
+check('...from a reloaded page', /await page\.reload\(/.test(
+  fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/notes-tab.mjs'), 'utf8')), true);
 check('...and it still gave up cleanly', reclick.notes, []);
 /*
  * And a DIFFERENT candidate each time. Waiting and re-clicking the same element was the first attempt at
@@ -235,12 +242,17 @@ check('...and it still gave up cleanly', reclick.notes, []);
  */
 const tried = [];
 await readNotesTab(
-  { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) },
+  { waitForTimeout: async () => {}, reload: async () => {}, waitForLoadState: async () => {},
+    locator: () => ({ innerText: async () => 'All Notes' }) },
   {
     openPanel: async (_p, _l, opts) => { tried.push(opts?.nth); return { opened: true, how: 'clicked' }; },
     expandTruncatedText: async () => ({ clicked: 0 })
   });
-check('each retry tries the next match', tried, [0, 1, 2]);
+check('each retry tries the next match', tried, [0, 0, 1]);
+/*
+ * The second entry repeats 0 on purpose: the first retry RELOADS and tries the same candidate from a clean
+ * page, because that is the state notes-doctor succeeds from. Only if that still fails does it move on.
+ */
 
 /* And openPanel must actually honour nth rather than always taking the first. */
 const OPEN = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/src/rei/tasks.mjs'), 'utf8');
