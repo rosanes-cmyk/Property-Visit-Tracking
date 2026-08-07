@@ -7,6 +7,7 @@ import { assertAuthenticated } from './browser.mjs';
 // readTasks is READ-ONLY — it lists task rows and clicks nothing. completeTask, the one REI write this
 // project can make, is deliberately not imported here.
 import { readTasks, openPanel } from './tasks.mjs';
+import { readNotesTab } from './notes-tab.mjs';
 import { expandTruncatedText } from './expand.mjs';
 import { taskMatchesVisit } from './task-gate.mjs';
 import { cancellationEvidence, deadLeadTags } from './cancel-signal.mjs';
@@ -257,7 +258,24 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       appointmentSource = 'task due date + title time';
     }
 
-    const notes = longTextItems(pairs);
+    /*
+     * The Notes TAB, then the contact page as a fallback.
+     *
+     * longTextItems reads what is on the contact page, and what is on the contact page is the right-hand
+     * "Notes (29)" SIDEBAR — a preview of each note, cut off with "Show More". That is why Rob Walker's note
+     * arrived with "...Show More" welded to its end, and why Marichu's newest note (an email received 8:50 AM
+     * on Aug 7 asking whether we handle the deed transfer) and Jose's Aug 6 call summary were never seen at
+     * all: both are on the tab, and nothing opened it. The client, from the screenshot: "it should be checked
+     * in the notes tab, as you there already, and the codes didn't check."
+     *
+     * The page fallback stays. A contact whose Notes tab will not open must not silently lose the preview
+     * text this has been reading all along.
+     */
+    const notesTab = await readNotesTab(page, { openPanel, expandTruncatedText });
+    if (notesTab.notes.length) {
+      console.log(`   Read ${notesTab.notes.length} note(s) from the Notes tab (${notesTab.how})`);
+    }
+    const notes = notesTab.notes.length ? notesTab.notes.map((n) => n.body) : longTextItems(pairs);
 
     // Cancellation is signalled by the notification (subject/title) or a "Canceled Appointment"
     // tag on the contact. We do NOT infer it from lead stage alone.
