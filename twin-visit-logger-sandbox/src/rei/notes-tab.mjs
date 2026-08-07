@@ -166,12 +166,27 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
     let attempts = 0;
     let chars = 0;
     let clicked = 0;
+    let head = '';
     for (; attempts < 3 && !notes.length; attempts += 1) {
-      if (attempts) await page.waitForTimeout(1500);
+      if (attempts) {
+        await page.waitForTimeout(1500);
+        /*
+         * Clicked AGAIN, not merely waited for. A click that reports success and does not switch the panel
+         * is indistinguishable from one that switched it slowly, and re-clicking a tab is harmless — it is
+         * the same navigation a person would repeat if the page had not moved.
+         */
+        await openPanel(page, labels);
+      }
       const expanded = await expandTruncatedText(page);
       clicked += expanded?.clicked || 0;
       const body = await page.locator('body').innerText().catch(() => '');
       chars = body.length;
+      /*
+       * Kept so a failure can SAY what it was looking at. Two rounds have now been spent on messages that
+       * reported an outcome and no evidence: "gave nothing" sent me back to the browser, and a character
+       * count on its own turned out to match neither the About page nor the Notes tab.
+       */
+      head = body.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12).join(' | ').slice(0, 400);
       notes = parseNotesPanel(body).slice(0, keep);
     }
 
@@ -181,7 +196,8 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
      */
     const how = notes.length
       ? `${opened.how}${attempts > 1 ? `, on attempt ${attempts}` : ''}`
-      : `${opened.how} — but after ${attempts} attempt(s) the page held ${chars} characters and no note headers`;
+      : `${opened.how} — but after ${attempts} attempt(s) the page held ${chars} characters and no note`
+        + ` headers. What it was looking at: ${head}`;
     return { notes, how, expanded: clicked, attempts };
   } catch {
     return { notes: [], how: 'the Notes tab could not be read' };

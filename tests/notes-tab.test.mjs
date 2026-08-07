@@ -211,6 +211,23 @@ const empty = await readNotesTab(emptyPage, {
 check('it gives up after three tries', empty.attempts, 3);
 check('...and reports the character count it saw', /held 9 characters/.test(empty.how), true);
 check('...and that it found no headers', /no note headers/.test(empty.how), true);
+/*
+ * And WHAT it was looking at. Two rounds were spent on messages that reported an outcome with no evidence:
+ * "gave nothing" sent me back to the browser, and the character count that replaced it — 7,115 — matched
+ * neither the About page (5,403) nor the Notes tab (20,839), so it identified nothing either.
+ */
+check('...and the first lines it saw, so the page can be identified',
+  /What it was looking at: All Notes/.test(empty.how), true);
+/* Re-clicked, not merely waited for: a click that reports success and does not switch looks the same. */
+let opens = 0;
+const reclick = await readNotesTab(
+  { waitForTimeout: async () => {}, locator: () => ({ innerText: async () => 'All Notes' }) },
+  {
+    openPanel: async () => { opens += 1; return { opened: true, how: 'clicked "Notes" in the tab strip' }; },
+    expandTruncatedText: async () => ({ clicked: 0 })
+  });
+check('the tab is re-opened on each retry', opens, 3);
+check('...and it still gave up cleanly', reclick.notes, []);
 
 console.log('\n--- a tab that will not open loses nothing ---');
 /*
