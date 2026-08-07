@@ -432,6 +432,14 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       callDisposition: normalize(callDisposition),
       followUpReason: normalize(followUpReason),
       notes: notes.join('\n\n'),
+      /*
+       * Where the notes came from, because the two sources are not equal quality.
+       *
+       * 'tab' is the Notes tab — full text. 'page' is the right-hand sidebar preview, which REI truncates by
+       * design. Both are useful for spotting a cancellation, but only one should be allowed to overwrite a
+       * cell that already holds the good version.
+       */
+      notesSource: notesTab.notes.length ? 'tab' : 'page',
       latestActivity: '',
       nextAction: normalize(nextAction),
       leadSource: normalize(leadSource),

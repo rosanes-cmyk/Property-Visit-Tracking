@@ -261,5 +261,39 @@ check('a byline glued to the name is not read as a date',
 check('...and the same byline with a space is', 
   noteDateKey('Seller confirmed the walkthrough. Aug 06, 2026 Theavil Marie'), 20260806);
 
+console.log('\n=== the truncated preview never demotes a note read in full ===');
+/*
+ * Two consecutive runs on Jose Anguiano rewrote Last Contact Result back and forth, differing only in
+ * spacing — "owner).++ Summary" from REI's cut-off sidebar preview against "owner). ++ Summary" from the
+ * Notes tab — because the tab opens on some runs and not others. Every run spent a write and logged a
+ * change that had not happened, and the cell alternated between the full note and a truncated one.
+ *
+ * Same principle as "a blank from REI never overwrites": a worse source must not replace a better one.
+ */
+const FULL = 'CALL SUMMARY – August 6, 2026 ++ Contact Result: Inbound. ++ Summary: postponed to January.';
+const PREVIEW = 'CALL SUMMARY – August 6, 2026 ++ Contact Result: Inbound.++ Summary: postponed to Janu';
+const rowWithNote = { 'Property Address': '2145 Capitol Ave', 'Last Contact Result': FULL };
+
+const fromPreview = { 'Last Contact Result': PREVIEW, __notePreviewOnly: true };
+check('a preview does not overwrite a note already there',
+  diffFromRei(rowWithNote, fromPreview).some((c) => c.field === 'Last Contact Result'), false);
+/* But it still fills an EMPTY cell — half a note beats none. */
+check('...and still fills an empty cell',
+  diffFromRei({ 'Property Address': '2145 Capitol Ave', 'Last Contact Result': '' }, fromPreview)
+    .find((c) => c.field === 'Last Contact Result')?.to, PREVIEW);
+/* The Notes tab, which carries no marker, still wins over whatever is in the cell. */
+check('the full note from the tab still overwrites',
+  diffFromRei({ ...rowWithNote, 'Last Contact Result': PREVIEW }, { 'Last Contact Result': FULL })
+    .find((c) => c.field === 'Last Contact Result')?.to, FULL);
+/* The marker must never reach the sheet — it is a decision, not a column. */
+check('the marker is not a writable field', RECHECK.includes("'__notePreviewOnly'"), false);
+check('...and is set from the scrape source',
+  /if \(scraped\.notesSource === 'page'\) out\.__notePreviewOnly = true;/.test(RECHECK), true);
+/* Only Last Contact Result is held back. The rest of REI_WINS is unaffected by where notes came from. */
+check('other REI_WINS fields are untouched by the marker',
+  diffFromRei({ 'Property Address': 'x', 'Assigned Owner': 'Juan' },
+    { 'Assigned Owner': 'Cherry', __notePreviewOnly: true })
+    .find((c) => c.field === 'Assigned Owner')?.to, 'Cherry');
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

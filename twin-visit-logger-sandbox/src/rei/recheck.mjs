@@ -639,8 +639,24 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE, now = new Date() } =
    * Last Contact Result, not Visit Notes. That column's whole purpose is the latest contact result, and
    * Visit Notes belongs to whoever stood in the property.
    */
+  /*
+   * The sidebar preview never overwrites a note already in the cell.
+   *
+   * Two consecutive runs on Jose Anguiano rewrote Last Contact Result each time, back and forth, differing
+   * only in spacing — "owner).++ Summary" from the truncated sidebar against "owner). ++ Summary" from the
+   * Notes tab. Every run spent a write and logged a change that had not happened, and the cell alternated
+   * between the full note and the cut-off preview depending on whether the tab opened that time.
+   *
+   * Same principle as "a BLANK from REI never overwrites": a worse source must not replace a better one. The
+   * preview still fills an EMPTY cell, and is still read for cancellations and gifts — it just cannot
+   * demote a note that was read in full.
+   */
   const note = latestReiNote(scraped.notes);
   if (note) out['Last Contact Result'] = note;
+  /*
+   * Marker, never written to the sheet — diffFromRei has the row and decides. Named like __unmappedOwner.
+   */
+  if (scraped.notesSource === 'page') out.__notePreviewOnly = true;
 
   /*
    * A gift ordered in REI. Fill-only, so a gift somebody recorded by hand is never rewritten.
@@ -723,6 +739,18 @@ export function diffFromRei(row, reiFields) {
   for (const field of REI_WINS) {
     const to = text(reiFields[field]);
     if (!to) continue;                                  // rule 2: a blank from REI decides nothing
+    /*
+     * The truncated sidebar preview never DEMOTES a note already read in full.
+     *
+     * Two consecutive runs on Jose Anguiano rewrote Last Contact Result back and forth, differing only in
+     * spacing — "owner).++ Summary" from the cut-off preview against "owner). ++ Summary" from the Notes
+     * tab — because the tab opens on some runs and not others. Every run spent a write and logged a change
+     * that had not happened, and the cell alternated between the full note and a truncated one.
+     *
+     * Same principle as "a blank from REI never overwrites": a worse source must not replace a better one.
+     * The preview still FILLS an empty cell, and is still read for cancellations and gifts.
+     */
+    if (field === 'Last Contact Result' && reiFields.__notePreviewOnly && text(row[field])) continue;
     const from = text(row[field]);
     if (sameFieldValue(field, from, to)) continue;
     changes.push({ field, from, to, ...(from ? {} : { filledBlank: true }) });
