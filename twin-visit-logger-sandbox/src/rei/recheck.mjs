@@ -509,6 +509,19 @@ const timeKey = (v) => {
 };
 
 /** Whether the sheet's value and REI's mean the same thing for this field, however each is spelled. */
+/*
+ * The columns that hold a DATE and the columns that hold MONEY, for sameFieldValue.
+ *
+ * Kept as lists rather than guessed from the value, because "08/06/2026" in a text column is a string that
+ * happens to look like a date, and normalising by shape would quietly compare two different things.
+ */
+const DATE_FIELDS = new Set(['Visit Date', 'Gift Sent Date', 'Gift Approval Date', 'Last Contact Date',
+  'Offer Prepared Date', 'Offer Sent Date', 'Contract Sent Date', 'Contract Signed Date',
+  'Next Action Due Date']);
+
+const MONEY_FIELDS = new Set(['Approved Offer Amount', 'Counteroffer Amount', 'Asking Price',
+  'Price Expectation']);
+
 export function sameFieldValue(field, from, to) {
   const a = text(from);
   const b = text(to);
@@ -527,6 +540,34 @@ export function sameFieldValue(field, from, to) {
     return Boolean(da) && tail(da) === tail(db);
   }
   if (field === 'Email') return a.toLowerCase() === b.toLowerCase();
+
+  /*
+   * Every OTHER date column, and money. Both were compared as raw text, and both rewrite themselves forever.
+   *
+   * Rob Walker's run, three times over: Approved Offer Amount "$500,000" -> "500000", Gift Approval Date
+   * "2026-08-06" -> "08/06/2026", Gift Sent Date the same. The write lands, Sheets re-renders it in the
+   * column's own format, the next run reads the rendered value and calls it a change again. Three writes and
+   * three Automation Log rows per lead per run, for nothing — and across 147 re-checkable leads that is what
+   * makes the log unreadable and hides the changes that matter.
+   *
+   * Only Visit Date and Visit Time were normalised, because those were the fields the re-check started with.
+   * The gift and money columns joined REI_WINS later and nobody widened this.
+   */
+  if (DATE_FIELDS.has(field)) {
+    const ka = sheetDayKey(a);
+    const kb = sheetDayKey(b);
+    return Boolean(ka) && ka === kb;
+  }
+  if (MONEY_FIELDS.has(field)) {
+    /* "$500,000" and "500000" are the same offer. A stray character makes it text again, and text compares. */
+    const num = (v) => {
+      const cleaned = v.replace(/[$,\s]/g, '');
+      return /^-?\d+(?:\.\d+)?$/.test(cleaned) ? Number(cleaned) : NaN;
+    };
+    const na = num(a);
+    const nb = num(b);
+    return Number.isFinite(na) && na === nb;
+  }
   return false;
 }
 

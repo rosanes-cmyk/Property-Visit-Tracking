@@ -1489,5 +1489,56 @@ const CONFIG_GS = fs.readFileSync(new URL('../apps-script/Config.gs', import.met
 check("'Reschedule Needed' is in the workbook's Visit Status dropdown",
   /'Visit Status':[^\]]*'Reschedule Needed'/.test(CONFIG_GS), true);
 
+console.log('\n=== the same value, written differently, is not a change ===');
+/*
+ * Rob Walker's run, three times over on three consecutive days:
+ *
+ *   Approved Offer Amount: "$500,000" -> "500000"
+ *   Gift Approval Date:    "2026-08-06" -> "08/06/2026"
+ *   Gift Sent Date:        "2026-08-06" -> "08/06/2026"
+ *
+ * The write lands, Sheets re-renders it in the column's own format, the next run reads the rendered value
+ * and calls it a change again. Three writes and three Automation Log rows per lead per run, for nothing.
+ * Across 147 re-checkable leads that is what makes the log unreadable and buries the changes that matter.
+ *
+ * Only Visit Date and Visit Time were normalised, because those were the fields the re-check started with;
+ * the gift and money columns joined REI_WINS later and nobody widened this.
+ */
+check('a currency-formatted offer equals its plain number',
+  sameFieldValue('Approved Offer Amount', '$500,000', '500000'), true);
+check('...and a DIFFERENT offer is still a change',
+  sameFieldValue('Approved Offer Amount', '$500,000', '425000'), false);
+check('...and a blank cell is still filled',
+  sameFieldValue('Approved Offer Amount', '', '500000'), false);
+check('decimals are compared as numbers',
+  sameFieldValue('Approved Offer Amount', '$500,000.00', '500000'), true);
+/* Anything that is not purely a number stays text, and text compares as text. */
+check('"call for price" is not silently equal to a number',
+  sameFieldValue('Approved Offer Amount', 'call for price', '500000'), false);
+
+for (const field of ['Gift Sent Date', 'Gift Approval Date', 'Last Contact Date', 'Offer Sent Date',
+  'Contract Signed Date', 'Next Action Due Date']) {
+  check(`${field}: ISO equals US`, sameFieldValue(field, '2026-08-06', '08/06/2026'), true);
+  check(`${field}: a different day is a change`, sameFieldValue(field, '2026-08-06', '08/07/2026'), false);
+}
+/* A blank on either side is never "the same" — that is how an empty cell still gets filled. */
+check('a blank date is not equal to a real one', sameFieldValue('Gift Sent Date', '', '08/06/2026'), false);
+/* Fields that are neither still compare exactly, so a real edit is never swallowed. */
+check('a text field still compares exactly', sameFieldValue('Gift Status', 'Approved', 'Sent'), false);
+check('...and matches when identical', sameFieldValue('Gift Status', 'Sent', 'Sent'), true);
+
+console.log('\n--- every REI_WINS date and money column is covered ---');
+/*
+ * The gap was not the rule, it was the LIST: a column can join REI_WINS and be left out of the
+ * normalisation, which is exactly what happened to the gift dates and the offer amount. This checks the two
+ * lists against each other rather than trusting somebody to remember.
+ */
+for (const field of REI_WINS.filter((f) => /Date$/.test(f))) {
+  check(`${field} is normalised`, sameFieldValue(field, '2026-08-06', '08/06/2026'), true);
+}
+for (const field of REI_WINS.filter((f) => /Amount$/.test(f))) {
+  check(`${field} is normalised`, sameFieldValue(field, '$500,000', '500000'), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
