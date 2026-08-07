@@ -352,7 +352,15 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
           visitTaskState = 'open';
           visitTaskReason = 'REI shows the booked-appointment task still open';
         } else if (!tasks.length) {
-          visitTaskState = 'unknown';
+          /*
+           * 'none' means we LOOKED and there is nothing. 'unknown' means we never managed to look.
+           *
+           * Both used to be 'unknown', which was safe but cost real information: appointmentGoneFromRei needs
+           * to know that the task list was genuinely read and genuinely empty before it will believe REI has
+           * let go of an appointment. Reading "we could not look" as "there is nothing there" is exactly the
+           * confident wrong answer that rule is guarded against.
+           */
+          visitTaskState = taskPanel.opened ? 'none' : 'unknown';
           // These two are NOT the same finding, and conflating them is what produced a confident,
           // wrong "REI holds no appointment for this contact any more".
           visitTaskReason = taskPanel.opened

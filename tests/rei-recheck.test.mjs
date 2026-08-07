@@ -14,6 +14,7 @@
 import {
   RECHECKABLE, ACTIVE_STAGES, recheckSkipReason, recheckUrgency, pickRecheckCandidates,
   recheckKey, parseSheetDate, sheetDayKey, reiFieldsFromScrape, diffFromRei, calendarAffected,
+  appointmentGoneFromRei,
   describeChanges, FILL_IF_BLANK, REI_WINS, sameFieldValue
 } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import { stageAdvance, stageCloseOut, closeOutRefusal, reiSaysLost, STAGE_LOST }
@@ -685,8 +686,16 @@ console.log('\n--- the scraper distinguishes complete / open / unknown ---');
 check('only a complete task becomes Completed',
   /visitTaskState === 'complete' \? 'Completed' : ''/.test(SCRAPER), true);
 check('a matched-but-open task is "open", not "unknown"', /visitTaskState = 'open'/.test(SCRAPER), true);
-check('an empty task list is "unknown", never "open"',
-  /if \(!tasks\.length\) \{\s*\n\s*visitTaskState = 'unknown'/.test(SCRAPER), true);
+/*
+ * An empty task list is never "open" — but it is now 'none' when the panel OPENED and 'unknown' when it did
+ * not. Those are different findings and appointmentGoneFromRei depends on the difference: it will believe
+ * REI has let go of an appointment only when the tasks were genuinely read and genuinely empty. Reading
+ * "we could not look" as "there is nothing there" is the confident wrong answer that rule guards against.
+ */
+check('an empty task list is never "open"',
+  /if \(!tasks\.length\) \{[\s\S]{0,600}?visitTaskState = taskPanel\.opened \? 'none' : 'unknown'/.test(SCRAPER), true);
+check('...and both halves are reported differently',
+  /the Tasks panel was opened[\s\S]{0,200}were never read/.test(SCRAPER), true);
 check('a task that does not match this visit is also "unknown"',
   /none matching this /.test(SCRAPER), true);
 check('a thrown error is "unknown" and carries the message',
@@ -1396,6 +1405,89 @@ const rebooked = diffFromRei(SARA, fromRei('2026-08-07T10:00:00-07:00'));
 check('her row stops saying Canceled',
   rebooked.find((c) => c.field === 'Visit Status')?.to, 'Scheduled');
 check('...and the calendar is told', calendarAffected(rebooked), true);
+
+console.log('\n=== REI has let go of the appointment ===');
+/*
+ * The client, on Jose Anguiano: "i said for jose its already follow up and its already updated, what's wrong
+ * with that?" Nothing was wrong in REI. His About panel reads
+ *
+ *   Appointment Time  -   Appointment Date  -   Appointment Assigned To  -
+ *   Lead Stage  2 Follow Up   Next Step  Follow up on this lead
+ *
+ * REI holds no appointment for him at all, and the Tasks panel opened and held none either. The tracker
+ * still said Visit Date 2026-08-01 / Scheduled, so the card kept asking somebody to chase a visit that
+ * existed nowhere but our sheet.
+ *
+ * The rule that blocked it — a blank from REI never overwrites — is a good one, because a missing field
+ * usually means the page did not render. What is new is that the four conditions below can tell the two
+ * apart.
+ */
+const JOSE_SCRAPE = {
+  contactStage: '2 Follow Up',        // the page rendered
+  appointmentStartIso: '',            // REI holds no appointment
+  visitTaskState: 'none'              // the Tasks panel opened and held nothing
+};
+check('all four conditions met', appointmentGoneFromRei(JOSE_SCRAPE), true);
+/* 1. A failed scrape gives no stage. Nothing may be concluded from a page that did not render. */
+check('a page that did not render decides nothing',
+  appointmentGoneFromRei({ ...JOSE_SCRAPE, contactStage: '' }), false);
+/* 2. An appointment REI still holds. */
+check('an appointment still in REI decides nothing',
+  appointmentGoneFromRei({ ...JOSE_SCRAPE, appointmentStartIso: '2026-08-20T14:00:00-07:00' }), false);
+/* 3. REI saying "booked" beats an empty date field — believe the stage over an absence. */
+check('"3 Appointment Booked" is believed over a blank date',
+  appointmentGoneFromRei({ ...JOSE_SCRAPE, contactStage: '3 Appointment Booked' }), false);
+/*
+ * 4. The critical one. 'unknown' means we never managed to read the tasks; reading that as "there is nothing
+ * there" is exactly the confident wrong answer this is guarded against.
+ */
+check('"we could not read the tasks" is NOT "there are no tasks"',
+  appointmentGoneFromRei({ ...JOSE_SCRAPE, visitTaskState: 'unknown' }), false);
+check('an OPEN task decides nothing', appointmentGoneFromRei({ ...JOSE_SCRAPE, visitTaskState: 'open' }), false);
+check('a COMPLETE task decides nothing',
+  appointmentGoneFromRei({ ...JOSE_SCRAPE, visitTaskState: 'complete' }), false);
+check('an empty scrape decides nothing', appointmentGoneFromRei({}), false);
+
+console.log('\n--- and what it changes, which is one cell ---');
+const JOSE_ROW = {
+  'Property Address': '2145 Capitol Ave, East Palo Alto, CA, 94303, UNITED STATES',
+  'Seller Name': 'Jose Anguiano',
+  'Visit Date': '2026-08-01',
+  'Visit Status': 'Scheduled',
+  'Current Stage': 'Visit Scheduled'
+};
+const goneFields = reiFieldsFromScrape(JOSE_SCRAPE, { zone: 'America/Los_Angeles' });
+check('the marker is set', goneFields.__appointmentGone, true);
+const goneChanges = diffFromRei(JOSE_ROW, goneFields);
+const statusChange = goneChanges.find((c) => c.field === 'Visit Status');
+check('Visit Status becomes Reschedule Needed', statusChange?.to, 'Reschedule Needed');
+check('...and it is flagged so the run can report it', statusChange?.appointmentGone, true);
+/* Reschedule Needed, not Canceled: the visit did not happen and the lead is still wanted. */
+check('it is not Canceled', statusChange?.to === 'Canceled', false);
+/*
+ * The visit DATE is left alone. It is the history of a visit that really was booked for Aug 1, and the card
+ * uses it to say how long this has drifted.
+ */
+check('the visit date is not cleared',
+  goneChanges.some((c) => c.field === 'Visit Date'), false);
+/* And Current Stage is untouched. Where the lead goes next is a person's decision, as every stage move is. */
+check('Current Stage is not moved',
+  goneChanges.some((c) => c.field === 'Current Stage' && c.to !== 'Visit Scheduled'), false);
+
+console.log('\n--- a person\'s own answer is never overwritten by an absence ---');
+for (const status of ['Completed', 'Canceled', 'Skipped — Offer Made', 'Reschedule Needed']) {
+  check(`"${status}" is left alone`,
+    diffFromRei({ ...JOSE_ROW, 'Visit Status': status }, goneFields)
+      .some((c) => c.field === 'Visit Status'), false);
+}
+/* A row with no visit booked in the first place has nothing to correct. */
+check('a blank Visit Status is not filled either',
+  diffFromRei({ ...JOSE_ROW, 'Visit Status': '' }, goneFields)
+    .some((c) => c.field === 'Visit Status'), false);
+/* Reschedule Needed must be a real dropdown value, or the whole row write fails. */
+const CONFIG_GS = fs.readFileSync(new URL('../apps-script/Config.gs', import.meta.url), 'utf8');
+check("'Reschedule Needed' is in the workbook's Visit Status dropdown",
+  /'Visit Status':[^\]]*'Reschedule Needed'/.test(CONFIG_GS), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

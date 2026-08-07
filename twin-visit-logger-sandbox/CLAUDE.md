@@ -165,6 +165,23 @@ When two high-confidence sources conflict, keep the REI page value, add a warnin
   When REI's stage is *earlier* than the tracker's and none of the three applies, `stageBehindTracker` reports
   and logs it rather than rewinding: the tracker holds Contract Sent/Signed Date and Transaction Handoff Status
   and REI has no equivalent, so REI being behind means REI is missing information.
+- **`Visit Status` moves off `Scheduled` when REI has let go of the appointment** (`appointmentGoneFromRei`).
+  Jose Anguiano's About panel showed Appointment Date, Time and Assigned To all empty, stage `2 Follow Up`,
+  Next Step *"Follow up on this lead"* — REI held no appointment at all — while the tracker still read
+  `Visit Date 2026-08-01 / Scheduled`, so the card kept asking somebody to chase a visit that existed nowhere
+  but our sheet. The client: *"for jose its already follow up and its already updated, what's wrong with
+  that?"* Nothing was, on REI's side.
+
+  FOUR conditions, all required, because "a blank from REI never overwrites" is otherwise right: the page
+  rendered (REI gave a Lead Stage), REI holds no appointment date, REI's stage is not `3 Appointment Booked`,
+  and the Tasks panel **opened** and held no booked-appointment task — `visitTaskState === 'none'`, which is
+  now distinct from `'unknown'` (never managed to look). Reading "we could not look" as "there is nothing
+  there" is the confident wrong answer this guards against.
+
+  It writes `Reschedule Needed`, not `Canceled`: the visit did not happen and the lead is still wanted —
+  Jose's own note has him postponed to January. The visit DATE is never cleared (it is the history of a visit
+  that really was booked), `Current Stage` is never moved, and any Visit Status a person set — Completed,
+  Canceled, Skipped — is their record and is never overwritten by an absence.
 - **Chat notifications are a shorter list than the changes.** A visit that MOVES updates the row, the
   dashboard and Juan's calendar event and posts **nothing** — the client's instruction: *"i dont want the
   update for this in the chat, it will confuse my teammate; as long as its updating in the dashboard its

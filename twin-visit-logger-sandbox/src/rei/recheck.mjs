@@ -536,6 +536,40 @@ export function sameFieldValue(field, from, to) {
  * Deliberately mirrors visitToRecord's formats ('MM/dd/yyyy', 'h:mm a') so a diff compares like with
  * like. Comparing a Luxon object against a formatted cell would report a change on every single run.
  */
+/**
+ * Has REI's appointment gone away — and can we say so with confidence?
+ *
+ * The client, on Jose Anguiano: "i said for jose its already follow up and its already updated, what's wrong
+ * with that?" Nothing was wrong with Jose in REI. His About panel reads
+ *
+ *   Appointment Time  -      Appointment Date  -      Appointment Assigned To  -
+ *   Lead Stage  2 Follow Up  Next Step  Follow up on this lead
+ *
+ * REI holds no appointment for him at all. The tracker still said Visit Date 2026-08-01, Visit Status
+ * Scheduled, so the card kept asking somebody to chase a visit that no longer exists anywhere but our sheet.
+ *
+ * The rule that blocked this is "a BLANK from REI never overwrites", and it is a good rule: a missing field
+ * usually means the page did not render. What is different here is that we can now tell the two apart, and
+ * all four of these must hold:
+ *
+ *   1. The page rendered — REI gave us its Lead Stage, so this is not a failed scrape.
+ *   2. REI has no appointment date.
+ *   3. REI's stage is not "3 Appointment Booked" — if it says booked, believe it over a blank field.
+ *   4. The Tasks panel OPENED and holds no booked-appointment task. Not "we could not read the tasks":
+ *      `unknown` means we never looked properly, and that must not be read as "there is nothing there".
+ *
+ * Deliberately NOT a Current Stage move. This says the visit is not booked; it does not say the lead is
+ * dead, and Jose's own note has him postponed to January rather than lost. Where the lead goes next is a
+ * person's decision, as every stage move is.
+ */
+export function appointmentGoneFromRei(scraped = {}) {
+  if (!text(scraped.contactStage)) return false;                       // 1. the page did not render
+  if (text(scraped.appointmentStartIso)) return false;                 // 2. REI still holds an appointment
+  if (/appointment\s*booked/i.test(text(scraped.contactStage))) return false;   // 3. REI says booked
+  if (scraped.visitTaskState !== 'none') return false;                 // 4. only a CONFIRMED empty task list
+  return true;
+}
+
 export function reiFieldsFromScrape(scraped, { zone = ZONE, now = new Date() } = {}) {
   const startRaw = scraped.appointmentStartIso ? new Date(scraped.appointmentStartIso) : null;
   const start = startRaw && !Number.isNaN(startRaw.getTime()) ? startRaw : null;
@@ -659,6 +693,23 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE, now = new Date() } =
   if (scraped.notesSource === 'page') out.__notePreviewOnly = true;
 
   /*
+   * REI has let go of the appointment — say so, once, and only on Visit Status.
+   *
+   * Jose Anguiano: REI shows Appointment Date, Time and Assigned To all empty, stage "2 Follow Up", Next Step
+   * "Follow up on this lead", and an opened Tasks panel with no booked appointment. The tracker still read
+   * Visit Date 2026-08-01 / Scheduled, so the card kept asking somebody to chase a visit that exists nowhere
+   * but our sheet. The client: "for jose its already follow up and its already updated, what's wrong with
+   * that?" Nothing was — on REI's side.
+   *
+   * 'Reschedule Needed' rather than 'Canceled': the visit did not happen and the lead is still wanted. Jose's
+   * own note has him postponed to January, not lost. Canceled would read as a decision nobody made.
+   *
+   * The Visit DATE is left alone. It is the history of a visit that really was booked for Aug 1, and the card
+   * uses it to say how long this has been drifting.
+   */
+  if (appointmentGoneFromRei(scraped)) out.__appointmentGone = true;
+
+  /*
    * A gift ordered in REI. Fill-only, so a gift somebody recorded by hand is never rewritten.
    *
    * Rob Walker's whole GIFT block was empty while REI held the order, the item, the total and the delivery
@@ -751,6 +802,11 @@ export function diffFromRei(row, reiFields) {
      * The preview still FILLS an empty cell, and is still read for cancellations and gifts.
      */
     if (field === 'Last Contact Result' && reiFields.__notePreviewOnly && text(row[field])) continue;
+    /*
+     * A Visit Status from REI still wins normally; this only ADDS the case where REI has no appointment left
+     * and the row still says Scheduled. Anything else a person has set — Completed, Canceled, Skipped — is
+     * their record of what happened and is never overwritten by an absence.
+     */
     const from = text(row[field]);
     if (sameFieldValue(field, from, to)) continue;
     changes.push({ field, from, to, ...(from ? {} : { filledBlank: true }) });
@@ -867,6 +923,23 @@ export function diffFromRei(row, reiFields) {
    */
 
   /*
+   * The appointment is gone from REI and the row still claims it is Scheduled.
+   *
+   * Only from 'Scheduled'. Completed, Canceled and Skipped are somebody's record of what happened, and an
+   * absence in REI must never overwrite a person's answer. Reported through appointmentGone so the run says
+   * it out loud rather than changing a visit quietly.
+   */
+  if (reiFields.__appointmentGone && text(row['Visit Status']) === 'Scheduled'
+    && !text(reiFields['Visit Status'])) {
+    changes.push({
+      field: 'Visit Status',
+      from: text(row['Visit Status']),
+      to: 'Reschedule Needed',
+      appointmentGone: true
+    });
+  }
+
+  /*
    * Last Contact Date moves FORWARD only.
    *
    * An older REI note must never undo a more recent contact somebody logged by hand — that would make a
@@ -915,6 +988,15 @@ export function calendarAffected(changes) {
  * at all. Those two need different actions from a person, so they need different words.
  */
 export function describeChanges(row, changes, reiFields = null, scraped = null) {
+  /*
+   * Say WHY a visit stopped being Scheduled, in the line itself.
+   *
+   * "Visit Status: Scheduled -> Reschedule Needed" on its own reads like the automation decided a visit was
+   * off. It did not: REI stopped holding the appointment. Somebody scanning the run needs the reason next to
+   * the change, not in a rule they would have to go and read.
+   */
+  const gone = (changes || []).find((c) => c.appointmentGone);
+  if (gone) gone.note = 'REI no longer holds this appointment — no date, and no booked task on an opened Tasks panel';
   const who = text(row['Seller Name']) || '(no name)';
   const where = text(row['Property Address']);
   const head = `${who} · ${where} · `;
@@ -966,7 +1048,15 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
   const noAppointment = !text(reiFields['Visit Date']) && !text(reiFields['Visit Time']);
   const looked = Boolean(scraped?.taskPanelOpened);
 
-  if (scraped && scraped.visitTaskState === 'unknown') {
+  /*
+   * 'none' joins 'unknown' here on purpose.
+   *
+   * They are different findings — looked-and-empty versus never-looked — and the message below already tells
+   * them apart through `looked`. What they share is that neither PROVES the visit happened, so both still
+   * belong in the "could not be verified" report. Splitting the state must not quietly drop half the leads
+   * out of that list.
+   */
+  if (scraped && (scraped.visitTaskState === 'unknown' || scraped.visitTaskState === 'none')) {
     const tail = !looked
       ? " This is a SCRAPER problem, not a data problem: REI's Tasks panel could not be opened, so its " +
         'tasks were never read. Nothing can be concluded about the visit from this run. ' +
