@@ -22,7 +22,7 @@ import { stageAdvance, stageCloseOut, stageContractCancelled, dispositionFromRei
   parseReiMoney, DISPOSITION_LOST } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 import { latestReiNote, latestReiNoteDate, contactResultReplaceable } from './notes.mjs';
-import { giftFromNotes } from './gift.mjs';
+import { giftFromNotes, giftReceiptDate } from './gift.mjs';
 
 const ZONE = 'America/Los_Angeles';
 
@@ -729,6 +729,23 @@ export function reiFieldsFromScrape(scraped, { zone = ZONE, now = new Date() } =
   const gift = giftFromNotes(scraped.notes);
   if (gift.status) out['Gift Status'] = gift.status;
   if (gift.sentDate) out['Gift Sent Date'] = gift.sentDate;
+
+  /*
+   * REI confirming the gift ARRIVED, when the order details are not in the note.
+   *
+   * Marichu Mangclimot's 7 August note: "Confirms package received — thanked us for it." No order number, no
+   * vendor, no total — so giftFromNotes says nothing, because it is reconstructing what the gift WAS. But the
+   * seller saying it arrived is proof it arrived, and the card was still asking Cherry to record a Gift Sent
+   * Date REI already held. The client, showing the note: "for marichu there already a record about the
+   * received."
+   *
+   * A marker, not a value: this FILLS a blank cell and never overwrites a date somebody typed. Unlike the
+   * rest of the gift columns, an inferred date should not beat a person's record of when they sent it.
+   */
+  if (!out['Gift Sent Date']) {
+    const arrived = giftReceiptDate(scraped.notes);
+    if (arrived) out.__giftReceiptDate = arrived;
+  }
   if (gift.reason) out['Gift Recommendation Reason'] = gift.reason;
   if (gift.approvalOwner) out['Gift Approval Owner'] = gift.approvalOwner;
   if (gift.approvedBy) out['Gift Approved By'] = gift.approvedBy;
@@ -921,6 +938,23 @@ export function diffFromRei(row, reiFields) {
    * Both predicates are still exported and still tested; nothing else in the project calls them, and they are
    * the record of what the rule used to be.
    */
+
+  /*
+   * A gift REI says arrived, into an EMPTY Gift Sent Date only.
+   *
+   * Fill-if-blank because the date is inferred from a note rather than stated as a field, and a date somebody
+   * typed is a better record than one this worked out. It is what takes Marichu and Rob off the gift section
+   * once REI shows the seller confirmed delivery.
+   */
+  if (reiFields.__giftReceiptDate && !text(row['Gift Sent Date'])) {
+    changes.push({
+      field: 'Gift Sent Date',
+      from: '',
+      to: reiFields.__giftReceiptDate,
+      filledBlank: true,
+      note: 'REI records the gift as received'
+    });
+  }
 
   /*
    * The appointment is gone from REI and the row still claims it is Scheduled.

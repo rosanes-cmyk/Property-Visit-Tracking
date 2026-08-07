@@ -16,6 +16,8 @@
  * Pure and importless, like the other decision modules, so the parsing is tested against the real note.
  */
 
+import { noteDateKey } from './notes.mjs';
+
 const text = (v) => String(v == null ? '' : v).trim();
 
 /*
@@ -202,4 +204,58 @@ export function giftFromNotes(notes) {
   out.approvedBy = 'Cherry';
 
   return out;
+}
+
+/*
+ * The date a gift was CONFIRMED RECEIVED, from REI's own words.
+ *
+ * Marichu Mangclimot's note of 7 August: "EMAIL RECEIVED – August 7, 2026 … ++ Confirms package received —
+ * thanked us for it." REI holds the proof of delivery, and the card was still asking Cherry to record a Gift
+ * Sent Date. The client, showing the note: "for marichu there already a record about the received."
+ *
+ * Separate from giftFromNotes on purpose. That one needs an ORDER marker — an order number, a vendor, a
+ * total — because it is reconstructing what the gift WAS. A seller writing "thank you, it arrived" carries
+ * none of that and is still proof it arrived.
+ *
+ * The date is the note's own. Sentence-level negation, not blanket: Rob Walker's delivery note also contains
+ * "Tracking page had not updated", and rejecting the whole note for one negative word would have thrown away
+ * the confirmation sitting two lines above it.
+ */
+const RECEIPT = [
+  /confirms?\s+(?:the\s+)?(?:package|gift|basket|delivery)\s+(?:was\s+)?received/i,
+  /(?:package|gift|basket)\s+(?:was\s+)?received/i,
+  /delivery\s+confirmation\s+(?:email\s+)?received/i,
+  /confirmed\s+receipt/i,
+  /received\s+by\s*:/i,
+  /(?:gift|basket)\s+(?:basket\s+)?delivered/i
+];
+
+/*
+ * Negation is checked in the WORDS IMMEDIATELY BEFORE the phrase, not anywhere near it.
+ *
+ * Rob Walker's note reads "Delivery confirmation email received 4:31 PM PT … Tracking page had not updated
+ * — email confirmed ahead of it", with no full stop between them. A sentence-level check threw the whole
+ * confirmation away over a "not" that was about the tracking page. "not received" negates; "received …
+ * tracking not updated" does not.
+ */
+const NOT_RECEIVED = /\b(?:not|never|no|hasn'?t|haven'?t|await(?:ing)?|pending|expecting)\s+(?:\w+\s+){0,2}$/i;
+
+/** 'MM/DD/YYYY' when a note confirms the gift arrived, or '' when none does. */
+export function giftReceiptDate(notes) {
+  const blocks = Array.isArray(notes) ? notes : String(notes || '').split(/\n{2,}/);
+  for (const block of blocks) {
+    const text = String(block || '');
+    const confirmed = RECEIPT.some((re) => {
+      const hit = re.exec(text);
+      return hit && !NOT_RECEIVED.test(text.slice(Math.max(0, hit.index - 40), hit.index));
+    });
+    if (!confirmed) continue;
+    const key = noteDateKey(text);
+    if (!key) continue;
+    const y = Math.floor(key / 10000);
+    const m = Math.floor(key / 100) % 100;
+    const d = key % 100;
+    return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${y}`;
+  }
+  return '';
 }

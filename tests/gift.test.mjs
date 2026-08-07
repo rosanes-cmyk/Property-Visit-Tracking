@@ -14,7 +14,7 @@
  * re-check skipped outright as "a finished lead is not going to change in REI in a way we care about". A
  * gift sent AFTER signing is exactly such a change.
  */
-import { giftFromNotes } from '../twin-visit-logger-sandbox/src/rei/gift.mjs';
+import { giftFromNotes, giftReceiptDate } from '../twin-visit-logger-sandbox/src/rei/gift.mjs';
 import { ACTIVE_STAGES, FILL_IF_BLANK, REI_WINS, recheckSkipReason, reiFieldsFromScrape, diffFromRei,
   giftReasonUpgradable } from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
 import fs from 'node:fs';
@@ -346,6 +346,62 @@ check('...and it is not marked as filling a blank', !upgrade?.filledBlank, true)
 check('a second pass changes nothing',
   diffFromRei({ ...marleneRow, 'Gift Recommendation Reason': upgrade.to }, marleneFields)
     .some((c) => c.field === 'Gift Recommendation Reason'), false);
+
+console.log('\n=== REI says the gift arrived ===');
+/*
+ * Marichu Mangclimot's note of 7 August: "EMAIL RECEIVED – August 7, 2026, 6:28 AM (inbound from Marichu)
+ * ++ Confirms package received — thanked us for it." REI held proof of delivery and the card was still
+ * asking Cherry to record a Gift Sent Date. The client, showing the note: "for marichu there already a
+ * record about the received."
+ *
+ * Separate from giftFromNotes, which needs an ORDER marker because it reconstructs what the gift WAS. A
+ * seller writing "thank you, it arrived" carries none of that and is still proof it arrived.
+ */
+const MARICHU_NOTE = 'EMAIL RECEIVED – August 7, 2026, 6:28 AM (inbound from Marichu) '
+  + '++ Confirms package received — thanked us for it '
+  + '++ Meeting her siblings later today; will get back to us soon after';
+check("Marichu's confirmation is read", giftReceiptDate(MARICHU_NOTE), '08/07/2026');
+check('...and giftFromNotes still says nothing, having no order details',
+  giftFromNotes(MARICHU_NOTE).sentDate, undefined);
+
+/*
+ * Rob Walker's, and the reason negation is checked in the words IMMEDIATELY BEFORE the phrase. His note says
+ * "Delivery confirmation email received 4:31 PM PT … Tracking page had not updated", with no full stop
+ * between them. A sentence-level check threw the confirmation away over a "not" about the tracking page.
+ */
+const ROB_NOTE = 'Gift Basket Delivered (Order #104240205) Note updated: Aug 6, 2026 — 4:36 PM PT '
+  + 'Delivery confirmation email received 4:31 PM PT Received by: Rob Walker '
+  + 'Tracking page had not updated — email confirmed ahead of it';
+check("Rob's confirmation survives a nearby negative", giftReceiptDate(ROB_NOTE), '08/06/2026');
+
+console.log('\n--- and what must NOT count as arrived ---');
+check('"not received yet"',
+  giftReceiptDate('CALL SUMMARY – August 5, 2026 ++ Gift basket not received yet, awaiting delivery'), '');
+check('"was never received"',
+  giftReceiptDate('August 5, 2026 seller says the package was never received'), '');
+check('"awaiting delivery confirmation"',
+  giftReceiptDate('August 5, 2026 ++ awaiting delivery confirmation email received from vendor'), '');
+/* No date, nothing to write. Guessing today would put a delivery date on a note that never gave one. */
+check('a confirmation with no date gives nothing',
+  giftReceiptDate('Confirms package received — thanked us for it'), '');
+check('a note about something else', giftReceiptDate('August 5, 2026 spoke to her, wants 950k'), '');
+check('empty', giftReceiptDate(''), '');
+check('null is safe', giftReceiptDate(null), '');
+
+console.log('\n--- it FILLS a blank cell and never overwrites one ---');
+/*
+ * Unlike the rest of the gift columns, this date is inferred from a note rather than stated as a field, so a
+ * date somebody typed is the better record and wins.
+ */
+const RECHECK_SRC = fs.readFileSync(
+  new URL('../twin-visit-logger-sandbox/src/rei/recheck.mjs', import.meta.url), 'utf8');
+check('it is a marker, not a written field', /out\.__giftReceiptDate = arrived;/.test(RECHECK_SRC), true);
+check('...set only when REI gave no gift-order date',
+  /if \(!out\['Gift Sent Date'\]\) \{/.test(RECHECK_SRC), true);
+check('...and applied only to an empty cell',
+  /reiFields\.__giftReceiptDate && !text\(row\['Gift Sent Date'\]\)/.test(RECHECK_SRC), true);
+check('...saying why, in the change itself',
+  /note: 'REI records the gift as received'/.test(RECHECK_SRC), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
