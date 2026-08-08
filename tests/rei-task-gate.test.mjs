@@ -54,7 +54,7 @@ check('switched off', allowed({ enabled: false }), false);
 check('...says so', why({ enabled: false }), 'REI task completion is switched off (REI_COMPLETE_TASKS)');
 check('no handover at all -> task stays open', allowed({ groupVerified: false }), false);
 check('...says so', why({ groupVerified: false }),
-  'no handover confirmed — neither a WhatsApp group nor a Chat briefing — leaving the task open');
+  'no handover confirmed — no WhatsApp group, Chat briefing or dashboard row — leaving the task open');
 
 console.log('\n--- the Chat briefing counts as the handover ---');
 /*
@@ -131,19 +131,56 @@ const PROC = fs.readFileSync(
   path.resolve('twin-visit-logger-sandbox/src/services/process.mjs'), 'utf8');
 
 check('the intake can complete a task', /shouldCompleteTask\(\{/.test(PROC), true);
-check('...only when REI_COMPLETE_TASKS is on', /if \(config\.reiCompleteTasks\) \{/.test(PROC), true);
+check('...only when REI_COMPLETE_TASKS is on',
+  /if \(config\.reiCompleteTasks && !config\.dryRun\) \{/.test(PROC), true);
 /*
  * `posted` is notifyChat's return value — whether the webhook ACCEPTED the message. Passing `true`, or
  * config.chatVisitBriefing, would mean a silently failed webhook still cleared the task, and the open
  * task is the only thing that would have made anyone notice.
  */
-check('the handover is the webhook\'s answer, not our intention',
-  /briefingPosted: posted/.test(PROC), true);
-check('...and posted comes from notifyChat itself',
-  /const posted = await notifyChat\(/.test(PROC), true);
+/*
+ * The handover proof is now the DASHBOARD ROW, not the posted message, because the client wanted the
+ * closure reported in the same Chat message: "i need the template that will notify in the gc about
+ * booked and the task is completed." To report it, it has to have already happened.
+ *
+ * The row is a fair substitute and arguably the better one: it is what the team works from and what the
+ * 11am/3pm cards are built from, and unlike a chat message it does not scroll away. The condition was
+ * never "a message was sent" — it was "the booking is recorded somewhere a person will see it".
+ */
+check('the handover proof is the row the sheet write reported',
+  /rowWritten: Boolean\(written\)/.test(PROC), true);
+/* And the closure must happen BEFORE the message, or it cannot be in it. */
+check('the task is closed before the Chat message is composed',
+  PROC.indexOf('shouldCompleteTask({') < PROC.indexOf('await notifyChat('), true);
+check('the outcome becomes a line in that message',
+  /taskLine = /.test(PROC) && /taskLine,/.test(PROC), true);
+check('...a tick when confirmed', /✅ REI task closed —/.test(PROC), true);
+check('...a warning when not', /⚠️ REI task still open —/.test(PROC), true);
+/*
+ * An unconfirmed click reads as a warning, never a tick. completeTask re-reads the row; a tick nobody
+ * can trust is worse than a warning, because it stops anybody going to look.
+ */
+check('an unconfirmed click is not reported as closed',
+  /the click was not confirmed/.test(PROC), true);
+/* And with REI_COMPLETE_TASKS off the line is absent, rather than claiming anything either way. */
+check('no task line at all when the feature is off', /\.filter\(Boolean\)\.join/.test(PROC), true);
+/*
+ * Closing the task is not a briefing feature. Tying it to CHAT_VISIT_BRIEFING would mean switching the
+ * briefing off silently stops REI being kept tidy.
+ */
+check('completion is outside the briefing gate',
+  PROC.indexOf('if (config.reiCompleteTasks && !config.dryRun)')
+    < PROC.indexOf('if (!config.dryRun && config.chatVisitBriefing)'), true);
 check('the calendar condition is the event id Google returned',
   /calendarVerified: Boolean\(calendarEventId\)/.test(PROC), true);
-check('a dry run never completes', /apply: !config\.dryRun/.test(PROC), true);
+/*
+ * A dry run never reaches the completion at all now — the whole block is behind !config.dryRun — so
+ * `apply: true` inside it is correct rather than lax. Asserting the outer guard is the real check.
+ */
+check('a dry run never reaches the completion',
+  /if \(config\.reiCompleteTasks && !config\.dryRun\)/.test(PROC), true);
+check('...and a dry run is still refused by the gate itself',
+  shouldCompleteTask({ ...ready, apply: false }).complete, false);
 check('an already-complete task is not re-clicked',
   /alreadyComplete: Boolean\(task\?\.complete\)/.test(PROC), true);
 check('the task is matched on this visit, not just found',

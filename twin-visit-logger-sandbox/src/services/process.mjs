@@ -205,19 +205,91 @@ export async function processInbox(auth, logger) {
          *
          * Seller phone and email are stripped by notifyChat regardless of what is assembled here.
          */
+        /*
+         * The ONE write this project makes into REI, and it happens BEFORE the Chat message.
+         *
+         * The client wanted both facts in a single message: "i need the template that will notify in the
+         * gc about booked and the task is completed." To report the closure, the closure has to have
+         * happened — so this runs first and hands `taskLine` to the message below.
+         *
+         * It is deliberately OUTSIDE the CHAT_VISIT_BRIEFING gate. Closing the task is not a briefing
+         * feature, and tying it to one would mean switching the briefing off silently stops REI being
+         * kept tidy.
+         *
+         * Each condition is re-checked rather than remembered: the event id Google returned, the row the
+         * sheet write reported, and the task read off this contact and matched on phone AND date — a
+         * seller with two properties has two tasks, and clearing the wrong one hides a visit still to
+         * come. shouldCompleteTask holds all of it, plus REI_COMPLETE_TASKS, which is false by default.
+         *
+         * Nothing here is ever fatal. By this point the row and the calendar event exist; an uncompleted
+         * task is precisely the visible loose end it is designed to be.
+         */
+        let taskLine = '';
+        if (config.reiCompleteTasks && !config.dryRun) {
+          try {
+            const visitKey = {
+              phone: partialVisit.phone,
+              date: partialVisit.appointmentStartIso
+                ? DateTime.fromISO(partialVisit.appointmentStartIso)
+                  .setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
+                : ''
+            };
+            const page = await context.newPage();
+            try {
+              await page.goto(partialVisit.reiLink, { waitUntil: 'domcontentloaded' });
+              const reiSelectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
+              const tasks = await readTasks(page, reiSelectors, { timezone: config.calendarTimezone });
+              const task = pickTaskForVisit(tasks, visitKey);
+              const verdict = shouldCompleteTask({
+                enabled: true,
+                apply: true,
+                task,
+                visit: visitKey,
+                rowWritten: Boolean(written),
+                calendarVerified: Boolean(calendarEventId),
+                alreadyComplete: Boolean(task?.complete)
+              });
+              if (!verdict.complete) {
+                taskLine = `⚠️ REI task still open — ${verdict.reason}`;
+                logger.info('REI task left open.', { reason: verdict.reason, seller: partialVisit.sellerName });
+              } else {
+                const result = await completeTask(page, reiSelectors, task);
+                /*
+                 * `confirmed` is completeTask re-reading the row, not the click landing. An unconfirmed
+                 * close is reported as still open — a tick nobody can trust is worse than a warning.
+                 */
+                taskLine = result.confirmed
+                  ? `✅ REI task closed — ${task.title || 'Booked appointment'}`
+                  : '⚠️ REI task — the click was not confirmed, check it in REI';
+                logger.info(result.confirmed ? 'REI task marked complete.' : 'REI task completion NOT confirmed.', {
+                  seller: partialVisit.sellerName,
+                  clicked: result.clicked,
+                  rowText: result.rowText
+                });
+              }
+            } finally {
+              await page.close().catch(() => {});
+            }
+          } catch (taskError) {
+            taskLine = '⚠️ REI task still open — could not be reached, close it by hand';
+            logger.warn('Could not complete the REI task; it stays open.', { message: taskError.message });
+          }
+        }
+
+        /*
+         * The FULL briefing belongs to the WhatsApp group, and is OFF in Chat unless asked for.
+         *
+         * It was routed here when WhatsApp was switched off; the client saw it land in the alerts channel
+         * and decided otherwise — "it should be in the whatsapp only". WhatsApp is out again, restricted,
+         * so CHAT_VISIT_BRIEFING=true puts it back and Chat is now the only delivery there is.
+         */
         if (!config.dryRun && config.chatVisitBriefing) {
           /*
-           * The SAME builder, from the SAME text, as the WhatsApp delivery.
-           *
-           * This used to assemble its own version straight from the REI fields, and the client caught
-           * what that cost: "the exact that you are pasting in the whats app that should be as well in
-           * the gc." It carried the address, seller, stage and notes and silently dropped the drive
-           * plan, every PropertyRadar figure, motivation, condition, timeline, price expectation and
-           * the call summary — about half the briefing, with nothing on screen to show it was missing.
-           *
-           * buildDescription() is what goes on the calendar event, so this is the text the WhatsApp
-           * step would later read back off that same event. Building it here rather than re-fetching
-           * the event keeps this one API call lighter and cannot disagree with what was just written.
+           * The SAME builder, from the SAME text, as the WhatsApp delivery. This used to assemble its own
+           * version from the raw REI fields and silently dropped the drive plan, every PropertyRadar
+           * figure, motivation, condition, timeline, price expectation and the call summary — about half
+           * the briefing. buildDescription() is what goes on the calendar event, so the two deliveries
+           * read one source and cannot disagree.
            */
           const briefing = briefingFromDescription(buildDescription(partialVisit), {
             address: partialVisit.propertyAddress,
@@ -230,11 +302,6 @@ export async function processInbox(auth, logger) {
           /*
            * What the automation DID, then the one thing left for a person.
            *
-           * The client: "it should include the calendar has been set, update in the dashboard, next step
-           * create a whatsapp gc member for this." A line reading `— row 383 · calendar event set` is a
-           * footnote; it does not tell somebody skimming their phone that the two things they would
-           * otherwise go and check are already done, and it names nothing to act on.
-           *
            * Each line states what actually happened rather than what was attempted. A calendar event that
            * failed says so, in the same place the successful one would have — a checklist that only ever
            * shows ticks teaches people to stop reading it.
@@ -243,107 +310,43 @@ export async function processInbox(auth, logger) {
           const done = [
             calendarEventId
               ? `✅ Calendar — event on ${config.calendarName || 'the visit calendar'}`
-              : '❌ Calendar — NOT created, this visit is on nobody\'s day',
+              : "❌ Calendar — NOT created, this visit is on nobody's day",
             written
               ? `✅ Dashboard — row ${rowNumber} in "${config.trackerSheet}" (${written.appended ? 'new' : 'updated'})`
               : '❌ Dashboard — the row was NOT written',
+            // Absent entirely when REI_COMPLETE_TASKS is off, rather than claiming anything either way.
+            taskLine,
             '➡️ NEXT: create the WhatsApp group, add the team, and paste this briefing'
-          ].join('\n');
+          ].filter(Boolean).join('\n');
 
           /*
            * The briefing goes inside a fenced block; the checklist stays outside it.
            *
-           * The client: "how about the template? so my teammate can copy it?" Google Chat renders ```
-           * fenced text as a monospace block with a copy control, and — the part that matters — copying
-           * it takes ONLY that block. Posted as one flat message, a teammate copying the briefing also
-           * carried "✅ Calendar — event on Juan's Official Calendar · ➡️ NEXT: create the WhatsApp
-           * group" into the visit group, which is instructions to themselves, pasted for the team.
+           * The client: "how about the template? so my teammate can copy it?" Google Chat renders fenced
+           * text as a monospace block with a copy control, and copying it takes ONLY that block. Posted
+           * flat, a teammate copying the briefing also carried the checklist into the visit group —
+           * instructions to themselves, pasted for the team.
            *
            * A fence inside the briefing would close it early. Nothing generates one — every line is a
-           * label and a value — but the text is stripped rather than trusted, because the failure is
+           * label and a value — but the text is neutralised rather than trusted, because the failure is
            * silent and ugly: half a briefing in a box and the rest as loose text.
            */
-          const fenced = `\`\`\`\n${briefing.replace(/```/g, "'''")}\n\`\`\``;
+          const FENCE = String.fromCharCode(96, 96, 96);
+          const fenced = `${FENCE}\n${briefing.split(FENCE).join("'''")}\n${FENCE}`;
 
-          const posted = await notifyChat(
+          await notifyChat(
             `*New visit booked — ${partialVisit.sellerName || 'seller'}*\n` +
             'Copy the block below into the visit group.\n\n' +
             `${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
             /*
-             * The seller's number survives in the briefing, as it does in the seeded-group handover.
-             *
-             * It was redacted while this was one alert among many and WhatsApp carried the real briefing.
-             * WhatsApp is out — the client's number is restricted — so Chat is now the ONLY place the
-             * visitor gets this, and a briefing that says "[phone]" sends them to a house to meet
-             * somebody they cannot ring. That is the ten minutes of digging this exists to remove.
-             *
-             * The Chat space is the client's own Workspace and team-only, which is the same audience the
-             * WhatsApp visit group had. Every other notification this project sends is still scrubbed;
-             * tests/notify.test.mjs names the two call sites allowed to do this and fails on a third.
+             * The seller's number survives in the briefing. It was redacted while this was one alert among
+             * many and WhatsApp carried the real briefing; Chat is now the ONLY place the visitor gets
+             * this, and a briefing that says "[phone]" sends them to a house to meet somebody they cannot
+             * ring. Both destinations are the client's own team-only Workspace. Every other notification
+             * is still scrubbed, and tests/notify.test.mjs names the call sites allowed to do this.
              */
             { kind: 'ok', keepContactDetails: true }
           );
-
-          /*
-           * The ONE write this project makes into REI, and only once the handover has actually landed.
-           *
-           * The client's rule: "completing the task once added in the calendar, sending the notif the gc,
-           * and got task appointment, and then complete task." So all three have to be true, and each is
-           * re-checked rather than remembered:
-           *
-           *   - the calendar event: syncCalendarEvent returned an id, so Google accepted the write
-           *   - the Chat briefing: notifyChat returns whether the webhook accepted it. `posted` is that
-           *     answer, not "the briefing feature is on" — a silently failed webhook must leave the task
-           *     open, because an open task is the only thing that will make anyone notice
-           *   - the task itself: read off this contact and matched on phone AND date, because a seller
-           *     with two properties has two tasks and clearing the wrong one hides a visit still to come
-           *
-           * shouldCompleteTask holds all of that, plus REI_COMPLETE_TASKS, which is false by default.
-           * A failure here never fails the email: the row, the calendar event and the briefing have all
-           * already happened, and an uncompleted task is exactly the visible loose end it is meant to be.
-           */
-          if (config.reiCompleteTasks) {
-            try {
-              const visitKey = {
-                phone: partialVisit.phone,
-                date: partialVisit.appointmentStartIso
-                  ? DateTime.fromISO(partialVisit.appointmentStartIso)
-                    .setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
-                  : ''
-              };
-              const page = await context.newPage();
-              try {
-                await page.goto(partialVisit.reiLink, { waitUntil: 'domcontentloaded' });
-                const reiSelectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
-                const tasks = await readTasks(page, reiSelectors, { timezone: config.calendarTimezone });
-                const task = pickTaskForVisit(tasks, visitKey);
-                const verdict = shouldCompleteTask({
-                  enabled: true,
-                  apply: !config.dryRun,
-                  task,
-                  visit: visitKey,
-                  briefingPosted: posted,
-                  calendarVerified: Boolean(calendarEventId),
-                  alreadyComplete: Boolean(task?.complete)
-                });
-                if (!verdict.complete) {
-                  logger.info('REI task left open.', { reason: verdict.reason, seller: partialVisit.sellerName });
-                } else {
-                  const result = await completeTask(page, reiSelectors, task);
-                  logger.info(result.confirmed ? 'REI task marked complete.' : 'REI task completion NOT confirmed.', {
-                    seller: partialVisit.sellerName,
-                    clicked: result.clicked,
-                    rowText: result.rowText
-                  });
-                }
-              } finally {
-                await page.close().catch(() => {});
-              }
-            } catch (taskError) {
-              // Never fatal: everything the team needs has already been delivered.
-              logger.warn('Could not complete the REI task; it stays open.', { message: taskError.message });
-            }
-          }
         }
       } catch (error) {
         if (error instanceof ReiSessionExpiredError || error.retryable) {

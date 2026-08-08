@@ -144,8 +144,14 @@ console.log('\n--- the briefing is fenced so a teammate can copy just that ---')
  * themselves, pasted for the team.
  */
 check('the briefing is wrapped in a fence', /const fenced = /.test(PROCESS), true);
+/*
+ * The fence is built from char codes rather than written literally, so this source file can hold the
+ * assertion without the fence closing the block it lives in.
+ */
+check('...from a real triple backtick',
+  /const FENCE = String\.fromCharCode\(96, 96, 96\)/.test(PROCESS), true);
 check('...and any fence inside the text is neutralised first',
-  /briefing\.replace\(\/```\/g/.test(PROCESS), true);
+  /briefing\.split\(FENCE\)\.join\(/.test(PROCESS), true);
 /* The checklist must stay OUTSIDE the fence, or copying picks it up again. */
 check('the checklist sits outside the fence',
   /\$\{fenced\}\\n\\n━━ DONE FOR YOU ━━/.test(PROCESS), true);

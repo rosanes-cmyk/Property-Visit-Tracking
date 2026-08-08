@@ -26,13 +26,24 @@ Do not replace this with Claude browser control, an autonomous Claude loop, Goog
    delete anything, send a text/email, or click destructive controls.
 
    **"Handover" is no longer only the WhatsApp group.** With WhatsApp out, a rule insisting on a group
-   could never be satisfied, so the task would stay open forever — not caution, a broken feature. The
-   client's wording: *"completing the task once added in the calendar, sending the notif the gc, and got
-   task appointment, and then complete task."* `briefingPosted` satisfies the gate alongside
-   `groupVerified`; **neither** is still a refusal. What counts is `notifyChat`'s return value — whether
-   the webhook ACCEPTED the message — never `config.chatVisitBriefing`, which only says the feature is
-   switched on. A silently failed webhook must leave the task open, because that open task is the only
-   thing that will make anyone notice.
+   could never be satisfied, so the task would stay open forever — not caution, a broken feature. Any ONE
+   of `groupVerified`, `briefingPosted` or `rowWritten` satisfies the gate; **none** is still a refusal.
+
+   `rowWritten` is what the intake actually uses, and the reason is an ordering one. The client asked for
+   the booking and the closed task in a SINGLE Chat message — *"i need the template that will notify in
+   the gc about booked and the task is completed"* — so the closure has to happen BEFORE that message is
+   sent, and a posted briefing cannot be its precondition or nothing would ever close. The dashboard row
+   is a fair substitute and arguably the better one: it is what the team works from, it is what the 11am
+   and 3pm cards are built from, and unlike a chat message it does not scroll away. The condition was
+   never "a message was sent" — it was "the booking is recorded somewhere a person will see it".
+
+   **The cost, stated because it is real:** a Chat delivery that then fails leaves the task closed and
+   nobody told. The calendar event and the row are still there and the failure is in the log, but it is
+   not in front of anybody. A two-message ordering avoided that; one message cannot. The client chose one
+   message knowing this.
+
+   An unconfirmed click is reported as ⚠️, never ✅ — `completeTask` re-reads the row, and a tick nobody
+   can trust is worse than a warning because it stops anyone going to look.
 
    The completion now also runs from the **intake** (`src/services/process.mjs`), not only from the
    WhatsApp watcher. It lived solely in the watcher, which is off — so with WhatsApp disabled the write

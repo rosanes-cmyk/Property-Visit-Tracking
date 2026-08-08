@@ -53,6 +53,7 @@ export function shouldCompleteTask({
   visit = null,
   groupVerified = false,
   briefingPosted = false,
+  rowWritten = false,
   calendarVerified = false,
   alreadyComplete = false
 } = {}) {
@@ -63,20 +64,33 @@ export function shouldCompleteTask({
   if (alreadyComplete) return no('task is already complete');
   if (!taskMatchesVisit(task, visit)) return no('the task found does not match this visit (phone + date)');
   /*
-   * One handover or the other, and it must be one this run can PROVE — a group confirmed on WhatsApp,
-   * or a briefing the Chat webhook accepted. "We meant to post it" is not evidence, and neither is
-   * "the briefing feature is switched on".
+   * At least one handover, and it has to be one this run can PROVE.
+   *
+   * `rowWritten` joined the list when the client asked for the booking and the closed task to arrive as
+   * ONE Chat message: "i need the template that will notify in the gc about booked and the task is
+   * completed." To report the closure in that message, the closure has to happen BEFORE it is sent — so
+   * a posted briefing cannot be a precondition any more, or nothing would ever close.
+   *
+   * The dashboard row is a fair substitute, and arguably the better one. It is what the team actually
+   * works from, it is what the 11am and 3pm cards are built from, and unlike a chat message it does not
+   * scroll away. The point of this condition was never "a message was sent" — it was "the booking is
+   * recorded somewhere a person will see it".
+   *
+   * The cost, stated because it is real: with the row as the proof, a Chat delivery that then fails
+   * leaves the task closed and nobody told. The calendar event and the dashboard row are still there,
+   * and the failure is in the log — but it is not in front of anybody. The two-message ordering avoided
+   * that; one message cannot.
    */
-  if (!groupVerified && !briefingPosted) {
-    return no('no handover confirmed — neither a WhatsApp group nor a Chat briefing — leaving the task open');
+  if (!groupVerified && !briefingPosted && !rowWritten) {
+    return no('no handover confirmed — no WhatsApp group, Chat briefing or dashboard row — leaving the task open');
   }
   if (!calendarVerified) return no("calendar event not verified on Juan's calendar — leaving the task open");
   if (!apply) return no('dry run — would complete the task');
 
-  return {
-    complete: true,
-    reason: `calendar verified and ${groupVerified ? 'the WhatsApp group' : 'the Chat briefing'} confirmed`
-  };
+  const proof = groupVerified ? 'the WhatsApp group'
+    : briefingPosted ? 'the Chat briefing'
+      : 'the dashboard row';
+  return { complete: true, reason: `calendar verified and ${proof} confirmed` };
 }
 
 /**
