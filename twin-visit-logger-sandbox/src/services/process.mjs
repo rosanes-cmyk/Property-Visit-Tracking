@@ -224,9 +224,31 @@ export async function processInbox(auth, logger) {
               : ''
           });
 
+          /*
+           * What the automation DID, then the one thing left for a person.
+           *
+           * The client: "it should include the calendar has been set, update in the dashboard, next step
+           * create a whatsapp gc member for this." A line reading `— row 383 · calendar event set` is a
+           * footnote; it does not tell somebody skimming their phone that the two things they would
+           * otherwise go and check are already done, and it names nothing to act on.
+           *
+           * Each line states what actually happened rather than what was attempted. A calendar event that
+           * failed says so, in the same place the successful one would have — a checklist that only ever
+           * shows ticks teaches people to stop reading it.
+           */
+          const rowNumber = written?.rowNumber ?? '?';
+          const done = [
+            calendarEventId
+              ? `✅ Calendar — event on ${config.calendarName || 'the visit calendar'}`
+              : '❌ Calendar — NOT created, this visit is on nobody\'s day',
+            written
+              ? `✅ Dashboard — row ${rowNumber} in "${config.trackerSheet}" (${written.appended ? 'new' : 'updated'})`
+              : '❌ Dashboard — the row was NOT written',
+            '➡️ NEXT: create the WhatsApp group, add the team, and paste this briefing'
+          ].join('\n');
+
           await notifyChat(
-            `${briefing}\n\n— row ${written?.rowNumber ?? '?'} in "${config.trackerSheet}"` +
-            ` · calendar event ${calendarEventId ? 'set' : 'NOT created'}`,
+            `${briefing}\n\n━━ DONE FOR YOU ━━\n${done}`,
             /*
              * The seller's number survives in the briefing, as it does in the seeded-group handover.
              *
