@@ -1472,6 +1472,12 @@ function webGetData() {
         owner: rec['Assigned Owner'] || '',
         visitStatus: rec['Visit Status'] || '',
         visitDate: fmtCell_('Visit Date', rec['Visit Date']),
+        /*
+         * Sent so the board can show how long a parked row has been waiting, and say something honest
+         * once that becomes unreasonable. An ISO string rather than a formatted date: the page does
+         * arithmetic with it, and "08/08/2026" cannot be subtracted from anything.
+         */
+        created: rec['Created Date'] instanceof Date ? rec['Created Date'].toISOString() : '',
         visitTime: fmtCell_('Visit Time', rec['Visit Time']),
         visitor: rec['Assigned Visitor'] || '',
         visitNotes: rec['Visit Notes'] || '',
@@ -1580,9 +1586,131 @@ function nextPropertyId_() {
 /** Create a NEW record from the website. Writes into the first empty row (grid never shrinks),
  *  stamps Property ID + Source=Manual + Created Date, then runs the visit-status handler so the
  *  same automation fires. Never contacts sellers. */
+/*
+ * How a row that still needs its details from REI is marked.
+ *
+ * Read by scripts/fill-pending-rei.mjs on the PC, which is the half of this that CAN open REI. Change it
+ * in both places or rows will sit here forever looking like finished records with an odd address.
+ */
 var PENDING_REI_PREFIX = 'PENDING REI LOOKUP —';
 
+/** Last ten digits, so (650) 620-4017 and 6506204017 are the same number. */
+function phoneKey_(value) {
+  var digits = String(value == null ? '' : value).replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
+/**
+ * Find the row this booking already belongs to, if any.
+ *
+ * Returns { row, reason, ambiguous }. `ambiguous` means the phone matched more than one record — a
+ * seller with two properties has one number and two rows — and in that case NOTHING is edited. Guessing
+ * which property to reschedule silently moves the wrong visit; a duplicate card somebody merges by hand
+ * is the recoverable mistake of the two.
+ *
+ * Order matters: a REI link is an identity, a phone is a strong hint, an address is a last resort.
+ */
+function findRowForBooking_(params) {
+  var sh = dataSheet_();
+  var last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) return { row: 0, reason: 'the tab is empty' };
+  var n = last - CFG.FIRST_DATA_ROW + 1;
+
+  var link = String(params['REI BlackBook Link'] || '').trim();
+  if (link) {
+    var links = sh.getRange(CFG.FIRST_DATA_ROW, col('REI BlackBook Link'), n, 1).getValues();
+    for (var i = 0; i < links.length; i++) {
+      if (String(links[i][0]).trim() === link) {
+        return { row: CFG.FIRST_DATA_ROW + i, reason: 'same REI link' };
+      }
+    }
+  }
+
+  var wanted = phoneKey_(params['Phone']);
+  if (wanted) {
+    var phones = sh.getRange(CFG.FIRST_DATA_ROW, col('Phone'), n, 1).getValues();
+    var stages = sh.getRange(CFG.FIRST_DATA_ROW, col('Current Stage'), n, 1).getValues();
+    var hits = [];
+    for (var p = 0; p < phones.length; p++) {
+      if (phoneKey_(phones[p][0]) !== wanted) continue;
+      /*
+       * A closed-out lead does not count as "already there". The same seller coming back months later
+       * is a NEW opportunity, and reviving the dead row would bury why it was closed.
+       */
+      if (String(stages[p][0]).trim() === 'Lost / Closed Out') continue;
+      hits.push(CFG.FIRST_DATA_ROW + p);
+    }
+    if (hits.length === 1) return { row: hits[0], reason: 'same phone number' };
+    if (hits.length > 1) {
+      return { row: 0, ambiguous: true,
+        reason: hits.length + ' records share that phone — rows ' + hits.join(', ') };
+    }
+  }
+
+  var addr = String(params['Property Address'] || '').trim().toLowerCase();
+  if (addr) {
+    var addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), n, 1).getValues();
+    for (var a = 0; a < addrs.length; a++) {
+      if (String(addrs[a][0]).trim().toLowerCase() === addr) {
+        return { row: CFG.FIRST_DATA_ROW + a, reason: 'same address' };
+      }
+    }
+  }
+  return { row: 0, reason: 'no existing record' };
+}
+
+/*
+ * Stages at or before a visit. Rescheduling may set Current Stage back to "Visit Scheduled" only from
+ * one of these — a lead at Offer Sent that gets another visit booked stays at Offer Sent, because the
+ * offer is further on than the visit and the board must not claim otherwise.
+ */
+var STAGES_BEFORE_OFFER = ['', 'Visit Scheduled', 'Visit Completed — Needs Review'];
+
+/**
+ * Reschedule an existing record rather than creating a second card for the same lead.
+ *
+ * The client, on being shown that Add always appended: "no, just edit that tab instead, edit property,
+ * since that is already [there]." Right — and creating duplicates would have broken the rule this
+ * project holds everywhere else, while double-counting the lead in every number at the top of the board.
+ */
+function webRescheduleRow_(row, params) {
+  var sh = dataSheet_();
+  var R = new RowAccessor_(sh, row);
+  var changed = [];
+
+  ['Visit Date', 'Visit Time', 'Visit Status', 'Assigned Visitor', 'Assigned Owner',
+    'Lead Source', 'Next Action', 'Next Action Due Date', 'REI BlackBook Link', 'Phone'
+  ].forEach(function (h) {
+    if (params[h] === undefined || params[h] === '') return;
+    var value = h.indexOf('Date') >= 0 ? new Date(params[h]) : params[h];
+    var before = R.get(h);
+    R.set(h, value);
+    if (String(before) !== String(value)) changed.push(h);
+  });
+
+  var stage = String(R.get('Current Stage') || '').trim();
+  if (STAGES_BEFORE_OFFER.indexOf(stage) >= 0 && String(params['Visit Status'] || '') === 'Scheduled') {
+    if (stage !== 'Visit Scheduled') { R.set('Current Stage', 'Visit Scheduled'); changed.push('Current Stage'); }
+  }
+
+  stamp_(R);
+  R.flush();
+  if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
+  SpreadsheetApp.flush();
+  return { ok: true, updated: true, row: row, changed: changed,
+    id: R.get('Property ID'), seller: R.get('Seller Name'), data: webGetData() };
+}
+
 function webAddRecord_(params) {
+  /*
+   * Look before writing. An existing lead is RESCHEDULED, never duplicated.
+   *
+   * Without this, a colleague rebooking Sara produced a second Sara: two cards on the board, and every
+   * count at the top of the page — SLA breach, Overdue, Need decision — quietly wrong by one.
+   */
+  const found = findRowForBooking_(params);
+  if (found.row) return webRescheduleRow_(found.row, params);
+
   const sh = dataSheet_();
   ensureRows_(sh, CFG.MAX_ROWS);
   var row = 0;
@@ -1605,13 +1733,16 @@ function webAddRecord_(params) {
   if (!params['Property Address']) {
     var lookupKey = String(params['Phone'] || params['REI BlackBook Link'] || '').trim();
     if (!lookupKey) {
-      return { ok: false, error: 'Give a Property Address, or a Phone / REI link for the automation to look it up with.' };
+      return { ok: false, error: 'A phone number is needed — it is what REI is searched by.' };
     }
     params['Property Address'] = PENDING_REI_PREFIX + ' ' + lookupKey;
     // Flagged, so it is visibly unfinished on the board rather than looking like a complete record.
     if (params['Data Quality Status'] === undefined) params['Data Quality Status'] = 'Incomplete';
     if (params['Exception Reason'] === undefined) {
-      params['Exception Reason'] = 'Waiting for the PC to read REI and fill in the address and details.';
+      params['Exception Reason'] = found.ambiguous
+        ? ('POSSIBLE DUPLICATE — ' + found.reason + '. Added as a new record rather than guessing which '
+           + 'one to reschedule; merge them by hand if this is the same property.')
+        : 'Waiting for the PC to read REI and fill in the address and details.';
     }
   }
   const R = new RowAccessor_(sh, row);
@@ -1629,7 +1760,8 @@ function webAddRecord_(params) {
   R.flush();
   if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
   SpreadsheetApp.flush();
-  return { ok: true, data: webGetData(), newId: R.get('Property ID') };
+  return { ok: true, created: true, ambiguous: Boolean(found.ambiguous), pending: true,
+    data: webGetData(), newId: R.get('Property ID') };
 }
 
 function webAction(action, id, params) {

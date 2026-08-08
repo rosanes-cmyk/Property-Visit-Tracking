@@ -220,7 +220,7 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
   <input id="search" placeholder="Search seller or address…" style="flex:1;min-width:180px">
 </div></div>
 <div class="wrap" id="wrap"></div>
-<button class="fab" id="add">＋ Add property</button>
+<button class="fab" id="add">＋ Book / reschedule visit</button>
 <div id="toast" style="display:none"></div>
 
 <script>
@@ -388,8 +388,50 @@ function actionsFor(r){var a=[];
   if(r.stage==='Active Negotiation'){a.push(['logContact','Log follow-up',1]);a.push(['contractSent','Contract sent',0]);}
   if(r.stage==='Verbal Agreement'||r.stage==='Contract Sent'){a.push(['contractSigned','Contract signed',1]);a.push(['logContact','Log follow-up',0]);}
   a.push(['setNextAction','Set next action',0]); return a;}
+var PENDING_PREFIX='PENDING REI LOOKUP';
+/*
+ * A row a colleague booked from this page whose details are still being fetched from the PC.
+ *
+ * The client: "it should have a loading and timer, see when its done, just to be accurate." They do NOT
+ * need to keep the tab open — the lookup runs on the office PC, not in this browser — but they do need to
+ * see that something is happening, and to be told the truth when it stops happening.
+ */
+function isPending(r){return String(r.address||'').indexOf(PENDING_PREFIX)===0;}
+function waitedFor(r){
+  var since=r.created?new Date(r.created):null;
+  if(!since||isNaN(since.getTime()))return '';
+  var secs=Math.max(0,Math.round((Date.now()-since.getTime())/1000));
+  return secs<60?(secs+'s'):(Math.floor(secs/60)+'m '+(secs%60)+'s');
+}
+/*
+ * Fifteen minutes is well past the five-minute timer plus a slow REI page, so at that point it is not
+ * slow — something is wrong, and the honest cause is almost always the PC. Saying "still working…"
+ * forever is how somebody waits an afternoon for a row that was never going to complete.
+ */
+function pendingStale(r){
+  var since=r.created?new Date(r.created):null;
+  if(!since||isNaN(since.getTime()))return false;
+  return (Date.now()-since.getTime())>15*60*1000;
+}
 function cardHTML(r){
   var over=r.daysOverdue>0?' <span class="badge crit">'+r.daysOverdue+'d overdue</span>':'';
+  if(isPending(r)){
+    var waited=waitedFor(r);
+    var stale=pendingStale(r);
+    return '<div class="card '+(stale?'crit':'warn')+'">'+
+      '<div class="top" data-detail="'+esc(r.rowNum)+'" title="View full record"><div>'+
+      '<div class="seller">'+esc(r.seller||'(no name)')+'</div>'+
+      '<div class="addr">'+esc(r.phone||'')+(r.visitDate?(' · '+esc(r.visitDate)):'')+'</div>'+
+      '</div><span class="chipstage">'+(stale?'Not finished':'Finding in REI')+'</span></div>'+
+      '<div class="meta"><span>'+(stale?'⚠️':'⏳')+' <b>'+
+      (stale?'Still not finished':'Finding the property in REI')+'</b></span>'+
+      (waited?'<span class="num">'+esc(waited)+'</span>':'')+'</div>'+
+      '<div class="dnote" style="margin:6px 2px 0">'+
+      (stale
+        ? 'The office PC does this, and it has not. Check it is switched on and signed in to Windows.'
+        : 'You can close this tab — the office PC is doing it. The card will fill itself in.')+
+      '</div></div>';
+  }
   var h='<div class="card '+sev(r)+'"><div class="top" data-detail="'+esc(r.rowNum)+'" title="View full record"><div><div class="seller">'+sellerLink(r)+'</div><div class="addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span>'+(visitFlag(r)?'<span class="chipflag">'+esc(visitFlag(r))+'</span>':'')+'</div>';
   h+='<div class="meta"><span>👤 <b>'+esc(r.owner||'Unassigned')+'</b></span><span class="num">📅 '+esc(r.due||'—')+'</span>'+over;
   if(r.offer)h+='<span class="num">💵 <b>'+money(r.offer)+'</b></span>';
@@ -689,26 +731,26 @@ function modal(title,fields,onSave,cap,defaults){var host=document.createElement
   host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');var val=el?el.value:'';if(f[2]==='nextaction'&&val==='__custom__'){var c=host.querySelector('[data-k="'+f[0]+'__custom"]');val=c?c.value:'';}v[f[0]]=val;if(f[3]&&!String(val).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
 function openAdd(){var host=document.createElement('div');host.className='modal-bg';
-  host.innerHTML='<div class="modal"><h3>Add a property visit</h3><p class="cap">In the live app this saves straight to the Google Sheet.</p>'+
-   '<div class="field"><label>Property Address</label><input data-k="address" placeholder="leave blank if you have the phone"></div>'+
-   '<div class="row2"><div class="field"><label>Seller Name</label><input data-k="seller"></div><div class="field"><label>Phone</label><input data-k="phone"></div></div>'+
+  host.innerHTML='<div class="modal"><h3>Book / reschedule visit</h3><p class="cap">Name and phone are enough. The address and the rest come from REI within a few minutes — you can close this tab.</p>'+
+   '<div class="row2"><div class="field"><label>Seller Name *</label><input data-k="seller"></div><div class="field"><label>Phone *</label><input data-k="phone" placeholder="(650) 620-4017"></div></div>'+
    '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
    '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Next Action</label><input data-k="next" value="Conduct scheduled visit & log outcome"></div><div class="field"><label>Due Date</label><input data-k="due" type="date" value="'+todayISO()+'"></div></div>'+
-   '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Add property</button></div></div>';
+   '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
-  host.querySelector('[data-ok]').onclick=function(){var g=function(k){return host.querySelector('[data-k="'+k+'"]').value;};
+  host.querySelector('[data-ok]').onclick=function(){var g=function(k){var el=host.querySelector('[data-k="'+k+'"]');return el?el.value:'';};
     /*
-     * Address OR phone OR REI link. The client asked to be able to add a visit from the three things a
-     * colleague already has in front of them — number, seller, date — instead of going into REI to copy
-     * the address out. The PC fills the rest in on its next pass; this page cannot, having no browser
-     * to open REI with.
+     * Name and phone, and nothing else is required.
+     *
+     * The client: "can we remove the address, just the name and phone only?" The address was the one
+     * field a colleague would have had to open REI to copy out — which is the errand this removes. The
+     * phone is what REI is searched BY, so it is the field that cannot be optional.
      */
-    if(!g('address').trim()&&!g('phone').trim()&&!g('rei').trim()){toast('Give an address, or a phone / REI link to look it up with');return;}
-    var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
-    toast('Adding…');runAction('addRecord',null,params,close);};}
+    if(!g('seller').trim()||!g('phone').trim()){toast('Seller name and phone are both needed');return;}
+    var params={'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
+    toast('Saving…');runAction('addRecord',null,params,close);};}
 
 /*
  * rowNum MUST be carried through.
@@ -718,9 +760,9 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
  * "Full record" button simply did nothing when clicked. The record's identity is the first field for
  * that reason: it is the one property the page cannot work without.
  */
-function hydrate(x){return {rowNum:x.rowNum,id:x.id,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
+function hydrate(x){return {rowNum:x.rowNum,id:x.id,created:x.created,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
-function onData(d){RECS=(d.records||[]).map(hydrate);TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 var TRASH=[];
 function renderTrash(){
   var h='<div class="sec"><h2>Trash — deleted records</h2><span class="n">'+TRASH.length+'</span><span class="rule"></span></div>';
@@ -734,8 +776,21 @@ function renderTrash(){
 }
 function suggestNext(stage){return {'Visit Scheduled':'Conduct scheduled visit & log outcome','Visit Completed — Needs Review':'Decide: make offer or pass','Offer Sent':'Follow up on sent offer','Active Negotiation':'Decide counter response','Verbal Agreement':'Prepare & send contract','Contract Sent':'Confirm signature','Long-Term Nurture':'Nurture check-in call'}[stage]||'';}
 function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
+/*
+ * Poll ONLY while a row is waiting on the PC, and stop as soon as none are.
+ *
+ * The board is otherwise event-driven, and a permanent timer on every open tab is load on the Apps Script
+ * quota for nothing. This exists for one moment: a colleague has just booked a visit and is watching the
+ * card. Twenty seconds is well inside the five-minute job.
+ */
+var PENDING_POLL=null;
+function pollWhilePending(){
+  var waiting=RECS.some(isPending);
+  if(waiting&&!PENDING_POLL){PENDING_POLL=setInterval(refresh,20000);}
+  if(!waiting&&PENDING_POLL){clearInterval(PENDING_POLL);PENDING_POLL=null;}
+}
 function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
-function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast('Saved \u2714');if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
+function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast(res.updated?('Updated \u2714 rescheduled'+(res.seller?(' \u2014 '+res.seller):'')):(res.pending?'Added \u2714 finding it in REI\u2026':'Saved \u2714'));if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
 document.querySelectorAll('.seg button').forEach(function(b){b.onclick=function(){setView(b.getAttribute('data-v'));};});
 document.querySelectorAll('.chip[data-f]').forEach(function(c){c.setAttribute('tabindex','0');c.onclick=function(){setFilter(c.getAttribute('data-f'));};});
 var os=document.getElementById('owner');OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});

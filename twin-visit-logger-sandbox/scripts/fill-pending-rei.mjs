@@ -194,16 +194,45 @@ async function main() {
       }
 
       /*
-       * Matched the ordinary way — record id, then link, then normalised address. The parked row is found
-       * by its phone and link, so the write lands on the row the colleague created rather than appending
-       * a second one beside it.
+       * Matched the ordinary way — record id, then link, then normalised address.
+       *
+       * The interesting case is when that match lands on a DIFFERENT row: the contact already had a
+       * record, and the colleague booked from the board without knowing. The board catches most of these
+       * by phone before the row is ever created, but not all — REI holds numbers and links the board
+       * never saw, which is exactly why the lookup is happening here at all.
+       *
+       * Then the parked row must be CLEARED, not just left. upsertVisit writes to the matched row, so
+       * without this the placeholder sits beside the real card forever, and every run tries it again.
        */
       const match = await findExistingVisit(auth, visit);
+      const mergingInto = match?.rowNumber && match.rowNumber !== row.__rowNumber ? match.rowNumber : 0;
+      if (mergingInto) {
+        console.log(`    this contact already has row ${mergingInto} — merging into it`);
+        /*
+         * The date the colleague typed is the reason this row exists, so it is carried across. REI may
+         * not know about the new booking yet; that is the whole point of somebody typing it.
+         */
+        if (typedDate) visit.appointmentStartIso = visit.appointmentStartIso || '';
+      }
+
       const calendarEventId = await syncCalendarEvent(auth, visit, match.calendarEventId || '');
       visit.calendarEventId = calendarEventId;
       const written = await upsertVisit(auth, visit, match);
       console.log(`    filled row ${written?.rowNumber ?? '?'}` +
         ` · calendar event ${calendarEventId ? 'set' : 'NOT created (no valid time yet)'}`);
+
+      if (mergingInto) {
+        /*
+         * Blank the parked row rather than deleting it: deleting shifts every row below it, and the
+         * tracker's own formulas, the dashboard and any stored row numbers are all positional. An empty
+         * row is also what webAddRecord_ looks for when handing out the next slot, so the space is reused.
+         */
+        await sheets.spreadsheets.values.clear({
+          spreadsheetId: config.spreadsheetId,
+          range: `${config.trackerSheet}!A${row.__rowNumber}:CZ${row.__rowNumber}`
+        });
+        console.log(`    cleared the parked row ${row.__rowNumber} — one record, not two`);
+      }
       filled += 1;
     }
   } finally {

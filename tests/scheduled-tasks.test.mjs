@@ -166,5 +166,41 @@ check('the date typed on the board is kept', /keeping the date typed on the boar
 check('the existing row is matched, not appended', /findExistingVisit\(auth, visit\)/.test(FILL), true);
 check('a dry run is the default', /const APPLY = args\.includes\('--yes'\)/.test(FILL), true);
 
+
+console.log('\n--- booking from the board: edit, never duplicate ---');
+/*
+ * The client, shown that "+ Add property" always appended: "no, just edit that tab instead, edit
+ * property, since that is already [there]." Right — and a second Sara would have double-counted her in
+ * every number across the top of the board: SLA breach, Overdue, Need decision, Stalled.
+ */
+const WEB = fs.readFileSync('apps-script/WebApp.gs', 'utf8');
+const COMBINED = fs.readFileSync('apps-script/Code.combined.gs', 'utf8');
+
+check('an existing lead is looked for before anything is written',
+  WEB.indexOf('findRowForBooking_(params)') < WEB.indexOf("ensureRows_(sh, CFG.MAX_ROWS)"), true);
+check('...and a match is rescheduled, not appended',
+  /if \(found\.row\) return webRescheduleRow_\(found\.row, params\);/.test(WEB), true);
+check('matching ignores phone formatting', /digits\.slice\(-10\)/.test(WEB), true);
+/*
+ * A closed-out lead is NOT "already there": the same seller returning months later is a new
+ * opportunity, and reviving the dead row would bury why it was closed.
+ */
+check('a closed-out row is not revived', /Lost \/ Closed Out/.test(WEB), true);
+/*
+ * One phone, two properties, two rows. Rescheduling a guess moves the wrong visit silently; a duplicate
+ * card somebody merges by hand is the recoverable mistake of the two.
+ */
+check('an ambiguous phone creates rather than guesses', /ambiguous: true/.test(WEB), true);
+check('...and says so on the record', /POSSIBLE DUPLICATE/.test(WEB), true);
+/* A reschedule must not drag a lead backwards past where it has actually got to. */
+check('a stage past the visit is never rewound', /STAGES_BEFORE_OFFER/.test(WEB), true);
+/* The two Apps Script files are kept identical by hand; a drift here ships one and not the other. */
+check('Code.combined.gs carries the same logic',
+  /function webRescheduleRow_/.test(COMBINED) && /function findRowForBooking_/.test(COMBINED), true);
+
+/* And the PC side must clear a parked row it merged elsewhere, or the placeholder lives forever. */
+check('a merged parked row is cleared', /cleared the parked row/.test(FILL), true);
+check('...by blanking it, not deleting the row', /values\.clear/.test(FILL), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
