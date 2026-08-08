@@ -11,8 +11,11 @@ import { syncCalendarEvent, buildDescription } from '../google/calendar.mjs';
 import { parseAppointmentTitle } from '../parser/email.mjs';
 import { launchReiContext, ReiSessionExpiredError } from '../rei/browser.mjs';
 import { scrapeReiVisit } from '../rei/scraper.mjs';
+import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
+import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { notifyChat } from '../utils/notify.mjs';
 import { briefingFromDescription } from '../whatsapp/note.mjs';
+import fs from 'node:fs/promises';
 
 // Pull the phone number out of the REI notification (from the task-title line if possible). REI
 // truncates long titles, so a short "Booked appointment | (707) 484-2558" title survives and the
@@ -247,7 +250,7 @@ export async function processInbox(auth, logger) {
             '➡️ NEXT: create the WhatsApp group, add the team, and paste this briefing'
           ].join('\n');
 
-          await notifyChat(
+          const posted = await notifyChat(
             `${briefing}\n\n━━ DONE FOR YOU ━━\n${done}`,
             /*
              * The seller's number survives in the briefing, as it does in the seeded-group handover.
@@ -263,6 +266,67 @@ export async function processInbox(auth, logger) {
              */
             { kind: 'ok', keepContactDetails: true }
           );
+
+          /*
+           * The ONE write this project makes into REI, and only once the handover has actually landed.
+           *
+           * The client's rule: "completing the task once added in the calendar, sending the notif the gc,
+           * and got task appointment, and then complete task." So all three have to be true, and each is
+           * re-checked rather than remembered:
+           *
+           *   - the calendar event: syncCalendarEvent returned an id, so Google accepted the write
+           *   - the Chat briefing: notifyChat returns whether the webhook accepted it. `posted` is that
+           *     answer, not "the briefing feature is on" — a silently failed webhook must leave the task
+           *     open, because an open task is the only thing that will make anyone notice
+           *   - the task itself: read off this contact and matched on phone AND date, because a seller
+           *     with two properties has two tasks and clearing the wrong one hides a visit still to come
+           *
+           * shouldCompleteTask holds all of that, plus REI_COMPLETE_TASKS, which is false by default.
+           * A failure here never fails the email: the row, the calendar event and the briefing have all
+           * already happened, and an uncompleted task is exactly the visible loose end it is meant to be.
+           */
+          if (config.reiCompleteTasks) {
+            try {
+              const visitKey = {
+                phone: partialVisit.phone,
+                date: partialVisit.appointmentStartIso
+                  ? DateTime.fromISO(partialVisit.appointmentStartIso)
+                    .setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
+                  : ''
+              };
+              const page = await context.newPage();
+              try {
+                await page.goto(partialVisit.reiLink, { waitUntil: 'domcontentloaded' });
+                const reiSelectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
+                const tasks = await readTasks(page, reiSelectors, { timezone: config.calendarTimezone });
+                const task = pickTaskForVisit(tasks, visitKey);
+                const verdict = shouldCompleteTask({
+                  enabled: true,
+                  apply: !config.dryRun,
+                  task,
+                  visit: visitKey,
+                  briefingPosted: posted,
+                  calendarVerified: Boolean(calendarEventId),
+                  alreadyComplete: Boolean(task?.complete)
+                });
+                if (!verdict.complete) {
+                  logger.info('REI task left open.', { reason: verdict.reason, seller: partialVisit.sellerName });
+                } else {
+                  const result = await completeTask(page, reiSelectors, task);
+                  logger.info(result.confirmed ? 'REI task marked complete.' : 'REI task completion NOT confirmed.', {
+                    seller: partialVisit.sellerName,
+                    clicked: result.clicked,
+                    rowText: result.rowText
+                  });
+                }
+              } finally {
+                await page.close().catch(() => {});
+              }
+            } catch (taskError) {
+              // Never fatal: everything the team needs has already been delivered.
+              logger.warn('Could not complete the REI task; it stays open.', { message: taskError.message });
+            }
+          }
         }
       } catch (error) {
         if (error instanceof ReiSessionExpiredError || error.retryable) {

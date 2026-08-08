@@ -9,6 +9,8 @@
  *
  * Functions are imported from the shipped module, so they cannot drift.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   samePhone, taskMatchesVisit, shouldCompleteTask, assertCompletionSelector
 } from '../twin-visit-logger-sandbox/src/rei/task-gate.mjs';
@@ -41,7 +43,8 @@ const task = { phone: '6507717814', date: '2026-08-05' };
 const ready = { enabled: true, apply: true, task, visit, groupVerified: true, calendarVerified: true };
 
 check('everything verified -> complete', shouldCompleteTask(ready).complete, true);
-check('...with the reason recorded', shouldCompleteTask(ready).reason, 'group and calendar both verified');
+check('...with the reason recorded', shouldCompleteTask(ready).reason,
+  'calendar verified and the WhatsApp group confirmed');
 
 const why = (overrides) => shouldCompleteTask({ ...ready, ...overrides }).reason;
 const allowed = (overrides) => shouldCompleteTask({ ...ready, ...overrides }).complete;
@@ -49,8 +52,38 @@ const allowed = (overrides) => shouldCompleteTask({ ...ready, ...overrides }).co
 console.log('\n--- refusals ---');
 check('switched off', allowed({ enabled: false }), false);
 check('...says so', why({ enabled: false }), 'REI task completion is switched off (REI_COMPLETE_TASKS)');
-check('no group -> task stays open', allowed({ groupVerified: false }), false);
-check('...says so', why({ groupVerified: false }), 'WhatsApp group not verified — leaving the task open');
+check('no handover at all -> task stays open', allowed({ groupVerified: false }), false);
+check('...says so', why({ groupVerified: false }),
+  'no handover confirmed — neither a WhatsApp group nor a Chat briefing — leaving the task open');
+
+console.log('\n--- the Chat briefing counts as the handover ---');
+/*
+ * WhatsApp is out: the client's number is restricted. A rule that insists on a group can never be
+ * satisfied, so the task would stay open forever — not caution, a broken feature. The client's wording:
+ * "completing the task once added in the calendar, sending the notif the gc, and got task appointment,
+ * and then complete task."
+ *
+ * The Chat briefing carries the same content to the same team, and this project can PROVE it posted,
+ * because notifyChat reports whether the webhook accepted it. That proof is the whole basis for
+ * accepting it — "the briefing feature is switched on" would not be.
+ */
+check('a posted Chat briefing is enough',
+  allowed({ groupVerified: false, briefingPosted: true }), true);
+check('...and the reason names it, not the group',
+  why({ groupVerified: false, briefingPosted: true }),
+  'calendar verified and the Chat briefing confirmed');
+check('a group alone is still enough',
+  allowed({ groupVerified: true, briefingPosted: false }), true);
+check('both is fine and reads as the group',
+  why({ groupVerified: true, briefingPosted: true }),
+  'calendar verified and the WhatsApp group confirmed');
+/* The calendar is not optional just because the briefing went out. */
+check('briefing without a calendar event still refuses',
+  allowed({ groupVerified: false, briefingPosted: true, calendarVerified: false }), false);
+/* And a briefing cannot rescue a task that does not match this visit. */
+check('briefing does not excuse a mismatched task',
+  allowed({ groupVerified: false, briefingPosted: true, task: { phone: '6507717814', date: '2026-09-09' } }),
+  false);
 check('no calendar event -> task stays open', allowed({ calendarVerified: false }), false);
 check('...says so', why({ calendarVerified: false }),
   "calendar event not verified on Juan's calendar — leaving the task open");
@@ -84,6 +117,50 @@ for (const bad of [
   try { assertCompletionSelector(bad); } catch { threw = true; }
   check(`refused: ${bad}`, threw, true);
 }
+
+
+console.log('\n=== The intake is now where the task gets completed ===');
+/*
+ * It used to live only in the WhatsApp watcher, which is switched off — so with WhatsApp out, the write
+ * had no path to run at all and REI_COMPLETE_TASKS=true would have done nothing at all, silently.
+ *
+ * These pin the shape of that call rather than the browser work: the three conditions the client named,
+ * each taken from something re-checked rather than remembered.
+ */
+const PROC = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/services/process.mjs'), 'utf8');
+
+check('the intake can complete a task', /shouldCompleteTask\(\{/.test(PROC), true);
+check('...only when REI_COMPLETE_TASKS is on', /if \(config\.reiCompleteTasks\) \{/.test(PROC), true);
+/*
+ * `posted` is notifyChat's return value — whether the webhook ACCEPTED the message. Passing `true`, or
+ * config.chatVisitBriefing, would mean a silently failed webhook still cleared the task, and the open
+ * task is the only thing that would have made anyone notice.
+ */
+check('the handover is the webhook\'s answer, not our intention',
+  /briefingPosted: posted/.test(PROC), true);
+check('...and posted comes from notifyChat itself',
+  /const posted = await notifyChat\(/.test(PROC), true);
+check('the calendar condition is the event id Google returned',
+  /calendarVerified: Boolean\(calendarEventId\)/.test(PROC), true);
+check('a dry run never completes', /apply: !config\.dryRun/.test(PROC), true);
+check('an already-complete task is not re-clicked',
+  /alreadyComplete: Boolean\(task\?\.complete\)/.test(PROC), true);
+check('the task is matched on this visit, not just found',
+  /pickTaskForVisit\(tasks, visitKey\)/.test(PROC), true);
+
+/*
+ * And it must never cost the delivery. By the time this runs the row, the calendar event and the
+ * briefing have all landed; a REI page that will not load is a loose end, not a reason to fail the email
+ * and re-process it.
+ */
+check('a failure here is caught, not fatal', /catch \(taskError\)/.test(PROC), true);
+check('...and says the task stays open', /it stays open/.test(PROC), true);
+check('the completion page is always closed', /await page\.close\(\)\.catch/.test(PROC), true);
+
+/* The gate runs BEFORE any click. Reversing those two would complete first and ask afterwards. */
+check('the gate is consulted before the click',
+  PROC.indexOf('shouldCompleteTask({') < PROC.indexOf('await completeTask('), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

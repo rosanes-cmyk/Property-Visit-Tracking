@@ -19,11 +19,26 @@ Do not replace this with Claude browser control, an autonomous Claude loop, Goog
 
 1. Work only against the configured DEV/sandbox sheet and calendar until acceptance tests pass.
 2. Treat REI as read-only, with ONE narrow exception agreed with the client: marking a
-   **booked-appointment task complete**, and only after the visit is verified both on Juan's calendar
-   and as a WhatsApp group. It is off unless `REI_COMPLETE_TASKS=true`, it is gated by
+   **booked-appointment task complete**, and only after the visit is verified on Juan's calendar AND a
+   handover has demonstrably reached the team. It is off unless `REI_COMPLETE_TASKS=true`, it is gated by
    `src/rei/task-gate.mjs`, and a selector matching delete/remove/trash/archive/cancel/discard is
    refused at runtime. Everything else remains forbidden: never edit a contact, change a stage,
    delete anything, send a text/email, or click destructive controls.
+
+   **"Handover" is no longer only the WhatsApp group.** With WhatsApp out, a rule insisting on a group
+   could never be satisfied, so the task would stay open forever — not caution, a broken feature. The
+   client's wording: *"completing the task once added in the calendar, sending the notif the gc, and got
+   task appointment, and then complete task."* `briefingPosted` satisfies the gate alongside
+   `groupVerified`; **neither** is still a refusal. What counts is `notifyChat`'s return value — whether
+   the webhook ACCEPTED the message — never `config.chatVisitBriefing`, which only says the feature is
+   switched on. A silently failed webhook must leave the task open, because that open task is the only
+   thing that will make anyone notice.
+
+   The completion now also runs from the **intake** (`src/services/process.mjs`), not only from the
+   WhatsApp watcher. It lived solely in the watcher, which is off — so with WhatsApp disabled the write
+   had no path to execute at all and `REI_COMPLETE_TASKS=true` would have done nothing, silently. A
+   failure there is caught and logged, never fatal: by that point the row, the calendar event and the
+   briefing have all landed, and an uncompleted task is the visible loose end it is designed to be.
 3. Never store a REI password in source code or `.env`. Login is manual through `npm run login:rei` and persists in `browser-data/rei-sandbox`.
 4. Never commit `.env`, Google credentials/token, browser-data, debug screenshots/HTML, or seller data.
 5. Do not write directly to dashboard cells. Only upsert the tracker; dashboard formulas/charts must remain intact.

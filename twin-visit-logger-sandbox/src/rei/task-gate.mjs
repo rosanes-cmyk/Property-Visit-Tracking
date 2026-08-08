@@ -6,8 +6,17 @@
  * code, and every reason to refuse is explicit and tested.
  *
  * The rule: the task is only cleared once the booking demonstrably exists in BOTH places it needs to
- * live — a group on WhatsApp and an event on Juan's calendar. If either is missing, the task stays,
- * because an open task in REI is the only thing that will make anyone notice.
+ * live — an event on Juan's calendar, and a handover the team has actually received. If either is
+ * missing, the task stays, because an open task in REI is the only thing that will make anyone notice.
+ *
+ * "Handover" used to mean the WhatsApp group, full stop. WhatsApp is out — the client's number is
+ * restricted — so a rule that insists on a group can never be satisfied and the task would stay open
+ * forever, which is not caution, it is a broken feature. The Google Chat briefing is the handover now:
+ * same content, same team, and this project can prove it posted because notifyChat says whether the
+ * webhook accepted it. Either one counts; NEITHER counting is still a refusal.
+ *
+ * The client's wording, which this implements: *"completing the task once added in the calendar,
+ * sending the notif the gc, and got task appointment, and then complete task."*
  *
  * Covered by tests/rei-task-gate.test.mjs.
  */
@@ -43,6 +52,7 @@ export function shouldCompleteTask({
   task = null,
   visit = null,
   groupVerified = false,
+  briefingPosted = false,
   calendarVerified = false,
   alreadyComplete = false
 } = {}) {
@@ -52,11 +62,21 @@ export function shouldCompleteTask({
   if (!task) return no('no matching REI task was found on the contact');
   if (alreadyComplete) return no('task is already complete');
   if (!taskMatchesVisit(task, visit)) return no('the task found does not match this visit (phone + date)');
-  if (!groupVerified) return no('WhatsApp group not verified — leaving the task open');
+  /*
+   * One handover or the other, and it must be one this run can PROVE — a group confirmed on WhatsApp,
+   * or a briefing the Chat webhook accepted. "We meant to post it" is not evidence, and neither is
+   * "the briefing feature is switched on".
+   */
+  if (!groupVerified && !briefingPosted) {
+    return no('no handover confirmed — neither a WhatsApp group nor a Chat briefing — leaving the task open');
+  }
   if (!calendarVerified) return no("calendar event not verified on Juan's calendar — leaving the task open");
   if (!apply) return no('dry run — would complete the task');
 
-  return { complete: true, reason: 'group and calendar both verified' };
+  return {
+    complete: true,
+    reason: `calendar verified and ${groupVerified ? 'the WhatsApp group' : 'the Chat briefing'} confirmed`
+  };
 }
 
 /**
