@@ -250,8 +250,25 @@ export async function processInbox(auth, logger) {
             '➡️ NEXT: create the WhatsApp group, add the team, and paste this briefing'
           ].join('\n');
 
+          /*
+           * The briefing goes inside a fenced block; the checklist stays outside it.
+           *
+           * The client: "how about the template? so my teammate can copy it?" Google Chat renders ```
+           * fenced text as a monospace block with a copy control, and — the part that matters — copying
+           * it takes ONLY that block. Posted as one flat message, a teammate copying the briefing also
+           * carried "✅ Calendar — event on Juan's Official Calendar · ➡️ NEXT: create the WhatsApp
+           * group" into the visit group, which is instructions to themselves, pasted for the team.
+           *
+           * A fence inside the briefing would close it early. Nothing generates one — every line is a
+           * label and a value — but the text is stripped rather than trusted, because the failure is
+           * silent and ugly: half a briefing in a box and the rest as loose text.
+           */
+          const fenced = `\`\`\`\n${briefing.replace(/```/g, "'''")}\n\`\`\``;
+
           const posted = await notifyChat(
-            `${briefing}\n\n━━ DONE FOR YOU ━━\n${done}`,
+            `*New visit booked — ${partialVisit.sellerName || 'seller'}*\n` +
+            'Copy the block below into the visit group.\n\n' +
+            `${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
             /*
              * The seller's number survives in the briefing, as it does in the seeded-group handover.
              *

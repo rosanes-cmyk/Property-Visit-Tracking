@@ -133,6 +133,25 @@ check('it is a separate switch from CHAT_ALERTS',
 check('...and the briefing gate does not read chatAlerts',
   /config\.chatAlerts[\s\S]{0,80}buildInspectionNote/.test(PROCESS), false);
 
+
+console.log('\n--- the briefing is fenced so a teammate can copy just that ---');
+/*
+ * The client: "how about the template? so my teammate can copy it?"
+ *
+ * Google Chat renders a ``` block in monospace with a copy control, and copying takes ONLY what is
+ * inside it. Posted flat, a teammate copying the briefing also carried "✅ Calendar — event on Juan's
+ * Official Calendar · ➡️ NEXT: create the WhatsApp group" into the visit group — instructions to
+ * themselves, pasted for the team.
+ */
+check('the briefing is wrapped in a fence', /const fenced = /.test(PROCESS), true);
+check('...and any fence inside the text is neutralised first',
+  /briefing\.replace\(\/```\/g/.test(PROCESS), true);
+/* The checklist must stay OUTSIDE the fence, or copying picks it up again. */
+check('the checklist sits outside the fence',
+  /\$\{fenced\}\\n\\n━━ DONE FOR YOU ━━/.test(PROCESS), true);
+check('...and the message says what to copy',
+  /Copy the block below into the visit group/.test(PROCESS), true);
+
 console.log('\n=== keepContactDetails: the one message that keeps the number ===');
 /*
  * The visit briefing is copied out of Chat and pasted into the visit group. Redacted, it sends the
