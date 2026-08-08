@@ -157,13 +157,27 @@ check('explicitly false still redacts', /\[phone\]/.test(sent.at(-1)), true);
 globalThis.fetch = realFetch;
 
 /*
- * And only the seeded-group handover may ask for it. Any other call site keeping contact details would
- * be a silent widening of what leaves this project, so the count is asserted rather than the absence.
+ * TWO call sites may ask for it, and they are named. Any third would be a silent widening of what leaves
+ * this project, so the counts are asserted rather than the absence — a new one has to come here first.
+ *
+ *   1. the seeded-group handover (watch.mjs) — the briefing a colleague pastes into the visit group
+ *   2. the visit briefing itself (process.mjs) — which became the ONLY delivery once WhatsApp went out
+ *
+ * Both go to the client's own team-only Workspace, which is the audience the WhatsApp group had.
  */
 const WATCH = fs.readFileSync(
   path.resolve('twin-visit-logger-sandbox/src/whatsapp/watch.mjs'), 'utf8');
-check('exactly one call site keeps contact details',
+const PROC = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/services/process.mjs'), 'utf8');
+check('exactly one call site in the WhatsApp watcher',
   (WATCH.match(/keepContactDetails: true/g) || []).length, 1);
+check('exactly one call site in the intake',
+  (PROC.match(/keepContactDetails: true/g) || []).length, 1);
+/* And it is the briefing there, not one of the ordinary alerts. */
+check('...and it is the visit briefing',
+  /briefing[\s\S]{0,900}keepContactDetails: true/.test(PROC), true);
+check('...still gated on CHAT_VISIT_BRIEFING',
+  PROC.indexOf('config.chatVisitBriefing') < PROC.indexOf('keepContactDetails: true'), true);
 /*
  * Positions, not a character window. The seeded branch grew when admin promotion was added and a
  * fixed-width regex started failing on a file that was still correct — the assertion is that the ONE

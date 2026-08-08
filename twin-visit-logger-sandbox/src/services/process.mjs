@@ -223,7 +223,19 @@ export async function processInbox(auth, logger) {
           await notifyChat(
             `${briefing}\n\n— row ${written?.rowNumber ?? '?'} in "${config.trackerSheet}"` +
             ` · calendar event ${calendarEventId ? 'set' : 'NOT created'}`,
-            { kind: 'ok' }
+            /*
+             * The seller's number survives in the briefing, as it does in the seeded-group handover.
+             *
+             * It was redacted while this was one alert among many and WhatsApp carried the real briefing.
+             * WhatsApp is out — the client's number is restricted — so Chat is now the ONLY place the
+             * visitor gets this, and a briefing that says "[phone]" sends them to a house to meet
+             * somebody they cannot ring. That is the ten minutes of digging this exists to remove.
+             *
+             * The Chat space is the client's own Workspace and team-only, which is the same audience the
+             * WhatsApp visit group had. Every other notification this project sends is still scrubbed;
+             * tests/notify.test.mjs names the two call sites allowed to do this and fails on a third.
+             */
+            { kind: 'ok', keepContactDetails: true }
           );
         }
       } catch (error) {
