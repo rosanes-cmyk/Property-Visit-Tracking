@@ -93,5 +93,34 @@ check('it runs from the project root, not wherever the scheduler starts',
   /cd \/d "%~dp0\.\."/.test(RECHECK), true);
 check('the installer mentions the new log', /logs\\recheck-task\.log/.test(INSTALL), true);
 
+console.log('\n=== The bucket sweep QUEUES for REI; the whole-book re-check stands down ===');
+/*
+ * These two want opposite things from a busy lock, and getting it backwards is not a small bug.
+ *
+ * Both drive the same browser profile and share one lock. On the client's machine the sweep skipped twice
+ * in a row — fired on its timer, read the sheet, listed the 7 leads on the card, then found the lock held
+ * by the 20-minute job and exited 0. A clean exit, a full-looking log, and nothing checked.
+ *
+ * For the whole-book job that outcome is fine: three firings an hour, and the next one picks up whatever
+ * accumulated. For the sweep it is not. It runs once an hour and exists to make the 11am and 3pm cards
+ * true; a skipped sweep means a card posted from stale data with nothing on it saying so. So it waits its
+ * turn — affordable because it walks only the leads on the card, not the 149 with REI links.
+ */
+const BUCKETS = fs.readFileSync('twin-visit-logger-sandbox/scripts/recheck-buckets.cmd', 'utf8');
+check('the sweep runner exists',
+  fs.existsSync('twin-visit-logger-sandbox/scripts/recheck-buckets.cmd'), true);
+check('it sweeps the buckets, not the whole book', /--buckets/.test(BUCKETS), true);
+check('it WAITS for a busy REI rather than skipping', /--wait/.test(BUCKETS), true);
+check('...and the flag it passes is one recheck-rei.mjs honours',
+  /const WAIT = args\.includes\('--wait'\)/.test(
+    fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/recheck-rei.mjs'), 'utf8')), true);
+check('it applies changes, not a dry run', /--yes/.test(BUCKETS), true);
+check('it logs to its own file', /logs\\bucket-task\.log/.test(BUCKETS), true);
+check('every run is date-stamped', /==== %DATE% %TIME% ====/.test(BUCKETS), true);
+check('the log is rotated, not grown forever', /GTR 5000000/.test(BUCKETS), true);
+check('it runs from the project root', /cd \/d "%~dp0\.\."/.test(BUCKETS), true);
+/* And the opposite half of the rule, so a future edit cannot quietly make both jobs queue. */
+check('the whole-book re-check does NOT wait', /--wait/.test(RECHECK), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
