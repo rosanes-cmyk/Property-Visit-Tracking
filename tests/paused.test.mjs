@@ -134,6 +134,28 @@ for (const name of created) {
   check(`uninstall removes "${name}"`, UNINSTALL.includes(`"${name}"`), true);
 }
 
+/*
+ * And every one of those calls has to pass parameters the function actually declares.
+ *
+ * The bucket sweep was added with `-Minutes $BucketIntervalMinutes`, and New-VisitTask takes `-Every`.
+ * PowerShell only finds that out when the line RUNS — so the installer created the first task, then died,
+ * and the three after it (bucket sweep, notes audit) were never created at all. A half-installed scheduler
+ * is worse than a failed one: it looks like it worked and quietly does not sweep.
+ *
+ * Nothing here can run PowerShell, so the check is textual: the named parameters at each call site must be
+ * a subset of the ones in the param block.
+ */
+const declared = new Set(
+  [...(/function New-VisitTask\s*\{\s*param\(([^)]*)\)/.exec(INSTALL)?.[1] ?? '')
+    .matchAll(/\$(\w+)/g)].map((m) => m[1].toLowerCase()));
+check('New-VisitTask declares the four parameters', declared.size, 4);
+for (const call of INSTALL.matchAll(/(?<!function )New-VisitTask\s((?:[^\r\n]|`\r?\n)*)/g)) {
+  const name = /-Name\s+"([^"]+)"/.exec(call[1])?.[1] ?? '(unnamed)';
+  const used = [...call[1].matchAll(/(?:^|\s)-([A-Za-z]\w*)/g)].map((m) => m[1].toLowerCase());
+  const unknown = used.filter((p) => !declared.has(p));
+  check(`"${name}" passes only declared parameters`, unknown, []);
+}
+
 console.log('\n--- the commands a non-developer actually runs ---');
 const PAUSE = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/pause.cmd'), 'utf8');
 const RESUME = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/resume.cmd'), 'utf8');

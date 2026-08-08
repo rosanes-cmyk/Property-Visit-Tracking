@@ -76,7 +76,22 @@ function New-VisitTask {
   $command = 'wscript.exe "' + $launcher + '" "' + $Runner + '"'
   & schtasks.exe /Create /SC MINUTE /MO $Every /TN $Name /TR $command /F | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "Creating scheduled task '$Name' failed with exit code $LASTEXITCODE."
+    # "ERROR: Access is denied." on /Create /F almost always means the task ALREADY EXISTS and was
+    # created from an elevated prompt: overwriting it needs the same elevation that made it. Nothing is
+    # wrong with the runner or the path, so say the one thing that fixes it rather than an exit code.
+    # The same machine answered "Access is denied" to schtasks /Change /DISABLE for the same reason.
+    throw @"
+Creating scheduled task '$Name' failed with exit code $LASTEXITCODE.
+
+If the line above says "Access is denied", the task already exists and was created from an
+Administrator prompt. Re-run this installer the same way:
+
+  Start menu -> type: powershell -> right-click "Windows PowerShell" -> Run as administrator
+  cd "$((Resolve-Path (Join-Path $PSScriptRoot '..')).Path)"
+  powershell -ExecutionPolicy Bypass -File .\scripts\install-windows-task.ps1 -SkipWhatsApp
+
+The tasks still run as this Windows user either way - elevation only decides who may REPLACE them.
+"@
   }
   Write-Host ("  {0,-30} every {1,3} min   {2}" -f $Name, $Every, $What)
 }
@@ -100,12 +115,14 @@ if (-not $SkipRecheck) {
   Write-Host "  (REI re-check task skipped: -SkipRecheck)"
 }
 
-if (-not $SkipNotes) {
 if (-not $SkipBuckets) {
   New-VisitTask -Name "Twin Visit Logger Bucket Sweep" -Runner "recheck-buckets.cmd" `
-    -Minutes $BucketIntervalMinutes
+    -Every $BucketIntervalMinutes -What "re-check the 8 work-queue buckets in REI"
+} else {
+  Write-Host "  (bucket sweep skipped: -SkipBuckets)"
 }
 
+if (-not $SkipNotes) {
   New-VisitTask -Name "Twin Visit Logger Notes Audit" -Runner "audit-notes.cmd" `
     -Every $NotesIntervalMinutes -What "read the tracker's own notes for visit outcomes"
 } else {
