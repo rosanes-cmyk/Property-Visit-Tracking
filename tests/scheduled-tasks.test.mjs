@@ -122,5 +122,49 @@ check('it runs from the project root', /cd \/d "%~dp0\.\."/.test(BUCKETS), true)
 /* And the opposite half of the rule, so a future edit cannot quietly make both jobs queue. */
 check('the whole-book re-check does NOT wait', /--wait/.test(RECHECK), false);
 
+
+console.log('\n=== The board intake: rows a colleague added without an address ===');
+/*
+ * The client: "instead of waiting in the email... just add the number and then the name of the seller and
+ * date and it will do automatic... since my teammate can access it as well the dashboard."
+ *
+ * The board writes the row and parks it, because Apps Script has no browser and cannot open REI. This
+ * task is the half that can. The two halves agree through one string, and if they ever stop agreeing the
+ * rows sit on the board forever looking like finished records with a strange address — nothing would
+ * report it, so the agreement is asserted here.
+ */
+const FILL = fs.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs', 'utf8');
+const WEBAPP = fs.readFileSync('apps-script/WebApp.gs', 'utf8');
+const PENDING = 'PENDING REI LOOKUP —';
+
+check('the board marks a parked row', WEBAPP.includes(`var PENDING_REI_PREFIX = '${PENDING}'`), true);
+check('...and the PC looks for the same string', FILL.includes(`const PENDING_PREFIX = '${PENDING}'`), true);
+check('the runner exists', fs.existsSync('twin-visit-logger-sandbox/scripts/fill-pending.cmd'), true);
+check('the task is installed', INSTALL.includes('-Name "Twin Visit Logger Board Intake"'), true);
+check('...running that runner', INSTALL.includes('-Runner "fill-pending.cmd"'), true);
+check('...every 5 minutes by default', /\[int\]\$PendingIntervalMinutes = 5/.test(INSTALL), true);
+check('...and can be skipped', /\$SkipPending/.test(INSTALL), true);
+
+const FILLCMD = fs.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending.cmd', 'utf8');
+check('the scheduled run applies changes', /fill-pending-rei\.mjs --yes/.test(FILLCMD), true);
+check('it logs to its own file', /logs\\fill-pending\.log/.test(FILLCMD), true);
+check('the log is rotated', /GTR 5000000/.test(FILLCMD), true);
+check('it runs from the project root', /cd \/d "%~dp0\.\."/.test(FILLCMD), true);
+
+/*
+ * It WAITS for a busy REI rather than standing down. A colleague is watching that record on the board, so
+ * "skipped, try again in five minutes" is a person staring at a row that never completes.
+ */
+check('it queues for REI rather than skipping', /acquireLockWaiting/.test(FILL), true);
+/* A row it cannot resolve keeps its placeholder and says why — a silent skip looks like "not yet". */
+check('an unresolvable row is reported, not silently dropped', /left parked/.test(FILL), true);
+check('...and REI having no address is never guessed around',
+  /REI has no Property Address/.test(FILL), true);
+/* The colleague typed the date; REI may not know about the booking yet. Theirs wins. */
+check('the date typed on the board is kept', /keeping the date typed on the board/.test(FILL), true);
+/* And it updates the row that exists rather than appending a second one beside it. */
+check('the existing row is matched, not appended', /findExistingVisit\(auth, visit\)/.test(FILL), true);
+check('a dry run is the default', /const APPLY = args\.includes\('--yes'\)/.test(FILL), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

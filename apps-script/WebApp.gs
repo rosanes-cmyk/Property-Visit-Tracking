@@ -230,6 +230,14 @@ function nextPropertyId_() {
 /** Create a NEW record from the website. Writes into the first empty row (grid never shrinks),
  *  stamps Property ID + Source=Manual + Created Date, then runs the visit-status handler so the
  *  same automation fires. Never contacts sellers. */
+/*
+ * How a row that still needs its address from REI is marked.
+ *
+ * Read by scripts/fill-pending-rei.mjs on the PC, which is the half of this that CAN open REI. Change it
+ * in both places or rows will sit here forever looking like finished records with an odd address.
+ */
+var PENDING_REI_PREFIX = 'PENDING REI LOOKUP —';
+
 function webAddRecord_(params) {
   const sh = dataSheet_();
   ensureRows_(sh, CFG.MAX_ROWS);
@@ -237,11 +245,35 @@ function webAddRecord_(params) {
   const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
   for (var i = 0; i < addrs.length; i++) { if (String(addrs[i][0]).trim() === '') { row = CFG.FIRST_DATA_ROW + i; break; } }
   if (!row) return { ok: false, error: 'No empty rows available (increase MAX_ROWS).' };
-  if (!params['Property Address']) return { ok: false, error: 'Property Address is required.' };
+  /*
+   * An address, OR something the PC can look the address up WITH.
+   *
+   * The client's ask: "instead of waiting in the email... just add the number and then the name of the
+   * seller and date and it will do automatic." A colleague booking a visit has the phone in front of
+   * them; the address is the thing they would have to go into REI to fetch, which is the errand this is
+   * meant to remove.
+   *
+   * Apps Script cannot read REI — no browser — so the row is parked with a placeholder and the PC fills
+   * it in on its next pass. The placeholder is NOT cosmetic: this function finds the next free row by
+   * looking for a blank Property Address, so a genuinely blank one would be handed out again to the next
+   * person who clicked Add, and their record would overwrite this one.
+   */
+  if (!params['Property Address']) {
+    var lookupKey = String(params['Phone'] || params['REI BlackBook Link'] || '').trim();
+    if (!lookupKey) {
+      return { ok: false, error: 'Give a Property Address, or a Phone / REI link for the automation to look it up with.' };
+    }
+    params['Property Address'] = PENDING_REI_PREFIX + ' ' + lookupKey;
+    // Flagged, so it is visibly unfinished on the board rather than looking like a complete record.
+    if (params['Data Quality Status'] === undefined) params['Data Quality Status'] = 'Incomplete';
+    if (params['Exception Reason'] === undefined) {
+      params['Exception Reason'] = 'Waiting for the PC to read REI and fill in the address and details.';
+    }
+  }
   const R = new RowAccessor_(sh, row);
   const map = ['Property Address','Seller Name','Phone','Email','Lead Source','Visit Date','Visit Time',
     'Visit Status','Assigned Visitor','Visit Notes','Seller Motivation','Current Stage','Assigned Owner',
-    'Next Action','Next Action Due Date','REI BlackBook Link'];
+    'Next Action','Next Action Due Date','REI BlackBook Link','Data Quality Status','Exception Reason'];
   map.forEach(function(h){
     if (params[h] === undefined || params[h] === '') return;
     if (h.indexOf('Date') >= 0) R.set(h, new Date(params[h])); else R.set(h, params[h]);

@@ -77,7 +77,8 @@ console.log('\n=== every entry point honours it, before the lock and before any 
  * open or the sheet is read — a pause that still opens REI and still holds the lock is not a pause.
  */
 const read = (p) => fs.readFileSync(path.resolve('twin-visit-logger-sandbox', p), 'utf8');
-for (const file of ['scripts/recheck-rei.mjs', 'scripts/audit-notes.mjs', 'src/whatsapp/watch.mjs']) {
+for (const file of ['scripts/recheck-rei.mjs', 'scripts/audit-notes.mjs', 'src/whatsapp/watch.mjs',
+  'scripts/fill-pending-rei.mjs']) {
   const src = read(file);
   check(`${file} checks the pause`, /haltForPause\(/.test(src), true);
   check(`${file} honours --force`, /--force/.test(src), true);
@@ -126,10 +127,10 @@ const UNINSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/script
 const INSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/install-windows-task.ps1'), 'utf8');
 const created = [...INSTALL.matchAll(/New-VisitTask -Name "([^"]+)"/g)].map((m) => m[1]);
 /*
- * Five now, with the hourly bucket sweep. The COUNT is asserted so that adding a sixth is a deliberate act
- * that updates this line, rather than a task nobody notices is running.
+ * SIX now — the five, plus the board intake. The COUNT is asserted so adding a seventh is a deliberate act that
+ * updates this line, rather than a task nobody notices is running.
  */
-check('the installer creates five tasks', created.length, 5);
+check('the installer creates six tasks', created.length, 6);
 for (const name of created) {
   check(`uninstall removes "${name}"`, UNINSTALL.includes(`"${name}"`), true);
 }

@@ -690,7 +690,7 @@ function modal(title,fields,onSave,cap,defaults){var host=document.createElement
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
 function openAdd(){var host=document.createElement('div');host.className='modal-bg';
   host.innerHTML='<div class="modal"><h3>Add a property visit</h3><p class="cap">In the live app this saves straight to the Google Sheet.</p>'+
-   '<div class="field"><label>Property Address *</label><input data-k="address"></div>'+
+   '<div class="field"><label>Property Address</label><input data-k="address" placeholder="leave blank if you have the phone"></div>'+
    '<div class="row2"><div class="field"><label>Seller Name</label><input data-k="seller"></div><div class="field"><label>Phone</label><input data-k="phone"></div></div>'+
    '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
    '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'+
@@ -699,7 +699,14 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
    '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Add property</button></div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
-  host.querySelector('[data-ok]').onclick=function(){var g=function(k){return host.querySelector('[data-k="'+k+'"]').value;};if(!g('address').trim()){toast('Property Address is required');return;}
+  host.querySelector('[data-ok]').onclick=function(){var g=function(k){return host.querySelector('[data-k="'+k+'"]').value;};
+    /*
+     * Address OR phone OR REI link. The client asked to be able to add a visit from the three things a
+     * colleague already has in front of them — number, seller, date — instead of going into REI to copy
+     * the address out. The PC fills the rest in on its next pass; this page cannot, having no browser
+     * to open REI with.
+     */
+    if(!g('address').trim()&&!g('phone').trim()&&!g('rei').trim()){toast('Give an address, or a phone / REI link to look it up with');return;}
     var params={'Property Address':g('address'),'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
     toast('Adding…');runAction('addRecord',null,params,close);};}
 

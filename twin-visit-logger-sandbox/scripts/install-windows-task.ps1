@@ -42,6 +42,10 @@ param(
   # stale row costs something; the rest rotate through the ordinary re-check. The client: "we need to
   # prioritise those 8 buckets... time to time check in the REI of those every hour."
   [int]$BucketIntervalMinutes = 60,
+  # How often to finish the rows a colleague added on the board without an address. Five minutes: the
+  # person who typed it is watching that record, and a run with nothing pending never opens a browser.
+  [int]$PendingIntervalMinutes = 5,
+  [switch]$SkipPending,
   [switch]$SkipBuckets,
   [switch]$SkipNotes,
   [switch]$SkipRecheck,
@@ -122,6 +126,13 @@ if (-not $SkipBuckets) {
   Write-Host "  (bucket sweep skipped: -SkipBuckets)"
 }
 
+if (-not $SkipPending) {
+  New-VisitTask -Name "Twin Visit Logger Board Intake" -Runner "fill-pending.cmd" `
+    -Every $PendingIntervalMinutes -What "finish rows added on the board (REI lookup)"
+} else {
+  Write-Host "  (board intake skipped: -SkipPending)"
+}
+
 if (-not $SkipNotes) {
   New-VisitTask -Name "Twin Visit Logger Notes Audit" -Runner "audit-notes.cmd" `
     -Every $NotesIntervalMinutes -What "read the tracker's own notes for visit outcomes"
@@ -135,6 +146,7 @@ Write-Host "  logs\scheduled-task.log     the REI runs"
 if (-not $SkipWhatsApp) { Write-Host "  logs\whatsapp-task.log      the WhatsApp runs" }
 if (-not $SkipRecheck) { Write-Host "  logs\recheck-task.log       the REI re-checks" }
 if (-not $SkipNotes) { Write-Host "  logs\audit-notes.log        the notes audit" }
+if (-not $SkipPending) { Write-Host "  logs\fill-pending.log       rows added on the board" }
 Write-Host ""
 Write-Host "Check them with:   Get-Content logs\scheduled-task.log -Tail 30"
 Write-Host "See the tasks:     schtasks /Query /TN `"Twin Visit Logger Sandbox`""
