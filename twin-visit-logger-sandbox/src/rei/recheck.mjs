@@ -1016,7 +1016,27 @@ export function diffFromRei(row, reiFields) {
    * means the visit never happened and needs rebooking. On a lead that has moved to Offer Sent or beyond it
    * means the visit is finished and REI has tidied up — a different fact entirely, and not one to write.
    */
-  if (reiFields.__appointmentGone && text(row['Current Stage']) === 'Visit Scheduled'
+  /*
+   * And ONLY for a visit whose date has already passed.
+   *
+   * This fired on Sara Davenport, Pam Long and Joe Dickerson — three visits booked for TOMORROW — and took
+   * all three out of Upcoming Visit, which is the section Juan works from. REI's Appointment Date FIELD is
+   * empty for them; the appointment lives in the task and the notes. So "REI has no appointment date" does
+   * not mean the appointment is gone, it means REI does not always fill that field.
+   *
+   * A future-dated visit in the tracker is positive evidence that something IS booked, and it must outrank
+   * the absence of a field we already know REI leaves empty. Jose's case is unaffected: his visit was Aug 1
+   * and the date has long passed, which is what made "nothing is booked" a safe conclusion there.
+   *
+   * This is the second guard this rule has needed in a day. Both times it was too eager, and both times a
+   * live run found it before anybody acted on it — which is the argument for dry runs, not for the rule.
+   */
+  const visitPassed = (() => {
+    const key = sheetDayKey(row['Visit Date']);
+    return !key || key < dayKey(new Date());
+  })();
+  if (reiFields.__appointmentGone && visitPassed
+    && text(row['Current Stage']) === 'Visit Scheduled'
     && text(row['Visit Status']) === 'Scheduled'
     && !text(reiFields['Visit Status'])) {
     changes.push({

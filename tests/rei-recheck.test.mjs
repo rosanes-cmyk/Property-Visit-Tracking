@@ -1474,6 +1474,32 @@ check('the visit date is not cleared',
 check('Current Stage is not moved',
   goneChanges.some((c) => c.field === 'Current Stage' && c.to !== 'Visit Scheduled'), false);
 
+console.log('\n--- and NEVER for a visit still to come ---');
+/*
+ * This fired on Sara Davenport, Pam Long and Joe Dickerson — three visits booked for TOMORROW — and took all
+ * three out of Upcoming Visit, the section Juan works from. REI's Appointment Date FIELD is empty for them;
+ * the appointment lives in the task and the notes.
+ *
+ * So "REI has no appointment date" does not mean the appointment is gone. It means REI does not always fill
+ * that field. A future-dated visit in the tracker is positive evidence that something IS booked, and it
+ * outranks the absence of a field we already know is often empty.
+ */
+const tomorrow = new Date(Date.now() + 86400000);
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+check("tomorrow's visit is left alone",
+  diffFromRei({ ...JOSE_ROW, 'Visit Date': iso(tomorrow) }, goneFields)
+    .some((c) => c.field === 'Visit Status'), false);
+check("today's visit is left alone too",
+  diffFromRei({ ...JOSE_ROW, 'Visit Date': iso(new Date()) }, goneFields)
+    .some((c) => c.field === 'Visit Status'), false);
+/* Jose's is Aug 1 and long past, which is what made "nothing is booked" safe to conclude there. */
+check('a passed visit is still corrected',
+  diffFromRei(JOSE_ROW, goneFields).find((c) => c.field === 'Visit Status')?.to, 'Reschedule Needed');
+/* No date at all is the other safe case: there is nothing booked to contradict REI. */
+check('a row with no visit date is corrected',
+  diffFromRei({ ...JOSE_ROW, 'Visit Date': '' }, goneFields).find((c) => c.field === 'Visit Status')?.to,
+  'Reschedule Needed');
+
 console.log('\n--- and only while the lead is still AT the visit stage ---');
 /*
  * Amelia Middel exposed this on the first live --buckets run. REI has no appointment for her — her visit
