@@ -233,7 +233,22 @@ export function groupName(address, start, timezone, template = DEFAULT_GROUP_TEM
  * parses cleanly. Duplicates and the account's own number are removed — WhatsApp rejects a group
  * that tries to add its own owner as a participant.
  */
-export function participants({ teamNumbers = [], sellerPhone = '', includeSeller = false, ownNumber = '', defaultCountry = '1' }) {
+/*
+ * `seedOnly` keeps just the FIRST team number, asked for repeatedly by the client after the third ban:
+ * *"create a gc add 1 member ... then my colleauge will add the all members."* The automation makes the
+ * group with one person in it and a human adds the rest.
+ *
+ * Recorded plainly because it is the client's decision taken against my advice, and the next person to
+ * read this should not mistake it for a safety measure. It does NOT remove the detection risk. All three
+ * bans ran against an already-logged-in profile, and the third created exactly ONE group. What Meta reads
+ * is a program driving WhatsApp Web at all — and these participants are saved colleagues with daily chat
+ * history, which was never the suspicious part. Fewer actions per session is directionally better; that
+ * is the whole of the claim.
+ *
+ * The seller is never the seed, whatever includeSeller says. A group briefly holding the seller and the
+ * automation account, before a human adds the team, is the seller watching the group form.
+ */
+export function participants({ teamNumbers = [], sellerPhone = '', includeSeller = false, ownNumber = '', defaultCountry = '1', seedOnly = false }) {
   const own = toE164(ownNumber, defaultCountry);
   const seen = new Set();
   const out = [];
@@ -246,6 +261,7 @@ export function participants({ teamNumbers = [], sellerPhone = '', includeSeller
   };
 
   for (const number of teamNumbers) add(number, 'team');
+  if (seedOnly) return out.slice(0, 1);
   if (includeSeller) add(sellerPhone, 'seller');
   return out;
 }
@@ -264,6 +280,8 @@ export function planForEvent(event, options) {
     template = DEFAULT_GROUP_TEMPLATE,
     now = new Date(),
     alreadyDone = new Set(),
+    // Seed the group with one person and let a colleague add the rest. See participants().
+    seedOnly = false,
     // On by default. A test lead on the calendar otherwise gets worked on by every run, forever.
     skipTestLeads = true
   } = options || {};
@@ -296,8 +314,17 @@ export function planForEvent(event, options) {
   if (alreadyDone.has(event.id)) return skip(`group already created (${name})`);
 
   const sellerPhone = fieldFromDescription(event.description, 'Phone');
-  const people = participants({ teamNumbers, sellerPhone, includeSeller, ownNumber, defaultCountry });
+  const people = participants({ teamNumbers, sellerPhone, includeSeller, ownNumber, defaultCountry, seedOnly });
   if (!people.length) return skip('no valid participant numbers — nobody to add');
+  /*
+   * Who is missing, so the Chat message can NAME them rather than saying "add the members" and leaving
+   * somebody to work out who from memory. Derived from the same function with seeding off, so the two
+   * lists cannot drift apart as team numbers change.
+   */
+  const everyone = seedOnly
+    ? participants({ teamNumbers, sellerPhone, includeSeller, ownNumber, defaultCountry })
+    : people;
+  const missing = everyone.filter((p) => !people.some((q) => q.number === p.number));
 
   return {
     create: true,
@@ -313,7 +340,10 @@ export function planForEvent(event, options) {
       hour: 'numeric', minute: '2-digit'
     }),
     participants: people,
-    sellerIncluded: people.some((p) => p.role === 'seller')
+    sellerIncluded: people.some((p) => p.role === 'seller'),
+    seedOnly: Boolean(seedOnly),
+    // Empty unless seeding: the numbers a colleague still has to add by hand.
+    stillToAdd: missing
   };
 }
 

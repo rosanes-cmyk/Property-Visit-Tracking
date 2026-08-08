@@ -10,6 +10,7 @@
  */
 import { scrubContactDetails, notifyChat } from '../twin-visit-logger-sandbox/src/utils/notify.mjs';
 import fs from 'node:fs';
+import path from 'node:path';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -124,6 +125,47 @@ check('it is a separate switch from CHAT_ALERTS',
   CONFIG.includes('CHAT_VISIT_BRIEFING') && CONFIG.includes('CHAT_ALERTS'), true);
 check('...and the briefing gate does not read chatAlerts',
   /config\.chatAlerts[\s\S]{0,80}buildInspectionNote/.test(PROCESS), false);
+
+console.log('\n=== keepContactDetails: the one message that keeps the number ===');
+/*
+ * The visit briefing is copied out of Chat and pasted into the visit group. Redacted, it sends the
+ * visitor to a house to meet somebody they cannot then ring, and they go digging in REI — which is the
+ * ten minutes the briefing exists to save. Both destinations are team-only.
+ *
+ * What these tests protect is that it is exactly ONE message. A config flag would have silenced the
+ * scrubber everywhere; a parameter means the exception is visible at the call site that asks for it.
+ */
+const sent = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  sent.push(JSON.parse(init.body).text);
+  return { ok: true, status: 200, text: async () => '' };
+};
+const HOOK = 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=t';
+const BRIEF = 'Call Marichu on (415) 555-0100 or marichu@example.com';
+
+await notifyChat(BRIEF, { webhookUrl: HOOK });
+check('redacted by default', /\[phone\]/.test(sent.at(-1)) && /\[email\]/.test(sent.at(-1)), true);
+
+await notifyChat(BRIEF, { webhookUrl: HOOK, keepContactDetails: true });
+check('kept when asked for', sent.at(-1).includes('(415) 555-0100'), true);
+check('...including the email', sent.at(-1).includes('marichu@example.com'), true);
+check('...and the message is otherwise unchanged', sent.at(-1).endsWith(BRIEF), true);
+
+await notifyChat(BRIEF, { webhookUrl: HOOK, keepContactDetails: false });
+check('explicitly false still redacts', /\[phone\]/.test(sent.at(-1)), true);
+globalThis.fetch = realFetch;
+
+/*
+ * And only the seeded-group handover may ask for it. Any other call site keeping contact details would
+ * be a silent widening of what leaves this project, so the count is asserted rather than the absence.
+ */
+const WATCH = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/whatsapp/watch.mjs'), 'utf8');
+check('exactly one call site keeps contact details',
+  (WATCH.match(/keepContactDetails: true/g) || []).length, 1);
+check('...and it is the seeded handover',
+  /seedOnly[\s\S]{0,1400}keepContactDetails: true/.test(WATCH), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

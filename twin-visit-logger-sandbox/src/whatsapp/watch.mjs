@@ -132,8 +132,12 @@ async function main() {
   // the note will be posted. Three facts that have each cost a wrong diagnosis when left unstated.
   console.log(`Twin Visit Logger · WhatsApp watch · build ${BUILD}`);
   console.log(`Running: ${fileURLToPath(import.meta.url)}`);
-  console.log(`Note posting: ${config.whatsappPostNote ? 'ON' : 'OFF (WHATSAPP_POST_NOTE=false)'}` +
-    `${FORCE ? ' · --force: ignoring the state file' : ''}\n`);
+  console.log(config.whatsappSeedOnly
+    ? 'Mode: SEED ONLY (WHATSAPP_SEED_ONLY=true) — group made with 1 member, NOTHING sent to WhatsApp.\n' +
+      '      The briefing and the members still to add go to Google Chat.'
+    : `Note posting: ${config.whatsappPostNote ? 'ON' : 'OFF (WHATSAPP_POST_NOTE=false)'}`);
+  if (FORCE) console.log('--force: ignoring the state file');
+  console.log('');
 
   if (!config.whatsappEnabled) {
     console.log('WHATSAPP_ENABLED=false — the WhatsApp step is switched off. Nothing was opened or created.');
@@ -186,6 +190,7 @@ async function main() {
     ownNumber: config.whatsappOwnNumber,
     defaultCountry: config.phoneDefaultCountry,
     template: config.whatsappGroupTemplate,
+    seedOnly: config.whatsappSeedOnly,
     now,
     /*
      * "Done" means the group exists AND, when note posting is on, the note is in it. Treating a
@@ -195,7 +200,12 @@ async function main() {
     alreadyDone: (FORCE || REPOST_NOTE)
       ? new Set()
       : eventsFinished(state.groups, {
-        requireNote: config.whatsappPostNote,
+        /*
+         * A seeded group has no note in it by design, so requiring one would make every event
+         * permanently unfinished and every run re-open WhatsApp for a group that already exists —
+         * the opposite of the point.
+         */
+        requireNote: config.whatsappPostNote && !config.whatsappSeedOnly,
         requireTaskClosed: config.reiCompleteTasks
       })
   });
@@ -337,7 +347,8 @@ async function main() {
       };
       await writeState(state);
 
-      if (config.whatsappPostNote) {
+      // Seeded groups are left alone entirely — not opened, not read, not typed into.
+      if (config.whatsappPostNote && !config.whatsappSeedOnly) {
         const opened = await openGroupByName(page, selectors, plan.name);
         if (!opened.opened) {
           console.log(`    could not open it to post the note: ${opened.reason}`);
@@ -440,6 +451,37 @@ async function main() {
         };
         await writeState(state);
         console.log('    recorded');
+
+        /*
+         * SEED-ONLY: the group is made and WhatsApp is finished with. Nothing is typed, nothing is sent.
+         *
+         * The handover goes to Google Chat instead — the briefing to paste, and the names still to add —
+         * so the colleague who was going to add the members anyway does the two remaining steps there.
+         * This returns before maybePostNote is even reached, rather than relying on WHATSAPP_POST_NOTE
+         * also being set: one switch, one behaviour.
+         */
+        if (plan.seedOnly) {
+          const toAdd = plan.stillToAdd.map((p) => p.number).join(', ') || '(nobody — check WHATSAPP_TEAM_NUMBERS)';
+          console.log(`    seeded with 1 member; still to add by hand: ${toAdd}`);
+          console.log('    nothing was sent to WhatsApp — the briefing goes to Google Chat');
+          state.groups[plan.eventId].seeded = true;
+          await writeState(state);
+          await notifyChat(
+            `WhatsApp group created — ${plan.name}` +
+            `\n${plan.startLocal}` +
+            `\n\nADD THESE MEMBERS: ${toAdd}` +
+            '\nThen paste the briefing below into the group.\n\n' +
+            briefingFor(plan),
+            /*
+             * The seller's number survives in THIS message only. A briefing that says "[phone]" sends the
+             * visitor back into REI to find the number, which is the ten minutes of digging this exists to
+             * remove. Both destinations — the Chat space and the visit group — are team-only.
+             */
+            { kind: 'ok', keepContactDetails: true }
+          );
+          continue;
+        }
+
         state.groups[plan.eventId].noteAttemptedAt = new Date().toISOString();
         await writeState(state);
         let noteWent = await maybePostNote(page, selectors, plan);
@@ -503,11 +545,56 @@ async function main() {
  * of the PropertyRadar figures.
  */
 async function maybePostNote(page, selectors, plan) {
+  /*
+   * The seed-only refusal lives HERE, not only at the call site that creates a group.
+   *
+   * There are three places that post a note, and the second one — PASS 2, for a group that already
+   * exists on WhatsApp — is reached on every later run. A seeded group exists, so on the next run that
+   * path would have opened it and typed the briefing in, which is the exact thing this mode promises
+   * never happens. Guarding only the creation branch would have made "nothing is sent" true for about
+   * twenty minutes.
+   */
+  if (config.whatsappSeedOnly) {
+    console.log('    nothing sent (WHATSAPP_SEED_ONLY=true) — the briefing goes to Google Chat');
+    return false;
+  }
   if (!config.whatsappPostNote) {
     console.log('    note not posted (WHATSAPP_POST_NOTE=false)');
     return false;
   }
 
+  const note = briefingFor(plan);
+
+  /*
+   * Hard stop. The note names "Estimated Equity", "Motivation Level" and so on even when the values
+   * are blank, and a seller reading those headings learns what is being assessed about them. If a
+   * seller is in the group, it does not go out — regardless of the config flag.
+   */
+  if (plan.sellerIncluded) {
+    const sensitive = containsSellerSensitive(note);
+    if (sensitive.length) {
+      console.log(`    NOTE NOT POSTED — the seller is in this group and the note covers: ${sensitive.join(', ')}`);
+      console.log('    Either set WHATSAPP_INCLUDE_SELLER=false, or post a shortened note by hand.');
+      return false;
+    }
+  }
+
+  const posted = await postGroupNote(page, selectors, {
+    groupName: plan.name,
+    text: note,
+    apply: APPLY
+  });
+  console.log(`    note: ${posted.reason}`);
+  return posted.posted;
+}
+
+/**
+ * The briefing text for one visit, with nothing sent anywhere.
+ *
+ * Split out from maybePostNote so seed-only runs can put the SAME text into Google Chat for a person to
+ * paste. Two builders would drift, and the one nobody looks at would be the one going to the visitor.
+ */
+function briefingFor(plan) {
   const from = (label) => fieldFromDescription(plan.rawDescription, label);
   const block = (heading) => blockFromDescription(plan.rawDescription, heading);
   /*
@@ -553,27 +640,7 @@ async function maybePostNote(page, selectors, plan) {
     nextAction: from('Next Action')
   }, { appointmentText: plan.startLocal, includeSellerWarning: plan.sellerIncluded });
 
-  /*
-   * Hard stop. The note names "Estimated Equity", "Motivation Level" and so on even when the values
-   * are blank, and a seller reading those headings learns what is being assessed about them. If a
-   * seller is in the group, it does not go out — regardless of the config flag.
-   */
-  if (plan.sellerIncluded) {
-    const sensitive = containsSellerSensitive(note);
-    if (sensitive.length) {
-      console.log(`    NOTE NOT POSTED — the seller is in this group and the note covers: ${sensitive.join(', ')}`);
-      console.log('    Either set WHATSAPP_INCLUDE_SELLER=false, or post a shortened note by hand.');
-      return false;
-    }
-  }
-
-  const posted = await postGroupNote(page, selectors, {
-    groupName: plan.name,
-    text: note,
-    apply: APPLY
-  });
-  console.log(`    note: ${posted.reason}`);
-  return posted.posted;
+  return note;
 }
 
 /**

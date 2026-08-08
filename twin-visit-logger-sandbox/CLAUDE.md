@@ -268,8 +268,32 @@ switch — the config default is the switch, because anyone can run the command 
 
 Automating WhatsApp Web breaches Meta's terms of service and they detect it — this was a stated risk from the
 start of the project and it happened. No technique removes that risk, and the official WhatsApp Business Cloud
-API has no group management at all, so there is no compliant way to automate the group. Do not re-enable it or
-propose a "safer" scraping approach; the honest answer is that one does not exist.
+API has no group management at all, so there is no compliant way to automate the group. Do not propose a
+"safer" scraping approach on your own initiative; the honest answer is that one does not exist.
+
+**`WHATSAPP_SEED_ONLY=true` is the client's decision, taken against my advice, and it is not a safety
+feature.** Asked for repeatedly across one session: *"create a gc add 1 member in then ... my colleauge will
+add the all members"*, with the briefing going to Google Chat for a person to paste. The mode creates the
+group with ONE member and sends nothing at all; the handover — who is still to add, and the briefing text —
+is posted to Chat, which is the client's own Workspace and permitted to automate.
+
+It is genuinely less exposure than what ran before: one contact instead of four, and no message sending,
+which is the most heavily detected action of the lot. It is **not** protection, and the next person to read
+this should not mistake it for one. All three bans ran against an already-logged-in profile and the third
+created exactly ONE group. What Meta reads is a program driving WhatsApp Web at all — and the participants
+here are saved colleagues with daily chat history, which was never the suspicious part. My estimate, given
+to the client: around 80% that a working business number is banned or restricted within a month, and a real
+chance in the first week. My advice, also given, was to run it on a number the business can afford to lose.
+
+Three things hold that mode to what was agreed, and none may be removed:
+`participants()` returns exactly one and **never the seller**; `maybePostNote` refuses at the top, so all
+three posting paths are covered — including PASS 2, which reruns over groups that already exist and would
+otherwise have typed the briefing in on the very next run; and `WHATSAPP_ENABLED` still gates everything,
+so seeding does nothing until the client switches WhatsApp on themselves.
+
+The visit briefing is the ONE message allowed to keep the seller's phone and email — `notifyChat(...,
+{ keepContactDetails: true })`, at exactly one call site, asserted by `tests/notify.test.mjs`. A redacted
+briefing sends the visitor to a house to meet somebody they cannot ring. Both destinations are team-only.
 
 The briefing is a WhatsApp thing and does NOT go to Google Chat. It was routed there when WhatsApp was
 switched off; the client saw it land in the alerts channel and decided otherwise — *"it should be in the

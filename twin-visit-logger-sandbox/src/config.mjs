@@ -65,6 +65,24 @@ const raw = {
   // It still refuses outright if the note carries anything a seller must not read and a seller is in
   // the group, and it only ever types into a conversation whose header it has verified.
   whatsappPostNote: bool(process.env.WHATSAPP_POST_NOTE, true),
+  /*
+   * WHATSAPP_SEED_ONLY=true: create the group with ONE member and send nothing.
+   *
+   * The client's decision, asked for repeatedly after the third ban: *"create a gc add 1 member ... then
+   * my colleauge will add the all members"*, with the briefing going to Google Chat for a person to paste.
+   * Google Chat is their own Workspace and automating it is permitted, so the only thing left touching
+   * WhatsApp is opening it and making the group.
+   *
+   * It is genuinely less exposure than what ran before — one contact instead of four, and no message
+   * sending, which is the most heavily detected action of the lot. It is NOT protection. Every ban so far
+   * happened on an already-logged-in profile and the third created exactly one group; what Meta reads is
+   * a program driving WhatsApp Web, not the guest list. My advice was and is to do this on a number the
+   * business can afford to lose, and the client has heard it.
+   *
+   * Note posting is forced OFF whenever this is on. Leaving both switchable would let a later edit put
+   * the sending back without anyone deciding to.
+   */
+  whatsappSeedOnly: bool(process.env.WHATSAPP_SEED_ONLY, false),
   // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
   // US sellers read from REI. A number that already has a country code is used as-is, and one
   // starting with a 0 (a local trunk prefix) is refused rather than guessed at.
@@ -171,6 +189,7 @@ const schema = z.object({
   whatsappLookaheadDays: z.number().int().positive().max(365),
   reiCompleteTasks: z.boolean(),
   whatsappPostNote: z.boolean(),
+  whatsappSeedOnly: z.boolean(),
   phoneDefaultCountry: z.string().min(1),
   // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
   // to `raw` alone silently arrives as undefined.

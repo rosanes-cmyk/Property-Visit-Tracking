@@ -131,6 +131,32 @@ check('our own number is never added as a participant',
   participants({ teamNumbers: TEAM, ownNumber: '+14155550100' }).map((p) => p.number),
   ['+14155550101']);
 
+console.log('\n--- seed-only: one member, and a human adds the rest ---');
+/*
+ * The client, after the third ban and after hearing my objection several times: "create a gc add 1 member
+ * in then ... my colleauge will add the all members", with the briefing going to Google Chat to paste.
+ *
+ * Pinned here rather than argued again. It is the client's call on the client's number, and what these
+ * tests owe them is that the behaviour is exactly what was asked for: ONE member, never the seller, and
+ * an accurate list of who is missing — a group seeded with two, or with the seller, is a different and
+ * worse thing than the one that was agreed.
+ */
+check('exactly one member',
+  participants({ teamNumbers: TEAM, seedOnly: true }).map((p) => p.number), ['+14155550100']);
+check('...the first team number, not a random one',
+  participants({ teamNumbers: ['+14155550109', ...TEAM], seedOnly: true })[0].number, '+14155550109');
+check('the seller is NEVER the seed, even with includeSeller on',
+  participants({ teamNumbers: TEAM, sellerPhone: '(650) 771-7814', includeSeller: true, seedOnly: true })
+    .map((p) => p.role), ['team']);
+/* A seller-only run must seed nobody rather than fall through to the seller. */
+check('...and with no team numbers it seeds nobody',
+  participants({ teamNumbers: [], sellerPhone: '(650) 771-7814', includeSeller: true, seedOnly: true }).length, 0);
+check('our own number is still excluded before seeding',
+  participants({ teamNumbers: TEAM, ownNumber: '+14155550100', seedOnly: true }).map((p) => p.number),
+  ['+14155550101']);
+check('seedOnly off changes nothing',
+  participants({ teamNumbers: TEAM, seedOnly: false }).length, 2);
+
 console.log('\n=== Which calendar events get a group ===');
 const base = {
   id: 'evt1',
@@ -146,6 +172,22 @@ check('a future visit is planned', good.create, true);
 check('...named for the property', good.name, '2145 Capitol Ave, East Palo Alto, CA, 94303');
 check('...with the seller in it', good.sellerIncluded, true);
 check('...and three participants', good.participants.length, 3);
+
+/*
+ * The plan a seeded run produces. `stillToAdd` is what the Google Chat message names, so it has to be the
+ * REAL remainder — computed from the same participants() call with seeding off. Naming the wrong people
+ * there is worse than saying nothing: somebody adds two of three and believes the group is complete.
+ */
+const seeded = planForEvent(base, { ...opts, seedOnly: true });
+check('a seeded plan is still created', seeded.create, true);
+check('...with one participant', seeded.participants.map((p) => p.number), ['+14155550100']);
+check('...flagged as seeded', seeded.seedOnly, true);
+check('...and no seller in it', seeded.sellerIncluded, false);
+check('...and names exactly who is still missing',
+  seeded.stillToAdd.map((p) => `${p.role}:${p.number}`),
+  ['team:+14155550101', 'seller:+16507717814']);
+check('an ordinary plan has nobody outstanding', good.stillToAdd, []);
+check('...and is not flagged as seeded', good.seedOnly, false);
 
 const reason = (event, extra) => planForEvent({ ...base, ...event }, { ...opts, ...extra }).reason;
 console.log('\n--- skipped, with a reason ---');

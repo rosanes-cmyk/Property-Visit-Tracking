@@ -146,5 +146,61 @@ check('the missing note still comes first',
 check('requireTaskClosed defaults to false, so nothing changes unless asked',
   eventsFinished({ e: noted }).has('e'), true);
 
+console.log('\n=== Seed-only sends NOTHING to WhatsApp ===');
+/*
+ * The client's arrangement: the automation makes the group with one member, and everything after that
+ * happens in Google Chat and by hand. Sending is the most heavily detected action WhatsApp Web does, so
+ * "nothing is sent" is the entire safety claim of this mode — if a later edit lets a message through,
+ * the mode is not what was agreed and nobody will notice from the outside, because a group still appears.
+ *
+ * Asserted against the source because the alternative is a live WhatsApp session, which is exactly what
+ * must not happen in a test run.
+ */
+const fs = await import('node:fs');
+const path = await import('node:path');
+const WATCH = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/whatsapp/watch.mjs'), 'utf8');
+const CONFIG = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/config.mjs'), 'utf8');
+
+check('the switch exists', /whatsappSeedOnly: bool\(process\.env\.WHATSAPP_SEED_ONLY/.test(CONFIG), true);
+check('...and defaults to OFF', /WHATSAPP_SEED_ONLY, false\)/.test(CONFIG), true);
+check('the plan is told about it', /seedOnly: config\.whatsappSeedOnly/.test(WATCH), true);
+
+/*
+ * THREE places post a note, and this test found the second one the hard way.
+ *
+ * PASS 2 handles a group that already exists on WhatsApp, and it runs on every later run. A seeded group
+ * exists — so the run after the one that created it would have opened that group and typed the briefing
+ * in. Guarding only the creation branch made "nothing is sent" true for about twenty minutes.
+ *
+ * So the refusal lives inside maybePostNote itself, where every caller has to go through it, and the
+ * count below is asserted so a fourth posting path cannot be added outside the guard.
+ */
+check('maybePostNote itself refuses when seeding',
+  /async function maybePostNote[\s\S]{0,1200}if \(config\.whatsappSeedOnly\)[\s\S]{0,200}return false;/.test(WATCH),
+  true);
+check('...before the WHATSAPP_POST_NOTE check, so one switch is enough',
+  WATCH.indexOf('config.whatsappSeedOnly') < WATCH.indexOf('!config.whatsappPostNote'), true);
+/* Call sites, not the definition — `function maybePostNote(...)` matches the same shape. */
+check('there are still only three posting paths',
+  (WATCH.match(/(?<!function )maybePostNote\(page, selectors, plan\)/g) || []).length, 3);
+check('an already-existing group is not even opened when seeding',
+  /config\.whatsappPostNote && !config\.whatsappSeedOnly/.test(WATCH), true);
+
+/* And the creation branch leaves early rather than setting a flag and falling through. */
+check('a seeded group returns before any note is attempted',
+  /if \(plan\.seedOnly\)[\s\S]{0,1400}\n\s*continue;/.test(WATCH), true);
+check('...and it says on screen that nothing was sent',
+  /nothing was sent to WhatsApp/.test(WATCH), true);
+
+/*
+ * And the completeness rule has to relax with it. A seeded group has no note by design, so requiring one
+ * would leave every event unfinished and every run would re-open WhatsApp for a group that already exists
+ * — more sessions, which is the opposite of the point.
+ */
+check('a seeded group is not held open waiting for a note',
+  /requireNote: config\.whatsappPostNote && !config\.whatsappSeedOnly/.test(WATCH), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

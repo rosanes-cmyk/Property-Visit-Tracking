@@ -46,7 +46,7 @@ export function scrubContactDetails(text) {
  * `kind` is only used to prefix the message so the space is skimmable: a failure should be
  * distinguishable from a success at a glance, without reading the sentence.
  */
-export async function notifyChat(text, { kind = 'info', webhookUrl = null } = {}) {
+export async function notifyChat(text, { kind = 'info', webhookUrl = null, keepContactDetails = false } = {}) {
   const cfg = webhookUrl !== null ? null : (await import('../config.mjs')).config;
   /*
    * CHAT_ALERTS=off silences these without touching the webhook.
@@ -64,7 +64,18 @@ export async function notifyChat(text, { kind = 'info', webhookUrl = null } = {}
   if (!url) return false;
 
   const prefix = { ok: '✅', warn: '⚠️', error: '❌', info: 'ℹ️' }[kind] || 'ℹ️';
-  const body = { text: `${prefix} ${scrubContactDetails(text)}` };
+  /*
+   * keepContactDetails is for ONE message: the visit briefing a colleague copies out of Chat and pastes
+   * into the visit group. Redacting there defeats the message — the visitor is being sent to a house to
+   * meet somebody they then cannot ring, so they go hunting in REI and the briefing has saved nothing.
+   *
+   * It is a parameter rather than a config flag on purpose. A flag would silence the scrubber for every
+   * message the project sends; this way the exception is visible at the one call site that takes it, and
+   * every other notification is redacted whatever anyone puts in .env.
+   *
+   * The audience is the same either way: the Chat space and the visit group are both team-only.
+   */
+  const body = { text: `${prefix} ${keepContactDetails ? String(text || '') : scrubContactDetails(text)}` };
 
   try {
     const response = await fetch(url, {
