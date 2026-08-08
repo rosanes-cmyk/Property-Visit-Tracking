@@ -21,7 +21,15 @@ import { plausibleTitle, titlesMatch, noteAlreadyPresent } from './post-gate.mjs
 export const WHATSAPP_URL = 'https://web.whatsapp.com/';
 
 /** Anything that could send or delete. Asserted against every selector before it is used. */
-const FORBIDDEN = /send|delete|clear|block|report|exit|leave|logout|log out/i;
+/*
+ * `remove` and `dismiss` joined this list when admin promotion was added.
+ *
+ * The member menu that holds "Make group admin" also holds "Remove <name> from group" and, once
+ * promoted, "Dismiss as admin" — sitting directly under the item we want. A selector that drifted by
+ * one row would quietly throw a colleague out of the group instead of promoting them, and the run
+ * would report success because a click landed.
+ */
+const FORBIDDEN = /send|delete|clear|block|report|exit|leave|logout|log out|remove|dismiss/i;
 
 export async function launchWhatsApp({ userDataDir, headless = false, timezone = 'America/Los_Angeles' }) {
   await fs.mkdir(userDataDir, { recursive: true });
@@ -417,6 +425,122 @@ export async function openGroupByName(page, selectors, name) {
   }
   await clearSearch(page, search.locator);
   return { opened: false, reason: 'no chat with that exact name in the search results' };
+}
+
+/**
+ * Make the one other member of a seeded group an admin, so they can add the rest of the team.
+ *
+ * Why this exists: a group created by the automation has "Add other members" switched OFF, so the
+ * colleague it seeds is a plain member and cannot add Juan. Promoting them is two or three clicks;
+ * flipping the group permission instead needs a settings screen and leaves the group looser for
+ * everyone. Admin is the smaller change and it is the one the client asked for.
+ *
+ * Three refusals, because this is the second thing in the project that changes state on WhatsApp:
+ *
+ *   1. The open conversation's header must match the group name. Same rule as postGroupNote — a
+ *      settings panel acted on while the wrong chat is open acts on the wrong group.
+ *   2. There must be EXACTLY ONE other participant. In seed mode that is the whole population of the
+ *      group, so one is the only correct answer; anything else means this is not a freshly seeded
+ *      group and we are looking at the wrong thing. Guessing which of several people to promote from
+ *      a phone number we cannot see on screen — WhatsApp shows saved contact NAMES — is how the wrong
+ *      person gets rights.
+ *   3. The menu item is matched on its TEXT, anchored, and must be exactly "make group admin". Its
+ *      neighbours in that menu are "Remove from group" and "Dismiss as admin", one row away.
+ */
+export async function promoteToAdmin(page, selectors, { groupName, apply = false }) {
+  const report = { promoted: false, alreadyAdmin: false, reason: '', steps: [] };
+  const step = (s) => { report.steps.push(s); };
+
+  const header = await waitForConversation(page, selectors, groupName);
+  if (!titlesMatch(header, groupName)) {
+    report.reason = `the open chat reads "${header || '(nothing)'}", not "${groupName}" — refusing to touch its members`;
+    return report;
+  }
+  step(`conversation confirmed: ${header}`);
+
+  // Open group info. The header title is the reliable way in; the ⋮ menu differs between builds.
+  const infoOpened = await firstVisible(page, selectors.groupInfoOpen || [
+    "#main header [role='button'][title]",
+    '#main header span[title]',
+    '#main header'
+  ], { perCandidateMs: 2500 });
+  if (!infoOpened) {
+    report.reason = 'could not open group info from the conversation header';
+    return report;
+  }
+  await infoOpened.click().catch(() => {});
+  await page.waitForTimeout(1500);
+  step('group info opened');
+
+  /*
+   * The participant list, minus ourselves. "You" is how WhatsApp Web labels the account it is signed
+   * in as, and it is always in the list because we created the group.
+   */
+  const rows = page.locator((selectors.groupParticipantRows || [
+    "[data-testid='group-info-participants'] [role='listitem']",
+    "section [role='listitem']",
+    "[role='listitem']"
+  ]).join(', '));
+  const total = await rows.count().catch(() => 0);
+  const others = [];
+  for (let i = 0; i < total; i += 1) {
+    const text = ((await rows.nth(i).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    if (!text || /^you\b/i.test(text)) continue;
+    others.push({ index: i, text });
+  }
+  step(`participants found: ${others.length} besides You`);
+
+  if (others.length !== 1) {
+    report.reason = others.length === 0
+      ? 'no other participant is in this group — nobody to promote'
+      : `${others.length} other participants — this is not a freshly seeded group, refusing to guess`;
+    return report;
+  }
+
+  const member = others[0];
+  if (/group admin/i.test(member.text)) {
+    report.alreadyAdmin = true;
+    report.promoted = true;
+    report.reason = `${member.text} is already an admin`;
+    return report;
+  }
+
+  if (!apply) {
+    report.reason = `DRY RUN — would promote "${member.text}" to group admin`;
+    return report;
+  }
+
+  await rows.nth(member.index).click().catch(() => {});
+  await page.waitForTimeout(1000);
+
+  /*
+   * Anchored, exact, case-insensitive. WhatsApp words it "Make group admin"; some builds say
+   * "Make admin". Both are accepted, and nothing else is — a menu item that merely CONTAINS the word
+   * admin includes "Dismiss as admin".
+   */
+  const item = page.locator("[role='menuitem'], [role='button'], li, div[role='row']")
+    .filter({ hasText: /^make (group )?admin$/i }).first();
+  if (!(await item.count().catch(() => 0))) {
+    report.reason = 'the member menu opened but held no "Make group admin" item';
+    return report;
+  }
+  const label = ((await item.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+  assertSafe(label);                       // refuses Remove / Dismiss / Delete / Exit, whatever matched
+  await item.click();
+  await page.waitForTimeout(1500);
+  step(`clicked "${label}"`);
+
+  /*
+   * Verified, not assumed. A click that lands on a closing menu does nothing and would otherwise be
+   * reported as a promotion, leaving a colleague who still cannot add anybody and a Chat message
+   * telling them to.
+   */
+  const after = ((await rows.nth(member.index).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+  report.promoted = /group admin/i.test(after);
+  report.reason = report.promoted
+    ? `${member.text} is now a group admin`
+    : `clicked "${label}" but the row still reads "${after}" — not confirmed`;
+  return report;
 }
 
 /**

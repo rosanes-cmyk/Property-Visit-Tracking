@@ -189,8 +189,15 @@ check('an already-existing group is not even opened when seeding',
   /config\.whatsappPostNote && !config\.whatsappSeedOnly/.test(WATCH), true);
 
 /* And the creation branch leaves early rather than setting a flag and falling through. */
+/*
+ * Positions rather than a character window: the seeded branch grew when admin promotion was added,
+ * and a fixed-width regex would have started failing on a file that was still correct.
+ */
+const seedAt = WATCH.indexOf('if (plan.seedOnly)');
+const continueAt = WATCH.indexOf('continue;', seedAt);
+const postAt = WATCH.indexOf('await maybePostNote(', seedAt);
 check('a seeded group returns before any note is attempted',
-  /if \(plan\.seedOnly\)[\s\S]{0,1400}\n\s*continue;/.test(WATCH), true);
+  seedAt > 0 && continueAt > seedAt && continueAt < postAt, true);
 check('...and it says on screen that nothing was sent',
   /nothing was sent to WhatsApp/.test(WATCH), true);
 
@@ -201,6 +208,46 @@ check('...and it says on screen that nothing was sent',
  */
 check('a seeded group is not held open waiting for a note',
   /requireNote: config\.whatsappPostNote && !config\.whatsappSeedOnly/.test(WATCH), true);
+
+console.log('\n=== Promoting the seeded colleague to admin ===');
+/*
+ * The client's screenshot settled it: a group the automation creates has "Add other members" OFF, so
+ * the seeded colleague is a plain member and cannot add Juan. Without this, the Chat message asks
+ * somebody to do something WhatsApp will not let them do.
+ *
+ * This is the SECOND thing in the project that changes state on WhatsApp, and the member menu it opens
+ * holds "Remove from group" and "Dismiss as admin" one row from the item we want. So the guards are the
+ * test, not the happy path — a wrong selector must fail loudly, never act on the wrong person.
+ */
+const CLIENT = fs.readFileSync(
+  path.resolve('twin-visit-logger-sandbox/src/whatsapp/client.mjs'), 'utf8');
+
+check('remove and dismiss are refused selectors now',
+  /const FORBIDDEN = .*remove.*dismiss/i.test(CLIENT), true);
+check('the header must match the group first',
+  /promoteToAdmin[\s\S]{0,700}titlesMatch\(header, groupName\)/.test(CLIENT), true);
+check('exactly one other participant, or it refuses',
+  /others\.length !== 1/.test(CLIENT), true);
+check('...and "You" is excluded from that count',
+  /\/\^you\\b\/i\.test\(text\)/.test(CLIENT), true);
+check('the menu item is matched anchored, not by containing "admin"',
+  /\^make \(group \)\?admin\$/.test(CLIENT), true);
+check('...and its text is passed through assertSafe before clicking',
+  /assertSafe\(label\)[\s\S]{0,200}item\.click\(\)/.test(CLIENT), true);
+check('the promotion is verified by re-reading the row, not assumed',
+  /report\.promoted = \/group admin\/i\.test\(after\)/.test(CLIENT), true);
+check('a dry run promotes nobody',
+  /if \(!apply\)[\s\S]{0,160}DRY RUN — would promote/.test(CLIENT), true);
+check('already-an-admin is not clicked again',
+  /alreadyAdmin = true/.test(CLIENT), true);
+
+/* And the failure has to reach the person, not just the log. */
+check('a failed promotion warns in the Chat message',
+  /COULD NOT MAKE THEM ADMIN/.test(WATCH), true);
+check('...and the message is flagged as a warning, not a success',
+  /kind: admin\.promoted \? 'ok' : 'warn'/.test(WATCH), true);
+check('...and the group is still created and the briefing still sent',
+  WATCH.indexOf('COULD NOT MAKE THEM ADMIN') < WATCH.indexOf('briefingFor(plan),'), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

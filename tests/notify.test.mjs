@@ -164,8 +164,16 @@ const WATCH = fs.readFileSync(
   path.resolve('twin-visit-logger-sandbox/src/whatsapp/watch.mjs'), 'utf8');
 check('exactly one call site keeps contact details',
   (WATCH.match(/keepContactDetails: true/g) || []).length, 1);
-check('...and it is the seeded handover',
-  /seedOnly[\s\S]{0,1400}keepContactDetails: true/.test(WATCH), true);
+/*
+ * Positions, not a character window. The seeded branch grew when admin promotion was added and a
+ * fixed-width regex started failing on a file that was still correct — the assertion is that the ONE
+ * call keeping contact details sits inside the seeded branch, not that it sits within N characters.
+ */
+const seedAt = WATCH.indexOf('if (plan.seedOnly)');
+const keepAt = WATCH.indexOf('keepContactDetails: true');
+check('...and it is the seeded handover', seedAt > 0 && keepAt > seedAt, true);
+check('...still inside that branch, before the loop moves on',
+  keepAt < WATCH.indexOf('continue;', seedAt), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

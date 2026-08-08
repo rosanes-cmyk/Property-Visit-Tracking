@@ -71,5 +71,16 @@
     "#main [data-testid='conversation-compose-box-input']",
     "footer div[contenteditable='true']"
   ],
+  "groupInfoOpen": [
+    "#main header [role='button'][title]",
+    "#main header span[title]",
+    "#main header"
+  ],
+  "groupParticipantRows": [
+    "[data-testid='group-info-participants'] [role='listitem']",
+    "section [role='listitem']",
+    "[role='listitem']"
+  ],
+  "_adminComment": "CANDIDATES, NOT CONFIRMED. groupInfoOpen and groupParticipantRows were written without a live session and drive promoteToAdmin, which changes group membership rights - so expect to correct them on the first real run. The safety does NOT rest on them: promoteToAdmin refuses unless the open conversation's header matches the group name and there is EXACTLY ONE other participant, matches the menu item on anchored text (^make (group )?admin$), passes that text through assertSafe - which refuses remove/dismiss/delete/exit - and then re-reads the row to confirm 'Group admin' rather than assuming the click worked. A wrong selector here fails and says so; it does not act on the wrong person. Confirm with: node scripts/whatsapp-doctor.mjs --open \"<an existing group name>\".",
   "_postingComment": "CONFIRMED behaviour on this build (2026-08-03 run): the conversation header's title ATTRIBUTE reads 'click here for group info', not the group name - so the rendered text is read first and WhatsApp's furniture is filtered by plausibleTitle() in post-gate.mjs. '#main header' is listed first for that reason: its innerText begins with the real subject. conversationTitle and messageBox are scoped to #main - WhatsApp's conversation panel - which is the whole safety story. #main exists ONLY while a conversation is open, so a stale selector resolves to nothing rather than to the left pane's header or the search box. An earlier unscoped 'header span[title]' could match the CHAT LIST header and report a title while no chat was open at all. Confirm them on your build with: node scripts/whatsapp-doctor.mjs --open \"<an existing group name>\"."
 }

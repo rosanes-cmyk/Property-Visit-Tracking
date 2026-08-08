@@ -20,7 +20,7 @@ import { config } from '../config.mjs';
 import { planForEvents, suspiciousNumber } from './plan.mjs';
 import {
   launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers, postGroupNote,
-  openGroupByName
+  openGroupByName, promoteToAdmin
 } from './client.mjs';
 import { buildInspectionNote, containsSellerSensitive } from './note.mjs';
 import { eventsFinished, MAX_TASK_ATTEMPTS } from './post-gate.mjs';
@@ -464,11 +464,46 @@ async function main() {
           const toAdd = plan.stillToAdd.map((p) => p.number).join(', ') || '(nobody — check WHATSAPP_TEAM_NUMBERS)';
           console.log(`    seeded with 1 member; still to add by hand: ${toAdd}`);
           console.log('    nothing was sent to WhatsApp — the briefing goes to Google Chat');
+
+          /*
+           * Promote the seeded colleague, or the instruction we are about to post is impossible to follow.
+           *
+           * A group the automation creates has "Add other members" OFF, so a plain member cannot add
+           * Juan — the client's own screenshot showed exactly that. Admin is the smaller of the two
+           * fixes: flipping the group permission needs a settings screen and loosens the group for
+           * everyone, while an admin can add people whatever that toggle says.
+           *
+           * A failure here is NOT fatal, and is not hidden either. The group still exists and the
+           * briefing still reaches Chat; the message says plainly that the person has to be made admin
+           * by hand, because a message telling somebody to add members they cannot add is worse than
+           * one that admits the gap.
+           */
+          let admin = await promoteToAdmin(page, selectors, { groupName: plan.name, apply: APPLY });
+          /*
+           * Same fault the note posting hit: creating a group does not reliably leave its conversation
+           * on screen, so the header check refuses on a group that is sitting right there. Going and
+           * opening it by name is the fix, and only for THAT reason — a refusal about the participant
+           * count is a real answer and must not be retried into a different one.
+           */
+          if (!admin.promoted && /refusing to touch its members/.test(admin.reason)) {
+            const reopened = await openGroupByName(page, selectors, plan.name);
+            if (reopened.opened) {
+              console.log('    reopened the group by name — one more try at making them admin');
+              admin = await promoteToAdmin(page, selectors, { groupName: plan.name, apply: APPLY });
+            }
+          }
+          for (const line of admin.steps) console.log(`    ${line}`);
+          console.log(`    admin: ${admin.reason}`);
           state.groups[plan.eventId].seeded = true;
+          state.groups[plan.eventId].seedAdmin = admin.promoted;
           await writeState(state);
           await notifyChat(
             `WhatsApp group created — ${plan.name}` +
             `\n${plan.startLocal}` +
+            (admin.promoted
+              ? ''
+              : `\n\n⚠️ COULD NOT MAKE THEM ADMIN (${admin.reason}).` +
+                '\nOpen the group, tap the member, "Make group admin" — otherwise they cannot add anyone.') +
             `\n\nADD THESE MEMBERS: ${toAdd}` +
             '\nThen paste the briefing below into the group.\n\n' +
             briefingFor(plan),
@@ -477,7 +512,7 @@ async function main() {
              * visitor back into REI to find the number, which is the ten minutes of digging this exists to
              * remove. Both destinations — the Chat space and the visit group — are team-only.
              */
-            { kind: 'ok', keepContactDetails: true }
+            { kind: admin.promoted ? 'ok' : 'warn', keepContactDetails: true }
           );
           continue;
         }

@@ -291,6 +291,24 @@ three posting paths are covered — including PASS 2, which reruns over groups t
 otherwise have typed the briefing in on the very next run; and `WHATSAPP_ENABLED` still gates everything,
 so seeding does nothing until the client switches WhatsApp on themselves.
 
+**`promoteToAdmin` is the SECOND write this project makes to WhatsApp**, and it exists because the client's
+own screenshot showed a group the automation had created with *Add other members* switched OFF — so the
+seeded colleague could not add Juan, and the Chat message would have asked for something WhatsApp forbids.
+Promoting them is smaller than flipping that permission: an admin can add people whatever the toggle says,
+and the group is not loosened for everybody. The client asked for both; only the promotion is done, because
+doing both is extra clicking inside WhatsApp for no gain.
+
+Its guards must not be relaxed. The open conversation's header must match the group name; there must be
+**exactly one** other participant (in seed mode that is the whole group, and WhatsApp shows saved contact
+NAMES rather than the number we hold, so anything else means we are looking at the wrong group); the menu
+item is matched on anchored text `^make (group )?admin$` and passed through `assertSafe`, which now also
+refuses `remove` and `dismiss` — both sit one row away in that same menu; and the result is confirmed by
+re-reading the row rather than assuming the click landed. `groupInfoOpen` and `groupParticipantRows` in
+`config/whatsapp-selectors.json` are **unconfirmed candidates** written without a live session and will
+likely need correcting on the first real run; the guards are what make a wrong selector fail loudly instead
+of acting on the wrong person. A failed promotion is not fatal — the group and the briefing still go out,
+and the Chat message says the promotion must be done by hand.
+
 The visit briefing is the ONE message allowed to keep the seller's phone and email — `notifyChat(...,
 { keepContactDetails: true })`, at exactly one call site, asserted by `tests/notify.test.mjs`. A redacted
 briefing sends the visitor to a house to meet somebody they cannot ring. Both destinations are team-only.
