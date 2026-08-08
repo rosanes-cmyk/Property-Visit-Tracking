@@ -105,6 +105,22 @@ for (const row of [
 console.log('\n=== the re-check uses it ===');
 const RUNNER = read('twin-visit-logger-sandbox/scripts/recheck-rei.mjs');
 check('--buckets is a flag', /--buckets/.test(RUNNER), true);
+/*
+ * MIDNIGHT, not the current time. The card compares a visit's date against today's midnight; passing
+ * `new Date()` made a visit booked for 10:30 this morning read as overdue at 10:35, so the sweep reported
+ * "upcomingVisit: 0, pendingFollowUp: 5" for the leads the card was showing as Upcoming Visit (3). Same
+ * leads either way, but a count that contradicts the card reads as the two disagreeing about the work.
+ */
+check('...and it asks at MIDNIGHT, as the card does',
+  /new Date\(n\.getFullYear\(\), n\.getMonth\(\), n\.getDate\(\)\)[\s\S]{0,80}onTheCard/.test(RUNNER), true);
+/* The proof, rather than the shape: a visit later today is upcoming, not overdue. */
+const later = new Date();
+later.setHours(23, 0, 0, 0);
+const todayIso = `${later.getFullYear()}-${String(later.getMonth() + 1).padStart(2, '0')}-${String(later.getDate()).padStart(2, '0')}`;
+const midnight = new Date(later.getFullYear(), later.getMonth(), later.getDate());
+check("a visit later TODAY is Upcoming, not overdue",
+  bucketOf({ 'Property Address': 'x', 'Current Stage': 'Visit Scheduled', 'Visit Status': 'Scheduled',
+    'Visit Date': todayIso }, midnight), 'upcomingVisit');
 check('...and it filters on onTheCard', /onTheCard\(/.test(RUNNER), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);

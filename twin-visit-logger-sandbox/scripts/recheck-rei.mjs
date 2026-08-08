@@ -178,7 +178,16 @@ let candidates = pickRecheckCandidates(rows, state, { now: new Date(), limit: LI
  * the run says so rather than pretending it covered everything.
  */
 if (BUCKETS_ONLY) {
-  const today = new Date();
+  /*
+   * MIDNIGHT, not the current time. The card compares a visit's date against today's midnight, so passing
+   * `new Date()` made a visit booked for 10:30 this morning look overdue at 10:35 — and the sweep reported
+   * "upcomingVisit: 0, pendingFollowUp: 5" for the very leads the card was listing under Upcoming Visit (3).
+   *
+   * The SET of leads was identical either way, so nothing was checked wrongly — but a count that disagrees
+   * with the card is exactly the drift this module exists to prevent, and it would have been read as the
+   * sweep and the card disagreeing about the work.
+   */
+  const today = (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); })();
   const onCard = rows.filter((r) => onTheCard(r, today));
   console.log(`\n--buckets: ${onCard.length} lead(s) on the 3pm card right now`);
   const bySection = {};
