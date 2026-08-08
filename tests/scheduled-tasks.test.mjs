@@ -202,5 +202,45 @@ check('Code.combined.gs carries the same logic',
 check('a merged parked row is cleared', /cleared the parked row/.test(FILL), true);
 check('...by blanking it, not deleting the row', /values\.clear/.test(FILL), true);
 
+
+console.log('\n--- the waiting card: visible, honest, and counting from the right moment ---');
+const DASH = fs.readFileSync('apps-script/Dashboard.html', 'utf8');
+
+/*
+ * The counter read 1009m 16s at ten to five in the afternoon, because it subtracted Created Date — a
+ * column written by today_(), which is MIDNIGHT. Both date columns are dates by design (formulas, the
+ * daily report and the legacy import all depend on that), so the instant is carried in the text instead.
+ */
+check('the parked moment is stamped as an instant', /\[since ' \+ new Date\(\)\.toISOString\(\)/.test(WEB), true);
+check('...and the board reads it from there', /\\\[since \(\[\^\\\]\]\+\)\\\]/.test(DASH), true);
+check('...not from Created Date', /var since=r\.created\?new Date\(r\.created\)/.test(DASH), false);
+
+/*
+ * The client: "there should be showed in the dashboard, added will not be closed, so that its still
+ * working." Pinned above every section and never filtered out — left in the ordinary sections it would
+ * sort by due date, hide behind whatever chip was on, and look identical to a card that had failed.
+ */
+check('pending rows are pinned in their own section', /<h2>Being added<\/h2>/.test(DASH), true);
+check('...and removed from the ordinary sections',
+  /live=live\.filter\(function\(r\)\{return !isPending\(r\);\}\)/.test(DASH), true);
+/* And they must not move the numbers at the top: a half-fetched row is not an SLA breach. */
+check('...and excluded from the counts',
+  /ribbon\(live\.filter\(function\(r\)\{return !isPending\(r\);\}\)\)/.test(DASH), true);
+/* After fifteen minutes it stops claiming to be working and names the actual cause. */
+check('a stuck row stops pretending', /Still not finished/.test(DASH), true);
+check('...and says what to check', /signed in to Windows/.test(DASH), true);
+
+console.log('\n--- the booking form ---');
+check('visit time is on the form', /data-k="visitTime" type="time"/.test(DASH), true);
+check('...and is sent to the sheet', /'Visit Time':g\('visitTime'\)/.test(DASH), true);
+check('a visitor can be chosen', /data-k="visitor"/.test(DASH), true);
+/*
+ * Both lists come from the WORKBOOK's own dropdowns, never hardcoded here. A value outside them fails
+ * the whole row write, not just its own cell — REI really does contain "Thea, Cherry".
+ */
+check('the visitor list comes from the workbook', /visitors: visitors/.test(WEB), true);
+check('...read from the sheet\'s dropdown', /DROPDOWNS\['Assigned Visitor'\]/.test(WEB), true);
+check('...and the page takes it from the server', /if\(d\.visitors&&d\.visitors\.length\)VISITORS=d\.visitors/.test(DASH), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

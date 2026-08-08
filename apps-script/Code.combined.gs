@@ -1524,8 +1524,10 @@ function webGetData() {
   ].map(function(s){ return { title: s[0], rows: s[1] }; });
 
   const owners = DROPDOWNS['Assigned Owner'];
+  // Sent so the booking form offers exactly what the sheet accepts — an illegal value fails the row write.
+  const visitors = DROPDOWNS['Assigned Visitor'];
   var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
-  return { generatedAt: fmt_(today_()), owners: owners, sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
+  return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors, sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
@@ -1739,10 +1741,20 @@ function webAddRecord_(params) {
     // Flagged, so it is visibly unfinished on the board rather than looking like a complete record.
     if (params['Data Quality Status'] === undefined) params['Data Quality Status'] = 'Incomplete';
     if (params['Exception Reason'] === undefined) {
-      params['Exception Reason'] = found.ambiguous
+      /*
+       * The timestamp goes in the TEXT, deliberately.
+       *
+       * Created Date and Last Updated Date are both written by today_(), which is midnight — a date with
+       * no clock on it. The board's "waiting for…" counter read one of those and showed 1009m 16s, which
+       * is minutes since midnight, not since the row was made. Rather than change what those two columns
+       * mean (formulas, the daily report and the legacy import all depend on them being dates), the
+       * moment is carried here as an ISO instant the page can subtract.
+       */
+      params['Exception Reason'] = (found.ambiguous
         ? ('POSSIBLE DUPLICATE — ' + found.reason + '. Added as a new record rather than guessing which '
            + 'one to reschedule; merge them by hand if this is the same property.')
-        : 'Waiting for the PC to read REI and fill in the address and details.';
+        : 'Waiting for the PC to read REI and fill in the address and details.')
+        + ' [since ' + new Date().toISOString() + ']';
     }
   }
   const R = new RowAccessor_(sh, row);

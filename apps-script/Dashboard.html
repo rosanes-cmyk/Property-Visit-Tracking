@@ -227,6 +227,8 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
 "use strict";
 var TODAY=new Date(); TODAY.setHours(0,0,0,0);
 var OWNERS=['Jonathan','Kyle','Cherry','Juan'];
+/* Filled from the workbook's own dropdown by onData — a value outside it fails the whole row write. */
+var VISITORS=['Juan'];
 var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
 var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
 var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
@@ -397,9 +399,20 @@ var PENDING_PREFIX='PENDING REI LOOKUP';
  * see that something is happening, and to be told the truth when it stops happening.
  */
 function isPending(r){return String(r.address||'').indexOf(PENDING_PREFIX)===0;}
+/*
+ * When the row was parked, read from the "[since <ISO>]" stamp the server writes into Exception Reason.
+ *
+ * NOT from Created Date: that column is written by today_(), which is midnight, so subtracting it gave
+ * minutes since midnight — the card read "Still not finished 1009m 16s" at ten to five in the afternoon.
+ */
+function pendingSince(r){
+  var m=/\[since ([^\]]+)\]/.exec(String(r.exception||''));
+  var d=m?new Date(m[1]):(r.created?new Date(r.created):null);
+  return (d&&!isNaN(d.getTime()))?d:null;
+}
 function waitedFor(r){
-  var since=r.created?new Date(r.created):null;
-  if(!since||isNaN(since.getTime()))return '';
+  var since=pendingSince(r);
+  if(!since)return '';
   var secs=Math.max(0,Math.round((Date.now()-since.getTime())/1000));
   return secs<60?(secs+'s'):(Math.floor(secs/60)+'m '+(secs%60)+'s');
 }
@@ -409,8 +422,8 @@ function waitedFor(r){
  * forever is how somebody waits an afternoon for a row that was never going to complete.
  */
 function pendingStale(r){
-  var since=r.created?new Date(r.created):null;
-  if(!since||isNaN(since.getTime()))return false;
+  var since=pendingSince(r);
+  if(!since)return false;
   return (Date.now()-since.getTime())>15*60*1000;
 }
 function cardHTML(r){
@@ -532,6 +545,27 @@ function bindSection(el,si,live){
 }
 function renderBoard(live){
   var html='';
+  /*
+   * Rows still being fetched from REI are PINNED to the top, above everything, and are never filtered
+   * out by the chips or the search box.
+   *
+   * The client: "there should be showed in the dashboard, added will not be closed, so that its still
+   * working." Right — somebody who has just booked a visit needs to see that record until it completes.
+   * Left in the ordinary sections it would sort by due date, sit behind whatever filter happened to be
+   * on, and be indistinguishable from a card that had quietly failed.
+   *
+   * They also do not belong in the normal sections yet: no address, no stage that means anything. So
+   * they are removed from `live` and shown here instead, which also keeps them out of the counts across
+   * the top — a half-fetched record is not an SLA breach.
+   */
+  var waiting=live.filter(isPending);
+  if(waiting.length){
+    html+='<div class="sec"><h2>Being added</h2><span class="n">'+waiting.length+'</span><span class="rule"></span></div>';
+    html+='<p class="dnote" style="margin:0 2px 10px">Booked on this page; the office PC is fetching the property from REI. '+
+      'These stay here until they are done — you can close the tab.</p>';
+    html+='<div class="grid">'+waiting.map(cardHTML).join('')+'</div>';
+  }
+  live=live.filter(function(r){return !isPending(r);});
   SECTIONS.forEach(function(s,si){var rows=rowsFor(si,live); if(!rows.length&&FILTER!=='all')return;
     html+='<div class="secblock" id="sb_'+si+'">'+sectionInner(si,live)+'</div>';});
   var wrap=document.getElementById('wrap'); wrap.innerHTML=html;
@@ -687,7 +721,12 @@ function computeConflicts(live){
 function draw(){
   RECS.forEach(compute); var live=RECS;
   computeConflicts(live);
-  ribbon(live);
+  /*
+   * The counts across the top ignore rows still being fetched. A record with no address yet is not an
+   * SLA breach or a stalled lead — counting it as one makes those numbers move for a reason nobody can
+   * see, which is how a dashboard stops being believed.
+   */
+  ribbon(live.filter(function(r){return !isPending(r);}));
   document.getElementById('filters').style.display=(VIEW==='kpi'||VIEW==='reports'||VIEW==='trash')?'none':'block';
   if(VIEW==='board')renderBoard(live); else if(VIEW==='kpi')renderKPI(live); else if(VIEW==='reports')renderReports(live); else if(VIEW==='trash')renderTrash(); else renderData(live);
 }
@@ -734,7 +773,8 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
   host.innerHTML='<div class="modal"><h3>Book / reschedule visit</h3><p class="cap">Name and phone are enough. The address and the rest come from REI within a few minutes — you can close this tab.</p>'+
    '<div class="row2"><div class="field"><label>Seller Name *</label><input data-k="seller"></div><div class="field"><label>Phone *</label><input data-k="phone" placeholder="(650) 620-4017"></div></div>'+
    '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
-   '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div></div>'+
+   '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Time</label><input data-k="visitTime" type="time"></div></div>'+
+   '<div class="row2"><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Visitor</label><select data-k="visitor"><option value="">(none)</option>'+VISITORS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Next Action</label><input data-k="next" value="Conduct scheduled visit & log outcome"></div><div class="field"><label>Due Date</label><input data-k="due" type="date" value="'+todayISO()+'"></div></div>'+
    '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
@@ -749,7 +789,7 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
      * phone is what REI is searched BY, so it is the field that cannot be optional.
      */
     if(!g('seller').trim()||!g('phone').trim()){toast('Seller name and phone are both needed');return;}
-    var params={'Seller Name':g('seller'),'Phone':g('phone'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
+    var params={'Seller Name':g('seller'),'Phone':g('phone'),'Visit Time':g('visitTime'),'Assigned Visitor':g('visitor'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
     toast('Saving…');runAction('addRecord',null,params,close);};}
 
 /*
@@ -762,7 +802,7 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
  */
 function hydrate(x){return {rowNum:x.rowNum,id:x.id,created:x.created,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
-function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 var TRASH=[];
 function renderTrash(){
   var h='<div class="sec"><h2>Trash — deleted records</h2><span class="n">'+TRASH.length+'</span><span class="rule"></span></div>';
