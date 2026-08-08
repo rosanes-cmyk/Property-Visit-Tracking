@@ -1157,6 +1157,25 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
   const looked = Boolean(scraped?.taskPanelOpened);
 
   /*
+   * Does anybody actually need to record an outcome for this lead?
+   *
+   * The client, on Rob Walker's line: "this should be cleaned notif." His row says Visit Status Completed and
+   * Current Stage Contract Signed — the seller signed and the gift has been delivered — and every run still
+   * printed "Somebody has to mark the visit Completed or Canceled."
+   *
+   * It is noise of the harmful kind: it asks for work that is already done, on a finished lead. If every run
+   * says that about Rob, people learn to skim the whole message, and then miss it on Sara Davenport, where it
+   * is the one line that matters.
+   *
+   * So the ASK is printed only when the row genuinely has no answer — Visit Status blank or still Scheduled.
+   * The FINDING is still reported either way, because "REI could not confirm the visit" remains true and the
+   * could-not-be-verified list must stay complete.
+   */
+  const outcomeRecorded = ['Completed', 'Canceled', 'Skipped — Offer Made']
+    .includes(text(row['Visit Status']));
+  const ask = outcomeRecorded ? '' : ' Somebody has to mark the visit Completed or Canceled.';
+
+  /*
    * 'none' joins 'unknown' here on purpose.
    *
    * They are different findings — looked-and-empty versus never-looked — and the message below already tells
@@ -1185,14 +1204,15 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
          */
         ? ' REI has no OPEN booked-appointment task for this contact. That means either the appointment was ' +
           'removed, or REI lists only open tasks and this one was already ticked off — the panel does not say ' +
-          'which. Somebody has to mark the visit Completed or Canceled.'
-        : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.';
+          `which.${ask}`
+        : outcomeRecorded ? '' : ' Open the lead in REI, or run scripts/rei-task-doctor.mjs against it.';
     return head + `${confirmed}${notChecked}. REI could not tell us whether the visit happened — ` +
       `${scraped.visitTaskReason}.${tail}`;
   }
   if (scraped && scraped.visitTaskState === 'open') {
+    /* Same rule: report what REI shows, ask only when the row has no answer of its own. */
     return head + `${confirmed}${notChecked}. REI still has the visit task OPEN, so REI does not know ` +
-      'the outcome either. Somebody has to mark it Completed or Canceled.';
+      `the outcome either.${ask}`;
   }
   return head + confirmed + notChecked;
 }

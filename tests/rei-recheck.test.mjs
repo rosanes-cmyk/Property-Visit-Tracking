@@ -667,7 +667,13 @@ check('...and it names the tool that settles it',
   /rei-task-doctor/.test(said('unknown', 'x')), true);
 check('an OPEN task says REI does not know either',
   /REI still has the visit task OPEN/.test(said('open', 'still open')), true);
-check('...and names who has to act', /Somebody has to mark it Completed or Canceled/.test(said('open', 'x')), true);
+/*
+ * One sentence for both branches now — "mark the visit", not "mark it" — because the ask is printed from a
+ * single place that also decides WHETHER to print it. See "the run does not ask for work that is already
+ * done" below.
+ */
+check('...and names who has to act',
+  /Somebody has to mark the visit Completed or Canceled/.test(said('open', 'x')), true);
 check('a plain agreement names the one field REI answered on', said('not-checked', ''),
   'Jose Anguiano · 2145 Capitol Ave · REI confirms Visit Date · ' +
   'REI gave no Visit Time, Seller Name, Phone, Email, so those were NOT checked');
@@ -1405,6 +1411,55 @@ const rebooked = diffFromRei(SARA, fromRei('2026-08-07T10:00:00-07:00'));
 check('her row stops saying Canceled',
   rebooked.find((c) => c.field === 'Visit Status')?.to, 'Scheduled');
 check('...and the calendar is told', calendarAffected(rebooked), true);
+
+console.log('\n=== the run does not ask for work that is already done ===');
+/*
+ * The client, on Rob Walker's line: "this should be cleaned notif."
+ *
+ * His row says Visit Status Completed and Current Stage Contract Signed — the seller signed and the gift has
+ * been delivered — and every run still printed "Somebody has to mark the visit Completed or Canceled."
+ *
+ * Noise of the harmful kind: it asks for work already done, on a finished lead. If every run says that about
+ * Rob, people learn to skim the message, and then miss it on Sara Davenport where it is the one line that
+ * matters.
+ */
+const UNVERIFIED = { visitTaskState: 'none', taskPanelOpened: true, visitTaskReason: 'the Tasks panel was opened and holds no booked-appointment task' };
+const ROB = {
+  'Property Address': '492 Umland Dr, Santa Rosa, CA 95401',
+  'Seller Name': 'Rob Walker',
+  'Visit Status': 'Completed',
+  'Current Stage': 'Contract Signed'
+};
+const SARA_UNKNOWN = { ...ROB, 'Seller Name': 'Sara Davenport', 'Visit Status': 'Scheduled', 'Current Stage': 'Visit Scheduled' };
+
+const REI_SAID = { 'Seller Name': 'Rob Walker' };   // non-empty, or an earlier branch reports "REI returned NOTHING"
+const robLine = describeChanges(ROB, [], REI_SAID, UNVERIFIED);
+check("Rob is not asked to mark a visit he has already recorded",
+  /Somebody has to mark/.test(robLine), false);
+/* The FINDING still appears — it is true, and the could-not-be-verified list must stay complete. */
+check('...but the finding is still reported',
+  /REI could not tell us whether the visit happened/.test(robLine), true);
+check('...and he is not sent to the task doctor either',
+  /rei-task-doctor/.test(robLine), false);
+
+const saraLine = describeChanges(SARA_UNKNOWN, [], { 'Seller Name': 'Sara Davenport' }, UNVERIFIED);
+check('Sara, whose outcome is genuinely unknown, IS asked',
+  /Somebody has to mark the visit Completed or Canceled/.test(saraLine), true);
+
+/* Every status that counts as an answer. A blank does not. */
+for (const status of ['Completed', 'Canceled', 'Skipped — Offer Made']) {
+  check(`"${status}" counts as an answer`,
+    /Somebody has to mark/.test(describeChanges({ ...ROB, 'Visit Status': status }, [], REI_SAID, UNVERIFIED)), false);
+}
+for (const status of ['', 'Scheduled', 'Reschedule Needed']) {
+  check(`"${status || '(blank)'}" still needs one`,
+    /Somebody has to mark/.test(describeChanges({ ...ROB, 'Visit Status': status }, [], REI_SAID, UNVERIFIED)), true);
+}
+/* And the same rule where REI still holds the task open. */
+check('an OPEN task does not nag a finished row',
+  /Somebody has to mark/.test(describeChanges(ROB, [], REI_SAID, { ...UNVERIFIED, visitTaskState: 'open' })), false);
+check('...but does where the outcome is unknown',
+  /Somebody has to mark/.test(describeChanges(SARA_UNKNOWN, [], { 'Seller Name': 'Sara Davenport' }, { ...UNVERIFIED, visitTaskState: 'open' })), true);
 
 console.log('\n=== REI has let go of the appointment ===');
 /*
