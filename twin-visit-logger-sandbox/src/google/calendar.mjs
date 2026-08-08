@@ -31,7 +31,7 @@ function isCancelled(status) {
  * WhatsApp step, which reads these labels back out. That is why the summarising happens HERE and once —
  * the note used to re-parse the raw notes downstream, so the same work was done twice from the same text.
  */
-function buildDescription(visit) {
+export function buildDescription(visit) {
   const radar = extractPropertyRadar(visit.notes || '');
   const call = extractCallSummary(visit.notes || '');
   const trip = extractLogistics(visit.notes || '');

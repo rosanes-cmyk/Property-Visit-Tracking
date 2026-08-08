@@ -22,7 +22,7 @@ import {
   launchWhatsApp, assertLoggedIn, createGroup, groupExists, warmUpNumbers, postGroupNote,
   openGroupByName, promoteToAdmin
 } from './client.mjs';
-import { buildInspectionNote, containsSellerSensitive } from './note.mjs';
+import { briefingFromDescription, containsSellerSensitive } from './note.mjs';
 import { eventsFinished, MAX_TASK_ATTEMPTS } from './post-gate.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
@@ -30,7 +30,8 @@ import { shouldCompleteTask } from '../rei/task-gate.mjs';
 import { acquireLock } from '../utils/lock.mjs';
 import { haltForPause } from '../utils/paused.mjs';
 import { notifyChat } from '../utils/notify.mjs';
-import { fieldFromDescription, blockFromDescription, reiLinkFromDescription, localDay } from './plan.mjs';
+// fieldFromDescription/blockFromDescription moved with the briefing builder into note.mjs.
+import { reiLinkFromDescription, localDay } from './plan.mjs';
 
 // Paused before anything is read. WhatsApp is off by default anyway; this stops the timer too.
 if (haltForPause({ force: process.argv.includes('--force') })) process.exit(0);
@@ -630,52 +631,17 @@ async function maybePostNote(page, selectors, plan) {
  * paste. Two builders would drift, and the one nobody looks at would be the one going to the visitor.
  */
 function briefingFor(plan) {
-  const from = (label) => fieldFromDescription(plan.rawDescription, label);
-  const block = (heading) => blockFromDescription(plan.rawDescription, heading);
   /*
-   * Everything is read from the calendar description's LABELLED LINES.
-   *
-   * The description is now a summary written by the calendar module — the same parsers, run once, upstream
-   * — rather than REI's notes pasted in. So there is nothing to re-parse here, and the work is no longer
-   * done twice from the same text. block('Notes') is kept only as a fallback for events written before
-   * this change.
+   * Delegates to the shared builder in note.mjs so the Chat delivery and the WhatsApp delivery are the
+   * same text. They were not: the Chat copy was assembled separately from the raw REI fields and quietly
+   * dropped the drive plan, the PropertyRadar figures, motivation, condition, timeline and the call
+   * summary — about half of it.
    */
-  const note = buildInspectionNote({
-    propertyAddress: plan.address,
-    sellerName: from('Seller'),
-    phone: from('Phone'),
-    reiLink: reiLinkFromDescription(plan.rawDescription),
-    leadSource: from('Lead Source'),
-    contactStage: from('Contact Stage'),
-    assignedOwner: from('Assigned Owner'),
-
-    leaveOffice: from('Leave Office'),
-    driveTime: from('Drive Time'),
-    mapsLink: from('Maps'),
-
-    estimatedValue: from('Estimated Value'),
-    assessedValue: from('Assessed Value'),
-    openLoansBalance: from('Estimated Open Loans Balance'),
-    estimatedEquity: from('Estimated Equity'),
-    purchaseDate: from('Purchase Date'),
-    occupancy: from('Occupancy'),
-    vestedOwner: from('Vested Owner'),
-
-    motivationLevel: from('Motivation Level'),
-    reasonForSelling: from('Reason for Selling'),
-    propertyCondition: from('Property Condition'),
-    knownIssues: from('Known Issues'),
-    timeline: from('Timeline'),
-    priceExpectation: from('Price Expectation'),
-    callSummary: from('Call Summary'),
-    nextStep: from('Next Step'),
-
-    // Events written before the description became a summary still carry the raw blocks.
-    notes: block('Notes'),
-    nextAction: from('Next Action')
-  }, { appointmentText: plan.startLocal, includeSellerWarning: plan.sellerIncluded });
-
-  return note;
+  return briefingFromDescription(plan.rawDescription, {
+    address: plan.address,
+    appointmentText: plan.startLocal,
+    includeSellerWarning: plan.sellerIncluded
+  });
 }
 
 /**

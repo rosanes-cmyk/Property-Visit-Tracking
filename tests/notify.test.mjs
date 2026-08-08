@@ -111,8 +111,15 @@ console.log('\n=== the visit briefing is a WhatsApp thing, not a Chat thing ==='
  * still appears on the 11am/3pm work queue under Upcoming Visit.
  */
 const PROCESS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/services/process.mjs', import.meta.url), 'utf8');
+/*
+ * The gate, not the builder. This used to pin `const briefing = buildInspectionNote` on the very next
+ * line, and broke when the Chat briefing was switched to the shared builder — on a file that was more
+ * correct than before. What matters is that nothing is built or posted outside the two conditions.
+ */
 check('the briefing post is gated',
-  /if \(!config\.dryRun && config\.chatVisitBriefing\) \{\s*\n\s*const briefing = buildInspectionNote/.test(PROCESS), true);
+  /if \(!config\.dryRun && config\.chatVisitBriefing\) \{/.test(PROCESS), true);
+check('...and the briefing is built inside that gate',
+  PROCESS.indexOf('config.chatVisitBriefing') < PROCESS.indexOf('const briefing = briefingFromDescription'), true);
 const CONFIG = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/config.mjs', import.meta.url), 'utf8');
 check('...and defaults to OFF',
   /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, false\)/.test(CONFIG), true);

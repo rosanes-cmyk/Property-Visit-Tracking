@@ -7,12 +7,12 @@ import {
   readMessage
 } from '../google/gmail.mjs';
 import { findExistingVisit, upsertVisit } from '../google/sheets.mjs';
-import { syncCalendarEvent } from '../google/calendar.mjs';
+import { syncCalendarEvent, buildDescription } from '../google/calendar.mjs';
 import { parseAppointmentTitle } from '../parser/email.mjs';
 import { launchReiContext, ReiSessionExpiredError } from '../rei/browser.mjs';
 import { scrapeReiVisit } from '../rei/scraper.mjs';
 import { notifyChat } from '../utils/notify.mjs';
-import { buildInspectionNote } from '../whatsapp/note.mjs';
+import { briefingFromDescription } from '../whatsapp/note.mjs';
 
 // Pull the phone number out of the REI notification (from the task-title line if possible). REI
 // truncates long titles, so a short "Booked appointment | (707) 484-2558" title survives and the
@@ -203,17 +203,21 @@ export async function processInbox(auth, logger) {
          * Seller phone and email are stripped by notifyChat regardless of what is assembled here.
          */
         if (!config.dryRun && config.chatVisitBriefing) {
-          const briefing = buildInspectionNote({
-            propertyAddress: partialVisit.propertyAddress,
-            sellerName: partialVisit.sellerName,
-            phone: partialVisit.phone,
-            email: partialVisit.email,
-            reiLink: partialVisit.reiLink,
-            leadSource: partialVisit.leadSource,
-            contactStage: partialVisit.contactStage,
-            assignedOwner: partialVisit.assignedOwner,
-            notes: partialVisit.notes
-          }, {
+          /*
+           * The SAME builder, from the SAME text, as the WhatsApp delivery.
+           *
+           * This used to assemble its own version straight from the REI fields, and the client caught
+           * what that cost: "the exact that you are pasting in the whats app that should be as well in
+           * the gc." It carried the address, seller, stage and notes and silently dropped the drive
+           * plan, every PropertyRadar figure, motivation, condition, timeline, price expectation and
+           * the call summary — about half the briefing, with nothing on screen to show it was missing.
+           *
+           * buildDescription() is what goes on the calendar event, so this is the text the WhatsApp
+           * step would later read back off that same event. Building it here rather than re-fetching
+           * the event keeps this one API call lighter and cannot disagree with what was just written.
+           */
+          const briefing = briefingFromDescription(buildDescription(partialVisit), {
+            address: partialVisit.propertyAddress,
             appointmentText: partialVisit.appointmentStartIso
               ? DateTime.fromISO(partialVisit.appointmentStartIso)
                 .setZone(config.calendarTimezone).toFormat('ccc, LLL d, yyyy, h:mm a')

@@ -17,6 +17,8 @@
  *
  * Covered by tests/whatsapp-note.test.mjs.
  */
+import { fieldFromDescription, blockFromDescription, reiLinkFromDescription } from './plan.mjs';
+
 
 import {
   extractPropertyRadar, hasAnyPropertyRadar, extractCallSummary, extractLogistics, mapsLink
@@ -225,4 +227,61 @@ export function containsSellerSensitive(text) {
   }
   if (/price expectation|target price|asking price wasn'?t given/i.test(t)) hits.push('price strategy');
   return hits;
+}
+
+/**
+ * The briefing for one visit, built from the CALENDAR EVENT DESCRIPTION.
+ *
+ * One builder, two callers, so the two deliveries cannot say different things:
+ *
+ *   - the WhatsApp watcher, which reads the description off Juan's calendar
+ *   - the intake, which posts the briefing to Google Chat and holds the description it is about to
+ *     write to that same event
+ *
+ * This lived in watch.mjs, and the Chat copy was assembled separately from the raw REI fields. The
+ * client spotted the result: *"the exact that you are pasting in the whats app that should be as well
+ * in the gc."* They were right — the Chat version carried the address, seller, stage and notes, and
+ * silently dropped the drive plan, every PropertyRadar figure, motivation, condition, timeline, price
+ * expectation and the call summary. About half the briefing, missing with nothing to show it was.
+ *
+ * The description is a SUMMARY written once by the calendar module, so nothing is re-parsed here.
+ * block('Notes') stays only as a fallback for events written before that change.
+ */
+export function briefingFromDescription(description, { address, appointmentText = '', includeSellerWarning = false } = {}) {
+  const from = (label) => fieldFromDescription(description, label);
+  const block = (heading) => blockFromDescription(description, heading);
+
+  return buildInspectionNote({
+    propertyAddress: address,
+    sellerName: from('Seller'),
+    phone: from('Phone'),
+    reiLink: reiLinkFromDescription(description),
+    leadSource: from('Lead Source'),
+    contactStage: from('Contact Stage'),
+    assignedOwner: from('Assigned Owner'),
+
+    leaveOffice: from('Leave Office'),
+    driveTime: from('Drive Time'),
+    mapsLink: from('Maps'),
+
+    estimatedValue: from('Estimated Value'),
+    assessedValue: from('Assessed Value'),
+    openLoansBalance: from('Estimated Open Loans Balance'),
+    estimatedEquity: from('Estimated Equity'),
+    purchaseDate: from('Purchase Date'),
+    occupancy: from('Occupancy'),
+    vestedOwner: from('Vested Owner'),
+
+    motivationLevel: from('Motivation Level'),
+    reasonForSelling: from('Reason for Selling'),
+    propertyCondition: from('Property Condition'),
+    knownIssues: from('Known Issues'),
+    timeline: from('Timeline'),
+    priceExpectation: from('Price Expectation'),
+    callSummary: from('Call Summary'),
+    nextStep: from('Next Step'),
+
+    notes: block('Notes'),
+    nextAction: from('Next Action')
+  }, { appointmentText, includeSellerWarning });
 }

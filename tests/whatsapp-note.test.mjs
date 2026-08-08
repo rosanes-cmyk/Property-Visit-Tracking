@@ -13,8 +13,10 @@
  *      with, because that is the last check before a message goes out.
  */
 import {
-  buildInspectionNote, containsSellerSensitive, TO_FILL_IN
+  buildInspectionNote, containsSellerSensitive, TO_FILL_IN, briefingFromDescription
 } from '../twin-visit-logger-sandbox/src/whatsapp/note.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -256,6 +258,103 @@ check('no audit trail in the note', FROMLOG.includes('Updated by'), false);
 check('no "Show More" leakage', /Show More/.test(FROMLOG), false);
 check('no "Workflow: None"', FROMLOG.includes('Workflow'), false);
 check('and no section built from it', FROMLOG.includes('AFTER THE VISIT'), false);
+
+
+console.log('\n=== One briefing, two deliveries, identical text ===');
+/*
+ * The client: "the exact that you are pasting in the whats app that should be as well in the gc."
+ *
+ * They were right, and it was not a small gap. The Chat copy was assembled separately, straight from the
+ * REI fields, and carried the address, seller, stage and notes — while the WhatsApp one, built from the
+ * calendar description, carried all of that PLUS the drive plan, every PropertyRadar figure, motivation,
+ * condition, timeline, price expectation and the call summary. About half the briefing, missing with
+ * nothing on screen to say so.
+ *
+ * So there is now ONE builder reading ONE text, and these tests hold both halves of that: the fields the
+ * old Chat version dropped, and the fact that both callers go through the same function.
+ */
+const DESC = [
+  'Seller: Sara Davenport',
+  'Phone: (650) 620-4017',
+  'Property: 340 Vallejo Dr, Apt 83, Millbrae, CA, 94030',
+  'Assigned Owner: Juan',
+  'Lead Source: PropertyLeads (PPL)',
+  'Contact Stage: 8 Appointment Booked',
+  'Leave Office: 1:10 PM',
+  'Drive Time: 35 min',
+  'Maps: https://www.google.com/maps/dir/?api=1&destination=340%20Vallejo',
+  'Estimated Value: $1,180,000',
+  'Estimated Open Loans Balance: $410,000',
+  'Estimated Equity: $770,000',
+  'Occupancy: Owner Occupied',
+  'Vested Owner: Sara Davenport',
+  'Motivation Level: High',
+  'Reason for Selling: Relocating to be near family',
+  'Property Condition: Dated kitchen, roof replaced 2019',
+  'Timeline: Wants to close in 30 days',
+  'Price Expectation: Has not given a number',
+  'Call Summary: Thea gathered full property details and set the visit.',
+  'Next Step: Cherry to prepare a preliminary offer',
+  'REI BlackBook: https://my.reiblackbook.com/contacts/20539133'
+].join('\n');
+
+const BRIEF = briefingFromDescription(DESC, {
+  address: '340 Vallejo Dr, Apt 83, Millbrae, CA, 94030',
+  appointmentText: 'Wed, Aug 5, 2026, 2:00 PM'
+});
+
+/* The half that used to reach WhatsApp and not Chat. Named one by one so a regression says WHICH. */
+for (const [what, text] of [
+  ['the drive time', '35 min'],
+  ['when to leave', '1:10 PM'],
+  ['the maps link', 'maps/dir'],
+  ['the estimated value', '$1,180,000'],
+  ['the equity', '$770,000'],
+  ['the loan balance', '$410,000'],
+  ['occupancy', 'Owner Occupied'],
+  ['motivation', 'High'],
+  ['why they are selling', 'Relocating to be near family'],
+  ['the condition', 'roof replaced 2019'],
+  ['their timeline', 'close in 30 days'],
+  ['the price expectation', 'Has not given a number'],
+  ['the call summary', 'Thea gathered full property details']
+]) {
+  check(`the briefing carries ${what}`, BRIEF.includes(text), true);
+}
+/*
+ * "Next Step" is NOT here, and that is a real gap rather than a change: buildInspectionNote collects
+ * call.nextStep and never renders it, so REI's next step has never reached either delivery. Found while
+ * writing this test, reported rather than fixed — adding it changes the wording of the briefing itself,
+ * which is the client's to decide.
+ */
+check('next step is still missing from the briefing (known gap, not a regression)',
+  BRIEF.includes('Cherry to prepare a preliminary offer'), false);
+
+check('...and the seller\'s number, which is the point of it',
+  BRIEF.includes('(650) 620-4017'), true);
+check('...and the appointment as given', BRIEF.includes('Wed, Aug 5, 2026, 2:00 PM'), true);
+
+/* Same input, same output — the property that makes "identical in both places" true at all. */
+check('the same description always gives the same text',
+  briefingFromDescription(DESC, { address: 'X', appointmentText: 'Y' })
+    === briefingFromDescription(DESC, { address: 'X', appointmentText: 'Y' }), true);
+
+/*
+ * And both callers really do go through it. A second builder appearing anywhere is how the two
+ * deliveries drifted apart the first time.
+ */
+const read = (p) => fs.readFileSync(path.resolve('twin-visit-logger-sandbox', p), 'utf8');
+const WATCH = read('src/whatsapp/watch.mjs');
+const PROC = read('src/services/process.mjs');
+check('the WhatsApp side uses the shared builder',
+  /briefingFromDescription\(/.test(WATCH), true);
+check('the Chat side uses the shared builder',
+  /briefingFromDescription\(/.test(PROC), true);
+check('neither builds its own any more',
+  /buildInspectionNote\(/.test(WATCH) || /buildInspectionNote\(/.test(PROC), false);
+/* The Chat side feeds it the very text that goes on the calendar event, so they cannot disagree. */
+check('the Chat side builds it from the calendar description',
+  /briefingFromDescription\(buildDescription\(partialVisit\)/.test(PROC), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
