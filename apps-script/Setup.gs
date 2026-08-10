@@ -184,6 +184,27 @@ function formulaFor_(header, r) {
     case 'Duplicate Address Flag':
       return '=IF(' + A('Normalized Address') + '="","",IF(COUNTIFS(' + R('Normalized Address') + ',' + A('Normalized Address') + ',' + R('Current Stage') + ',"<>Lost / Closed Out")>1,"Duplicate",""))';
     case 'Opportunity Priority':
+      /*
+       * A visit HAPPENING TODAY outranks everything, and the bonus decays as the date recedes.
+       *
+       * The client, pointing at the board's booking button: "if someone added in here this should be prio
+       * and work all ASAP." They are right, and the plain stage score could not express it — Visit
+       * Scheduled sat at 30, below Offer Preparation, so a visit this afternoon ranked beneath paperwork.
+       *
+       * The bonus is TIME-based rather than a flat promotion, and that distinction matters. Simply putting
+       * Visit Scheduled above Verbal Agreement would rank a visit booked for next month above a contract
+       * about to be signed, which is wrong and would teach everyone to ignore the ordering. A visit today
+       * is the thing that genuinely cannot slip: it is at a fixed hour, with somebody expecting you at a
+       * house. A signature is not.
+       *
+       *   today          30 + 75 = 105   above every stage
+       *   tomorrow       30 + 50 =  80   between Active Negotiation and Offer Sent
+       *   within 7 days  30 + 25 =  55
+       *   later          30              unchanged
+       *
+       * Only while Visit Status is still Scheduled — a completed or cancelled visit must not keep the
+       * bonus and sit at the top of the board for the rest of the day.
+       */
       return '=IF(' + A('Property Address') + '="","",IFS(' +
         A('Current Stage') + '="Verbal Agreement",100,' +
         A('Current Stage') + '="Contract Sent",95,' +
@@ -194,7 +215,12 @@ function formulaFor_(header, r) {
         A('Current Stage') + '="Visit Scheduled",30,' +
         A('Current Stage') + '="Long-Term Nurture",10,' +
         A('Current Stage') + '="Contract Signed",5,' +
-        'TRUE,0)+IF(' + A('Days Overdue') + '="",0,MIN(' + A('Days Overdue') + ',20))+IF(' + A('Stalled Status') + '="Yes",5,0))';
+        'TRUE,0)+IF(' + A('Days Overdue') + '="",0,MIN(' + A('Days Overdue') + ',20))+IF(' + A('Stalled Status') + '="Yes",5,0)' +
+        '+IF(AND(' + A('Visit Status') + '="Scheduled",' + A('Visit Date') + '<>""),' +
+        'IFS(' + A('Visit Date') + '=TODAY(),75,' +
+        A('Visit Date') + '=TODAY()+1,50,' +
+        'AND(' + A('Visit Date') + '>TODAY(),' + A('Visit Date') + '<=TODAY()+7),25,' +
+        'TRUE,0),0))';
     case 'Data Quality Status':
       return '=IF(' + A('Property Address') + '="","",IF(' + A('Exception Reason') + '<>"","Exception",IF(' + A('Missing Required Fields') + '<>"","Incomplete","OK")))';
     case 'Exception Reason':

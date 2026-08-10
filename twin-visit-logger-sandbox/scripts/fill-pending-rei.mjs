@@ -34,6 +34,13 @@ import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { acquireLockWaiting } from '../src/utils/lock.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
+import { buildDescription } from '../src/google/calendar.mjs';
+import { briefingFromDescription } from '../src/whatsapp/note.mjs';
+import { notifyChat } from '../src/utils/notify.mjs';
+import { readTasks, pickTaskForVisit, completeTask } from '../src/rei/tasks.mjs';
+import { shouldCompleteTask } from '../src/rei/task-gate.mjs';
+import fsp from 'node:fs/promises';
+import { DateTime } from 'luxon';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -103,7 +110,26 @@ async function main() {
     console.log('No rows are waiting on REI. Everything added from the board has been filled in.');
     return;
   }
-  console.log(`${pending.length} row(s) added on the board and waiting on REI:`);
+  /*
+   * TODAY FIRST. The client: "if the lead was added for today it should be priority... work all ASAP."
+   *
+   * Unsorted, this read the sheet top to bottom, so a visit booked for next month was looked up before
+   * one booked for this afternoon — and each lookup is a real browser page, so the afternoon visit could
+   * wait several minutes behind work that did not matter yet. Rows with no date go last: they cannot be
+   * urgent, and one of them failing must not delay a visit that is hours away.
+   */
+  const dayKey = (r) => {
+    const raw = text(r['Visit Date']);
+    if (!raw) return '9999-99-99';
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(raw);
+    if (us) return `${us[3]}-${String(us[1]).padStart(2, '0')}-${String(us[2]).padStart(2, '0')}`;
+    return '9999-99-99';
+  };
+  pending.sort((a, b) => (dayKey(a) < dayKey(b) ? -1 : dayKey(a) > dayKey(b) ? 1 : a.__rowNumber - b.__rowNumber));
+
+  console.log(`${pending.length} row(s) added on the board and waiting on REI, soonest visit first:`);
   for (const r of pending) {
     console.log(`  row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} · ${text(r['Property Address'])}`);
   }
@@ -220,6 +246,95 @@ async function main() {
       const written = await upsertVisit(auth, visit, match);
       console.log(`    filled row ${written?.rowNumber ?? '?'}` +
         ` · calendar event ${calendarEventId ? 'set' : 'NOT created (no valid time yet)'}`);
+
+      /*
+       * From here on this does exactly what a booking EMAIL does — close the REI task, then post one Chat
+       * message carrying the briefing and what was done.
+       *
+       * It did not, and the inconsistency was the client's to spot: "if someone added in here this should
+       * be prio and work all ASAP to add, book, add calendar, closed, chat, check notes and alert GC." A
+       * visit typed on the board reached the tracker and the calendar and then went silent, so the visitor
+       * never got the briefing and the REI task stayed open. Same event, two different outcomes, depending
+       * on which door it came through.
+       *
+       * The order is the same as the intake's, and for the same reason: the task is closed BEFORE the
+       * message, so the message can report it.
+       */
+      let taskLine = '';
+      if (config.reiCompleteTasks) {
+        try {
+          const visitKey = {
+            phone: visit.phone,
+            date: visit.appointmentStartIso
+              ? DateTime.fromISO(visit.appointmentStartIso).setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
+              : dayKey(row)
+          };
+          const taskPage = await context.newPage();
+          try {
+            await taskPage.goto(visit.reiLink, { waitUntil: 'domcontentloaded' });
+            const reiSelectors = JSON.parse(await fsp.readFile(config.reiSelectorConfig, 'utf8'));
+            const tasks = await readTasks(taskPage, reiSelectors, { timezone: config.calendarTimezone });
+            const task = pickTaskForVisit(tasks, visitKey);
+            const verdict = shouldCompleteTask({
+              enabled: true,
+              apply: true,
+              task,
+              visit: visitKey,
+              rowWritten: Boolean(written),
+              calendarVerified: Boolean(calendarEventId),
+              alreadyComplete: Boolean(task?.complete)
+            });
+            if (!verdict.complete) {
+              taskLine = `⚠️ REI task still open — ${verdict.reason}`;
+            } else {
+              const result = await completeTask(taskPage, reiSelectors, task);
+              // `confirmed` is the row re-read, not the click landing. An unconfirmed close reads as open.
+              taskLine = result.confirmed
+                ? `✅ REI task closed — ${task.title || 'Booked appointment'}`
+                : '⚠️ REI task — the click was not confirmed, check it in REI';
+            }
+          } finally {
+            await taskPage.close().catch(() => {});
+          }
+        } catch (taskError) {
+          taskLine = '⚠️ REI task still open — could not be reached, close it by hand';
+        }
+        console.log(`    ${taskLine}`);
+      }
+
+      if (config.chatVisitBriefing) {
+        /*
+         * The SAME builder and the SAME source text as the email path — buildDescription() is what goes on
+         * the calendar event. Two builders would drift, and the one nobody looks at would be the one the
+         * visitor is reading in the car.
+         */
+        const briefing = briefingFromDescription(buildDescription(visit), {
+          address,
+          appointmentText: visit.appointmentStartIso
+            ? DateTime.fromISO(visit.appointmentStartIso)
+              .setZone(config.calendarTimezone).toFormat('ccc, LLL d, yyyy, h:mm a')
+            : `${typedDate}${typedTime ? ` ${typedTime}` : ''}`.trim()
+        });
+        const done = [
+          calendarEventId
+            ? `✅ Calendar — event on ${config.calendarName || 'the visit calendar'}`
+            : "❌ Calendar — NOT created, this visit is on nobody's day",
+          `✅ Dashboard — row ${written?.rowNumber ?? '?'} in "${config.trackerSheet}"`,
+          taskLine,
+          '➡️ NEXT: create the WhatsApp group, add the team, and paste this briefing'
+        ].filter(Boolean).join('\n');
+
+        const FENCE = String.fromCharCode(96, 96, 96);
+        const fenced = `${FENCE}\n${briefing.split(FENCE).join("'''")}\n${FENCE}`;
+        const posted = await notifyChat(
+          `*Visit booked on the dashboard — ${visit.sellerName || 'seller'}*\n` +
+          'Copy the block below into the visit group.\n\n' +
+          `${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
+          // The seller's number survives here, as in the intake. Same team-only Chat space.
+          { kind: 'ok', keepContactDetails: true }
+        );
+        console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted — check CHAT_WEBHOOK_URL'}`);
+      }
 
       if (mergingInto) {
         /*

@@ -142,7 +142,7 @@ check('...and the PC looks for the same string', FILL.includes(`const PENDING_PR
 check('the runner exists', fs.existsSync('twin-visit-logger-sandbox/scripts/fill-pending.cmd'), true);
 check('the task is installed', INSTALL.includes('-Name "Twin Visit Logger Board Intake"'), true);
 check('...running that runner', INSTALL.includes('-Runner "fill-pending.cmd"'), true);
-check('...every 5 minutes by default', /\[int\]\$PendingIntervalMinutes = 5/.test(INSTALL), true);
+check('...every 2 minutes by default', /\[int\]\$PendingIntervalMinutes = 2/.test(INSTALL), true);
 check('...and can be skipped', /\$SkipPending/.test(INSTALL), true);
 
 const FILLCMD = fs.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending.cmd', 'utf8');
@@ -241,6 +241,50 @@ check('a visitor can be chosen', /data-k="visitor"/.test(DASH), true);
 check('the visitor list comes from the workbook', /visitors: visitors/.test(WEB), true);
 check('...read from the sheet\'s dropdown', /DROPDOWNS\['Assigned Visitor'\]/.test(WEB), true);
 check('...and the page takes it from the server', /if\(d\.visitors&&d\.visitors\.length\)VISITORS=d\.visitors/.test(DASH), true);
+
+
+console.log('\n--- a board booking does everything an email booking does ---');
+/*
+ * It did not, and the client spotted the inconsistency: "if someone added in here this should be prio and
+ * work all ASAP to add, book, add calendar, closed, chat, check notes and alert GC."
+ *
+ * A visit typed on the board reached the tracker and the calendar and then went silent — no briefing, so
+ * the visitor never got one, and the REI task stayed open. The same event had two different outcomes
+ * depending on which door it came through.
+ */
+check('today first, not sheet order', /soonest visit first/.test(FILL), true);
+check('...sorted by the visit date', /pending\.sort\(/.test(FILL), true);
+check('...and undated rows go last', /'9999-99-99'/.test(FILL), true);
+check('the Chat briefing is posted', /await notifyChat\(/.test(FILL), true);
+check('...from the same builder as the email path', /briefingFromDescription\(buildDescription\(visit\)/.test(FILL), true);
+check('...with the seller\'s number kept', /keepContactDetails: true/.test(FILL), true);
+check('the REI task is closed through the same gate', /shouldCompleteTask\(\{/.test(FILL), true);
+check('...only when REI_COMPLETE_TASKS is on', /if \(config\.reiCompleteTasks\) \{/.test(FILL), true);
+check('...matched on phone AND date', /pickTaskForVisit\(tasks, visitKey\)/.test(FILL), true);
+check('...and an unconfirmed click is not called closed',
+  /the click was not confirmed/.test(FILL), true);
+/* Closed BEFORE the message, so the message can report it — same ordering as the intake. */
+check('the task is closed before the Chat message',
+  FILL.indexOf('shouldCompleteTask({') < FILL.indexOf('await notifyChat('), true);
+
+console.log('\n--- a visit today outranks everything ---');
+/*
+ * Visit Scheduled scored 30, below Offer Preparation — so a visit this afternoon ranked beneath
+ * paperwork on the board, the KPIs, the reports and the Chat card, all of which read this one column.
+ *
+ * The bonus is TIME-based rather than a flat promotion on purpose: promoting the stage itself would rank
+ * a visit booked for next month above a contract about to be signed, which is wrong and would teach
+ * everyone to ignore the ordering.
+ */
+const SETUP = fs.readFileSync('apps-script/Setup.gs', 'utf8');
+check('a visit today gets the top bonus', /TODAY\(\),75/.test(SETUP), true);
+check('...tomorrow less', /TODAY\(\)\+1,50/.test(SETUP), true);
+check('...this week less again', /TODAY\(\)\+7\),25/.test(SETUP), true);
+/* A completed or cancelled visit must not keep the bonus and sit at the top all day. */
+check('only while the visit is still Scheduled',
+  /IF\(AND\('.*Visit Status.*"Scheduled"/.test(SETUP.replace(/\n/g, '')), true);
+/* Setup.gs and Code.combined.gs are kept identical by hand; a drift ships one and not the other. */
+check('Code.combined.gs has the same formula', /TODAY\(\),75/.test(COMBINED), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

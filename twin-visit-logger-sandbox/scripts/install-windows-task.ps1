@@ -42,9 +42,10 @@ param(
   # stale row costs something; the rest rotate through the ordinary re-check. The client: "we need to
   # prioritise those 8 buckets... time to time check in the REI of those every hour."
   [int]$BucketIntervalMinutes = 60,
-  # How often to finish the rows a colleague added on the board without an address. Five minutes: the
-  # person who typed it is watching that record, and a run with nothing pending never opens a browser.
-  [int]$PendingIntervalMinutes = 5,
+  # How often to finish the rows a colleague added on the board. TWO minutes, matching the email intake:
+  # the client's instruction was "work all ASAP", the person who typed it is watching that record, and a
+  # run with nothing pending costs one Sheets read and never opens a browser at all.
+  [int]$PendingIntervalMinutes = 2,
   [switch]$SkipPending,
   [switch]$SkipBuckets,
   [switch]$SkipNotes,
