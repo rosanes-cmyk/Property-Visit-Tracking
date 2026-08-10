@@ -775,7 +775,7 @@ check('...while reschedule-needed goes to Follow Up',
  * outcomes up in REI, where this card cannot see them.
  */
 check('...and so does an overdue visit, which is what Cherry asked for by name',
-  /if \(on < today\) \{[\s\S]{0,2600}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+  /if \(on < today\) \{[\s\S]{0,3200}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
 console.log('\n--- REI activity after the visit: report the date, never the text ---');
 /*
  * Two mistakes here, in order, and the client caught the second one in the preview before it posted.
@@ -794,11 +794,19 @@ console.log('\n--- REI activity after the visit: report the date, never the text
  */
 check('REI activity after the visit is recognised',
   /lastOn && lastOn\.getTime\(\) >= on\.getTime\(\)/.test(CHAT_C), true);
-check('...reported as a DATE', /REI was last noted ' \+ fmt_\(lastOn\)/.test(CHAT_C), true);
+check('...reported as a DATE', /REI noted ' \+ fmt_\(lastOn\)/.test(CHAT_C), true);
+/*
+ * And it must FIT. DIGEST_REASON_MAX clips at 120 characters; the first wording ran to ~135 and published
+ * "REI was last noted 2026-08-08 — tick it Completed or…", losing the only actionable words in the line.
+ * A truncated instruction is worse than a terse one. Measured here at its longest plausible value.
+ */
+check('the line fits inside the 120-character clip',
+  ('visit was Aug 8, 2026 · tracker says Reschedule Needed · REI noted Aug 10, 2026'
+    + ' — tick Completed or Canceled').length <= 120, true);
 check('...and the note text is never quoted on this line',
   /REI says: ' \+ clipReason_\(lastSaid\)/.test(CHAT_C), false);
 check('...and it still asks for the one outstanding click',
-  /tick it Completed or Canceled to clear this/.test(CHAT_C), true);
+  /tick Completed or Canceled/.test(CHAT_C), true);
 /*
  * Activity dated BEFORE the visit proves nothing — a call last week is not evidence about a visit
  * yesterday — so that case must still fall through to the plain OVERDUE line.

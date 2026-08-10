@@ -3874,10 +3874,14 @@ function attentionBucket_(rec, today) {
            * was working this lead in REI after the visit date. That is enough to stop implying neglect, and
            * it stops short of saying what happened — which only the person who was there can record.
            */
+          /*
+           * Worded to FIT. DIGEST_REASON_MAX clips at 120 characters, and the first version ran to about
+           * 135 — so it published "REI was last noted 2026-08-08 — tick it Completed or…" and cut off the
+           * only actionable words in the line. A truncated instruction is worse than a terse one.
+           */
           return { key: 'pendingFollowUp', attention: true, sort: at,
-            reason: 'visit was ' + fmt_(on) + ' · the tracker still says ' + (status || 'Scheduled')
-              + ' · REI was last noted ' + fmt_(lastOn)
-              + ' — tick it Completed or Canceled to clear this' };
+            reason: 'visit was ' + fmt_(on) + ' · tracker says ' + (status || 'Scheduled')
+              + ' · REI noted ' + fmt_(lastOn) + ' — tick Completed or Canceled' };
         }
         return { key: 'pendingFollowUp', attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and the tracker still says ' + (status || 'Scheduled')
