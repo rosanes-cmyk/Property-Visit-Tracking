@@ -63,6 +63,18 @@ function text(value) {
   return String(value == null ? '' : value).trim();
 }
 
+/** 1 -> A, 27 -> AA. Exception Reason sits past column Z, so a single letter will not do. */
+function columnLetter(index) {
+  let n = index;
+  let out = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
 /** The phone or REI link a parked row was created with, taken from the row's own columns first. */
 function lookupKeyFor(row) {
   const link = text(row['REI BlackBook Link']);
@@ -246,6 +258,37 @@ async function main() {
       const written = await upsertVisit(auth, visit, match);
       console.log(`    filled row ${written?.rowNumber ?? '?'}` +
         ` · calendar event ${calendarEventId ? 'set' : 'NOT created (no valid time yet)'}`);
+
+      /*
+       * Clear the "waiting" flag, or the finished row is branded an Exception for ever.
+       *
+       * Data Quality Status is a FORMULA reading Exception Reason, so a stale reason does not just look
+       * untidy on the card — the row counts as an exception in every total on the board, and the visitor
+       * reads a red warning telling them the automation has not run on a record it plainly has.
+       *
+       * Only OUR sentence is removed, and a POSSIBLE DUPLICATE warning is deliberately kept: that one is
+       * addressed to a person and is still true after the lookup. The "[since ...]" stamp goes either way,
+       * because it drives the elapsed timer and there is nothing left to time.
+       */
+      const targetRow = written?.rowNumber ?? row.__rowNumber;
+      const priorReason = text(row['Exception Reason']);
+      const withoutStamp = priorReason.replace(/\s*\[since [^\]]*\]/g, '').trim();
+      const cleaned = /^Waiting for the PC to read REI/i.test(withoutStamp) ? '' : withoutStamp;
+      if (priorReason !== cleaned) {
+        const col = headers.indexOf('Exception Reason');
+        if (col >= 0) {
+          const a1 = `${config.trackerSheet}!${columnLetter(col + 1)}${targetRow}`;
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: config.spreadsheetId,
+            range: a1,
+            valueInputOption: 'RAW',
+            requestBody: { values: [[cleaned]] }
+          });
+          console.log(cleaned
+            ? `    kept the duplicate warning, dropped the waiting flag`
+            : `    cleared the "waiting for the PC" flag on row ${targetRow}`);
+        }
+      }
 
       /*
        * From here on this does exactly what a booking EMAIL does — close the REI task, then post one Chat

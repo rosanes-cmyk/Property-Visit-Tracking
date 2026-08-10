@@ -286,5 +286,32 @@ check('only while the visit is still Scheduled',
 /* Setup.gs and Code.combined.gs are kept identical by hand; a drift ships one and not the other. */
 check('Code.combined.gs has the same formula', /TODAY\(\),75/.test(COMBINED), true);
 
+
+console.log('\n--- the finished row stops claiming to be waiting ---');
+/*
+ * The client's screenshot caught this: Sean's card was complete — address, owner, next action — and still
+ * carried "⚠️ Waiting for the PC to read REI and fill in the address and details. [since ...]".
+ *
+ * Not cosmetic. Data Quality Status is a FORMULA reading Exception Reason, so a stale reason makes that
+ * row count as an Exception in every total on the board, permanently, and shows a red warning to the
+ * visitor saying the automation has not run on a record it plainly has.
+ */
+check('the waiting flag is cleared after a fill', /cleared the "waiting for the PC" flag/.test(FILL), true);
+check('...by writing the cell, not hoping upsert does it', /values\.update/.test(FILL), true);
+/*
+ * A POSSIBLE DUPLICATE warning is addressed to a PERSON and is still true after the lookup, so it stays.
+ * Only our own sentence goes.
+ */
+check('only our own sentence is removed',
+  /\^Waiting for the PC to read REI/.test(FILL), true);
+check('...and the duplicate warning survives', /kept the duplicate warning/.test(FILL), true);
+/* The [since] stamp goes either way — it drives the elapsed timer, and there is nothing left to time. */
+check('the since-stamp is always stripped', /\\s\*\\\[since \[\^\\\]\]\*\\\]/.test(FILL), true);
+/*
+ * Exception Reason is past column Z on this sheet, so a one-letter A1 range would write to the wrong
+ * column — silently, into whatever lives at that letter.
+ */
+check('the A1 range handles two-letter columns', /function columnLetter/.test(FILL), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
