@@ -107,18 +107,24 @@ const raw = {
    */
   chatAlerts: (process.env.CHAT_ALERTS || 'on').trim().toLowerCase() !== 'off',
   /*
-   * The full PROPERTY INSPECTION briefing in Google Chat. OFF.
+   * The full PROPERTY INSPECTION briefing in Google Chat. ON.
    *
-   * It went to Chat when WhatsApp was switched off, on the reasoning that the briefing was the valuable part
-   * and should survive. The client has now seen it land there and decided otherwise: "it should be in the
-   * whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable
-   * again."
+   * It was OFF, and that was right at the time: WhatsApp carried the real briefing, the client saw a second
+   * longer copy land in the alerts channel, and said "it should be in the whatsapp only, so we dont need
+   * that in the alert gc, and should be only in the whatsapp if we enable again."
    *
-   * Nothing is lost by it. A new booking still creates the row, the dashboard entry and Juan's calendar
-   * event, and still appears on the 11am/3pm work queue under Upcoming Visit. What stops is a second, longer
-   * copy of the same visit in the alerts channel.
+   * WhatsApp is now gone — the number is restricted — so Chat is not a duplicate of anything; it is the ONLY
+   * place the visitor gets this. The client's instruction: "it will send notif always in the gc about the
+   * notes instead for whats app."
+   *
+   * The default is what changed, and deliberately. Leaving it off meant the one channel the team actually
+   * has had to be switched on by hand in a config file — and the client's answer to being asked to do that
+   * was the right one: "why would i type that, it should be automated." A default that has to be corrected
+   * before the software does its job is a bug with a workaround, not a setting.
+   *
+   * CHAT_VISIT_BRIEFING=false still turns it off, for whenever WhatsApp is genuinely carrying it again.
    */
-  chatVisitBriefing: bool(process.env.CHAT_VISIT_BRIEFING, false),
+  chatVisitBriefing: bool(process.env.CHAT_VISIT_BRIEFING, true),
   /*
    * WHATSAPP_ENABLED=false stops the WhatsApp step dead, wherever it is called from.
    *

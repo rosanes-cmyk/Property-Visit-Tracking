@@ -98,17 +98,19 @@ check('the digest is posted by Apps Script, not by this notifier',
 check('...and nothing in Apps Script reads CHAT_ALERTS',
   /CHAT_ALERTS/.test(fs.readFileSync('apps-script/ChatNotify.gs', 'utf8')), false);
 
-console.log('\n=== the visit briefing is a WhatsApp thing, not a Chat thing ===');
+console.log('\n=== the visit briefing goes to Chat, and does so by default ===');
 /*
- * The client, after seeing a full PROPERTY INSPECTION card arrive in the alerts channel: "it should be in
- * the whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable
- * again."
+ * This was the other way round, correctly, when WhatsApp carried the briefing: the client saw a full
+ * PROPERTY INSPECTION card arrive in the alerts channel as a second, longer copy and said "it should be in
+ * the whatsapp only... and should be only in the whatsapp if we enable again."
  *
- * It was routed to Chat when WhatsApp was switched off — the briefing was the valuable part and the group
- * was not. That reasoning holds for the briefing; it does not make the alerts channel the right home for it.
+ * WhatsApp is gone — the number is restricted — so Chat is not duplicating anything; it is the only place
+ * the visitor gets this: "it will send notif always in the gc about the notes instead for whats app."
  *
- * Nothing is lost: the booking still creates the row, the dashboard entry and Juan's calendar event, and
- * still appears on the 11am/3pm work queue under Upcoming Visit.
+ * The DEFAULT is what this now pins. Leaving it false meant the single channel the team has had to be
+ * switched on by hand in a config file, and the client's reply to being asked to do that was the right one:
+ * "why would i type that, it should be automated." A default that must be corrected before the software
+ * does its job is a bug with a workaround, not a setting.
  */
 const PROCESS = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/services/process.mjs', import.meta.url), 'utf8');
 /*
@@ -121,8 +123,11 @@ check('the briefing post is gated',
 check('...and the briefing is built inside that gate',
   PROCESS.indexOf('config.chatVisitBriefing') < PROCESS.indexOf('const briefing = briefingFromDescription'), true);
 const CONFIG = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/config.mjs', import.meta.url), 'utf8');
-check('...and defaults to OFF',
-  /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, false\)/.test(CONFIG), true);
+check('...and defaults to ON now that Chat is the only channel',
+  /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, true\)/.test(CONFIG), true);
+/* Still switchable off, for whenever WhatsApp is genuinely carrying it again. */
+check('...and can still be turned off explicitly',
+  fs.readFileSync('twin-visit-logger-sandbox/.env.example', 'utf8').includes('CHAT_VISIT_BRIEFING=true'), true);
 /*
  * Its own switch, not borrowed from CHAT_ALERTS. Those are different decisions: CHAT_ALERTS silences the
  * per-lead interruptions, this one decides where the briefing lives. Folding them together would mean
