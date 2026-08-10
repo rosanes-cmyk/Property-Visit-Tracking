@@ -33,6 +33,16 @@ export function mapLeadSource(raw) {
   if (s.includes('facebook') || /\bfb\b/.test(s)) return 'Facebook';
   if (/\bseo\b/.test(s) || s.includes('organic')) return 'SEO';
   if (/\btv\b/.test(s) || s.includes('television')) return 'TV';
+  /*
+   * MLS, and Redfin with it.
+   *
+   * 'MLS' was added to the workbook's dropdown at the client's request — "for lead source / add Mls" — and
+   * without this line nothing could ever reach it: REI writes these as "MLS/ Redfin", which fell through to
+   * blank. A legal value the automation cannot produce is only half the change.
+   *
+   * `\bmls\b` rather than a substring, so a word that merely contains those letters cannot match.
+   */
+  if (/\bmls\b/.test(s) || s.includes('redfin')) return 'MLS';
   return '';   // unknown: leave it blank and let the raw value stand in the note
 }
 

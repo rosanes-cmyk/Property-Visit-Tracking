@@ -177,7 +177,10 @@ function webGetData() {
   // Sent so the booking form offers exactly what the sheet accepts — an illegal value fails the row write.
   const visitors = DROPDOWNS['Assigned Visitor'];
   var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
-  return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors, sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
+  return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors,
+    bookingOwners: bookingList_(BOOKING_OWNERS, owners),
+    bookingVisitors: bookingList_(BOOKING_VISITORS, visitors),
+    leadSources: DROPDOWNS['Lead Source'], sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
@@ -244,6 +247,27 @@ function nextPropertyId_() {
  * Read by scripts/fill-pending-rei.mjs on the PC, which is the half of this that CAN open REI. Change it
  * in both places or rows will sit here forever looking like finished records with an odd address.
  */
+/*
+ * Who the BOOKING FORM offers — a curated shortlist, not the workbook's whole validation list.
+ *
+ * The client, on the Book / reschedule form: "for visitior should only juan an cesar only; for assigneg
+ * owener should thea, cherry, genesis."
+ *
+ * Two different lists on purpose. DROPDOWNS above is what the SHEET accepts, and it has to stay long —
+ * dozens of existing rows hold Kyle, Matt, Arly and the rest, and a value outside the validation fails the
+ * whole row write. These are what a person is offered when booking today, so the common case is two taps
+ * instead of scrolling past people who left.
+ *
+ * Filtered against DROPDOWNS before being sent, so a name added here and forgotten there cannot reach the
+ * form and produce a row write that throws.
+ */
+var BOOKING_OWNERS = ['Thea', 'Cherry', 'Genesis'];
+var BOOKING_VISITORS = ['Juan', 'Cesar'];
+
+function bookingList_(wanted, allowed) {
+  return wanted.filter(function (name) { return allowed.indexOf(name) >= 0; });
+}
+
 /*
  * How a row that still needs its details from REI is marked.
  *
@@ -413,6 +437,22 @@ function webAddRecord_(params) {
         + ' [since ' + new Date().toISOString() + ']';
     }
   }
+  /*
+   * Next Action and its due date are filled HERE, not typed on the form.
+   *
+   * The client: "remove next action tab due date tab." Fair — for a visit that is being booked, both were
+   * always the same two values, and a form that asks for what it already knows is a form people rush.
+   *
+   * They cannot simply be left empty. Next Action is one of the fields Missing Required Fields checks, so a
+   * blank one flags the row on the dashboard and puts it on the work queue as incomplete — the booking
+   * would arrive already looking broken. The due date follows the visit, because that is when the action is
+   * actually due.
+   */
+  if (!params['Next Action']) params['Next Action'] = 'Conduct scheduled visit & log outcome';
+  if (!params['Next Action Due Date']) {
+    params['Next Action Due Date'] = params['Visit Date'] || fmt_(today_());
+  }
+
   const R = new RowAccessor_(sh, row);
   const map = ['Property Address','Seller Name','Phone','Email','Lead Source','Visit Date','Visit Time',
     'Visit Status','Assigned Visitor','Visit Notes','Seller Motivation','Current Stage','Assigned Owner',

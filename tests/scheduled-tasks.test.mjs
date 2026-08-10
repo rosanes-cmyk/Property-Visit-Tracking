@@ -367,5 +367,54 @@ for (const name of ['Sweep Before 0845', 'Sweep Before 1045', 'Sweep Before 1545
   check(`uninstall removes "${name}"`, UNINST.includes(name), true);
 }
 
+
+console.log('\n--- the booking form offers a shortlist, the SHEET still accepts everyone ---');
+/*
+ * The client, on the Book / reschedule form: "for visitior should only juan an cesar only; for assigneg
+ * owener should thea, cherry, genesis... for lead source / add Mls and remove next action tab due date tab."
+ *
+ * Two lists, deliberately. DROPDOWNS is the sheet's DATA VALIDATION and a value outside it fails the whole
+ * row write — so Thea, Genesis and MLS had to be ADDED there, and nobody could be removed: dozens of rows
+ * hold Kyle, Matt and Arly, and the next automated write to any of them would throw.
+ */
+const CFG_GS = fs.readFileSync('apps-script/Config.gs', 'utf8');
+for (const name of ['Thea', 'Genesis']) {
+  check(`the sheet accepts ${name} as an owner`,
+    new RegExp(`'Assigned Owner':[^\\n]*'${name}'`).test(CFG_GS), true);
+}
+check('the sheet accepts MLS as a lead source', /'Lead Source':[^\n]*'MLS'/.test(CFG_GS), true);
+/* Nobody was removed — that is the part that would break existing rows. */
+for (const name of ['Kyle', 'Matt', 'Arly', 'Jonathan']) {
+  check(`...and ${name} is still accepted`,
+    new RegExp(`'Assigned Owner':[^\\n]*'${name}'`).test(CFG_GS), true);
+}
+
+const WEBAPP_GS = fs.readFileSync('apps-script/WebApp.gs', 'utf8');
+check('the form shortlist is Thea, Cherry, Genesis',
+  /var BOOKING_OWNERS = \['Thea', 'Cherry', 'Genesis'\]/.test(WEBAPP_GS), true);
+check('...and the visitors are Juan and Cesar',
+  /var BOOKING_VISITORS = \['Juan', 'Cesar'\]/.test(WEBAPP_GS), true);
+/*
+ * Filtered against the real validation before being sent. A name added to the shortlist and forgotten in
+ * DROPDOWNS would otherwise reach the form and produce a row write that throws — which is the failure this
+ * whole split exists to avoid.
+ */
+check('the shortlist is filtered against what the sheet accepts',
+  /bookingList_\(BOOKING_OWNERS, owners\)/.test(WEBAPP_GS), true);
+
+const DASH_H = fs.readFileSync('apps-script/Dashboard.html', 'utf8');
+check('the form uses the owner shortlist', /BOOKING_OWNERS\.map/.test(DASH_H), true);
+check('the form uses the visitor shortlist', /BOOKING_VISITORS\.map/.test(DASH_H), true);
+check('Next Action is gone from the form', /data-k="next"/.test(DASH_H), false);
+check('Due Date is gone from the form', /data-k="due"/.test(DASH_H), false);
+/*
+ * But they cannot be left EMPTY. Next Action is one of the fields Missing Required Fields checks, so a blank
+ * one flags the row and puts the booking on the work queue as incomplete the moment it is made.
+ */
+check('the server fills Next Action instead',
+  /if \(!params\['Next Action'\]\) params\['Next Action'\] = 'Conduct scheduled visit/.test(WEBAPP_GS), true);
+check('...and dates it to the visit, not to today',
+  /params\['Next Action Due Date'\] = params\['Visit Date'\] \|\|/.test(WEBAPP_GS), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -229,6 +229,15 @@ var TODAY=new Date(); TODAY.setHours(0,0,0,0);
 var OWNERS=['Jonathan','Kyle','Cherry','Juan'];
 /* Filled from the workbook's own dropdown by onData — a value outside it fails the whole row write. */
 var VISITORS=['Juan'];
+/*
+ * The BOOKING shortlists — who the form offers, as opposed to what the sheet accepts.
+ *
+ * The client: "for visitior should only juan an cesar only; for assigneg owener should thea, cherry,
+ * genesis." The long lists stay behind the filter chips at the top, where you still need to find a lead
+ * assigned to somebody who has since left.
+ */
+var BOOKING_OWNERS=['Thea','Cherry','Genesis'];
+var BOOKING_VISITORS=['Juan','Cesar'];
 var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
 var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
 var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
@@ -774,9 +783,8 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
    '<div class="row2"><div class="field"><label>Seller Name *</label><input data-k="seller"></div><div class="field"><label>Phone *</label><input data-k="phone" placeholder="(650) 620-4017"></div></div>'+
    '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
    '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Time</label><input data-k="visitTime" type="time"></div></div>'+
-   '<div class="row2"><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Visitor</label><select data-k="visitor"><option value="">(none)</option>'+VISITORS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
-   '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
-   '<div class="row2"><div class="field"><label>Next Action</label><input data-k="next" value="Conduct scheduled visit & log outcome"></div><div class="field"><label>Due Date</label><input data-k="due" type="date" value="'+todayISO()+'"></div></div>'+
+   '<div class="row2"><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Visitor</label><select data-k="visitor"><option value="">(none)</option>'+BOOKING_VISITORS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
+   '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+BOOKING_OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
   document.body.appendChild(host);function close(){document.body.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
@@ -789,7 +797,7 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
      * phone is what REI is searched BY, so it is the field that cannot be optional.
      */
     if(!g('seller').trim()||!g('phone').trim()){toast('Seller name and phone are both needed');return;}
-    var params={'Seller Name':g('seller'),'Phone':g('phone'),'Visit Time':g('visitTime'),'Assigned Visitor':g('visitor'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner'),'Next Action':g('next'),'Next Action Due Date':g('due')};
+    var params={'Seller Name':g('seller'),'Phone':g('phone'),'Visit Time':g('visitTime'),'Assigned Visitor':g('visitor'),'Lead Source':g('lead'),'REI BlackBook Link':g('rei'),'Visit Date':g('visitDate'),'Visit Status':g('vstatus'),'Current Stage':g('stage'),'Assigned Owner':g('owner')};
     toast('Saving…');runAction('addRecord',null,params,close);};}
 
 /*
@@ -802,7 +810,10 @@ function openAdd(){var host=document.createElement('div');host.className='modal-
  */
 function hydrate(x){return {rowNum:x.rowNum,id:x.id,created:x.created,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
 function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
-function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;
+  if(d.bookingOwners&&d.bookingOwners.length)BOOKING_OWNERS=d.bookingOwners;
+  if(d.bookingVisitors&&d.bookingVisitors.length)BOOKING_VISITORS=d.bookingVisitors;
+  if(d.leadSources&&d.leadSources.length)LEADS=d.leadSources;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
 var TRASH=[];
 function renderTrash(){
   var h='<div class="sec"><h2>Trash — deleted records</h2><span class="n">'+TRASH.length+'</span><span class="rule"></span></div>';

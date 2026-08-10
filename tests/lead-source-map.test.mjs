@@ -70,7 +70,25 @@ const outputs = ['PropertyLeads (PPL)', 'MotivatedLeads (PPL)', 'Bing Ads (PPC)'
   .map(mapLeadSource);
 check('nothing outside the dropdown, blank aside',
   outputs.every((v) => v === '' || ALLOWED.includes(v)), true);
-check('the dropdown has eight values', ALLOWED.length, 8);
+/*
+ * NINE now: 'MLS' was added at the client's request — "for lead source / add Mls" — because REI is feeding
+ * MLS/Redfin leads in and there was no legal value to put them under.
+ *
+ * The count is asserted rather than the contents so that adding a tenth is a deliberate act that updates
+ * this line. Every value mapLeadSource can return still has to be one of them: an illegal value fails the
+ * whole row write, not just its own cell.
+ */
+check('the dropdown has nine values', ALLOWED.length, 9);
+check('...including MLS', ALLOWED.includes('MLS'), true);
+/*
+ * And something has to REACH it. REI writes these as "MLS/ Redfin", which fell through to blank — a legal
+ * value the automation cannot produce is only half the change.
+ */
+check('"MLS/ Redfin" maps to MLS', mapLeadSource('MLS/ Redfin'), 'MLS');
+check('"Redfin" alone maps to MLS', mapLeadSource('Redfin'), 'MLS');
+check('"mls" in any case maps to MLS', mapLeadSource('mls listing'), 'MLS');
+/* Word-boundary, so a word that merely contains those letters does not match. */
+check('"mlsomething" is not MLS', mapLeadSource('mlsomething'), '');
 // A whole-word guard: 'ppc' must not fire on a word that merely contains it.
 check('"clippings" is not PPC', mapLeadSource('newspaper clippings'), '');
 check('"stv" is not TV', mapLeadSource('stvincent'), '');

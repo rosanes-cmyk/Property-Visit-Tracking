@@ -90,7 +90,16 @@ const DROPDOWNS = {
   'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
   // Both lists carry every real name found in the live workbook, so an import does not fail
   // validation. 'Juan Diaz' and 'Juan' are both present because the old sheet used both.
-  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','Arly','Matt','Darius','Danica','Team','Matt/Arly','Matt/Juan','Cherry/Matt'],
+  /*
+   * ADDED, never replaced: 'Thea' and 'Genesis'.
+   *
+   * The client wants the booking form to offer Thea, Cherry and Genesis only — but this list is the sheet's
+   * DATA VALIDATION, and a value outside it fails the whole row write, not just its own cell. Deleting the
+   * names already in use would break every existing row that holds one, and the next automated write to any
+   * of them would throw. So the workbook keeps the long list and the FORM offers the short one
+   * (BOOKING_OWNERS below).
+   */
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','Arly','Matt','Darius','Danica','Team','Matt/Arly','Matt/Juan','Cherry/Matt','Thea','Genesis'],
   'Assigned Visitor': ['Juan','Juan Diaz','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
   'Gift Approved By': ['Cherry','Juan'],
@@ -98,7 +107,8 @@ const DROPDOWNS = {
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
-  'Lead Source': ['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'],
+  // 'MLS' added at the client's request. REI writes it as "MLS/ Redfin", which lead-source-map.mjs maps in.
+  'Lead Source': ['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads','MLS'],
   'Offer Status': ['Not Started','In Preparation','Sent','Countered','Accepted','Rejected','Withdrawn'],
   'Occupancy Status': ['Owner-Occupied','Tenant-Occupied','Vacant','Unknown'],
   'Property Condition': ['Excellent','Good','Fair','Poor','Distressed'],

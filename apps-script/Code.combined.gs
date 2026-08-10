@@ -153,7 +153,16 @@ const DROPDOWNS = {
   'Current Stage': ['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'],
   // Both lists carry every real name found in the live workbook, so an import does not fail
   // validation. 'Juan Diaz' and 'Juan' are both present because the old sheet used both.
-  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','Arly','Matt','Darius','Danica','Team','Matt/Arly','Matt/Juan','Cherry/Matt'],
+  /*
+   * ADDED, never replaced: 'Thea' and 'Genesis'.
+   *
+   * The client wants the booking form to offer Thea, Cherry and Genesis only — but this list is the sheet's
+   * DATA VALIDATION, and a value outside it fails the whole row write, not just its own cell. Deleting the
+   * names already in use would break every existing row that holds one, and the next automated write to any
+   * of them would throw. So the workbook keeps the long list and the FORM offers the short one
+   * (BOOKING_OWNERS below).
+   */
+  'Assigned Owner': ['Jonathan','Kyle','Cherry','Juan','Arly','Matt','Darius','Danica','Team','Matt/Arly','Matt/Juan','Cherry/Matt','Thea','Genesis'],
   'Assigned Visitor': ['Juan','Juan Diaz','Kyle','Cherry','Jonathan','Cesar','Jose Herrera','Manny Morales','Lily','Alan Hernandez'],
   'Gift Approval Owner': ['Cherry','Juan'],
   'Gift Approved By': ['Cherry','Juan'],
@@ -161,7 +170,8 @@ const DROPDOWNS = {
   'Final Disposition': ['Contracted','Lost','Long-Term Nurture','Closed Out'],
   'Gift Status': ['Not Reviewed','Recommended','Approved','Sent','Not Appropriate'],
   'Blocker': ['Price','Title','Tenant','Family','Access','Timing','Documents','Property Condition','Seller Unresponsive','Other'],
-  'Lead Source': ['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'],
+  // 'MLS' added at the client's request. REI writes it as "MLS/ Redfin", which lead-source-map.mjs maps in.
+  'Lead Source': ['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads','MLS'],
   'Offer Status': ['Not Started','In Preparation','Sent','Countered','Accepted','Rejected','Withdrawn'],
   'Occupancy Status': ['Owner-Occupied','Tenant-Occupied','Vacant','Unknown'],
   'Property Condition': ['Excellent','Good','Fair','Poor','Distressed'],
@@ -959,7 +969,23 @@ function onEditInstallable(e) {
     const row = e.range.getRow();
     if (row < CFG.FIRST_DATA_ROW) return;
     const editedCol = e.range.getColumn();
-    const R = new RowAccessor_(sh, row);
+    /*
+   * Next Action and its due date are filled HERE, not typed on the form.
+   *
+   * The client: "remove next action tab due date tab." Fair — for a visit that is being booked, both were
+   * always the same two values, and a form that asks for what it already knows is a form people rush.
+   *
+   * They cannot simply be left empty. Next Action is one of the fields Missing Required Fields checks, so a
+   * blank one flags the row on the dashboard and puts it on the work queue as incomplete — the booking
+   * would arrive already looking broken. The due date follows the visit, because that is when the action is
+   * actually due.
+   */
+  if (!params['Next Action']) params['Next Action'] = 'Conduct scheduled visit & log outcome';
+  if (!params['Next Action Due Date']) {
+    params['Next Action Due Date'] = params['Visit Date'] || fmt_(today_());
+  }
+
+  const R = new RowAccessor_(sh, row);
     if (!R.get('Property Address')) return; // ignore blank rows
 
     const header = HEADERS[editedCol - 1];
@@ -1553,7 +1579,10 @@ function webGetData() {
   // Sent so the booking form offers exactly what the sheet accepts — an illegal value fails the row write.
   const visitors = DROPDOWNS['Assigned Visitor'];
   var email = ''; try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
-  return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors, sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
+  return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors,
+    bookingOwners: bookingList_(BOOKING_OWNERS, owners),
+    bookingVisitors: bookingList_(BOOKING_VISITORS, visitors),
+    leadSources: DROPDOWNS['Lead Source'], sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
@@ -1614,6 +1643,27 @@ function nextPropertyId_() {
 /** Create a NEW record from the website. Writes into the first empty row (grid never shrinks),
  *  stamps Property ID + Source=Manual + Created Date, then runs the visit-status handler so the
  *  same automation fires. Never contacts sellers. */
+/*
+ * Who the BOOKING FORM offers — a curated shortlist, not the workbook's whole validation list.
+ *
+ * The client, on the Book / reschedule form: "for visitior should only juan an cesar only; for assigneg
+ * owener should thea, cherry, genesis."
+ *
+ * Two different lists on purpose. DROPDOWNS above is what the SHEET accepts, and it has to stay long —
+ * dozens of existing rows hold Kyle, Matt, Arly and the rest, and a value outside the validation fails the
+ * whole row write. These are what a person is offered when booking today, so the common case is two taps
+ * instead of scrolling past people who left.
+ *
+ * Filtered against DROPDOWNS before being sent, so a name added here and forgotten there cannot reach the
+ * form and produce a row write that throws.
+ */
+var BOOKING_OWNERS = ['Thea', 'Cherry', 'Genesis'];
+var BOOKING_VISITORS = ['Juan', 'Cesar'];
+
+function bookingList_(wanted, allowed) {
+  return wanted.filter(function (name) { return allowed.indexOf(name) >= 0; });
+}
+
 /*
  * How a row that still needs its details from REI is marked.
  *
