@@ -1641,5 +1641,30 @@ for (const field of REI_WINS.filter((f) => /Amount$/.test(f))) {
   check(`${field} is normalised`, sameFieldValue(field, '$500,000', '500000'), true);
 }
 
+
+console.log('\n=== every helper a script calls must exist in it ===');
+/*
+ * scripts/recheck-rei.mjs called text(row['Assigned Owner']) in the unmapped-owner report and nothing in
+ * the file defined or imported `text`. It crashed the sweep mid-run on Joe Dickerson — the first lead
+ * whose REI owner the workbook's dropdown does not hold — after writing his changes and before reaching
+ * Pam Long, Guadalupe Silva and everything after them.
+ *
+ * `node --check` cannot catch this: a missing identifier is a ReferenceError at RUN time, not a syntax
+ * error. So the guard is here, and it is cheap: for each bare helper call in the scripts that run
+ * unattended, assert the name is defined or imported in the same file.
+ */
+const scriptFiles = ['scripts/recheck-rei.mjs', 'scripts/fill-pending-rei.mjs', 'scripts/audit-notes.mjs'];
+for (const file of scriptFiles) {
+  const src = fs.readFileSync(new URL(`../twin-visit-logger-sandbox/${file}`, import.meta.url), 'utf8');
+  for (const helper of ['text', 'dayKey', 'columnLetter']) {
+    const called = new RegExp(`(?<![.\\w])${helper}\\(`).test(src);
+    if (!called) continue;
+    const declared = new RegExp(
+      `function ${helper}\\(|const ${helper} =|let ${helper} =|import \\{[^}]*\\b${helper}\\b`
+    ).test(src);
+    check(`${file} defines ${helper}() before calling it`, declared, true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

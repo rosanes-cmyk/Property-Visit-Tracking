@@ -348,6 +348,19 @@ if (!release) {
 }
 
 // launchReiContext returns the context itself; callers close it. Matches add-visit-from-rei.
+/*
+ * A local `text` helper, because this file used one it never had.
+ *
+ * The unmapped-owner report called text(row['Assigned Owner']) and nothing in this script defined or
+ * imported it. `node --check` passes — a missing identifier is a ReferenceError at RUN time, not a syntax
+ * error — so it sat here until a lead finally took that branch. Joe Dickerson did: REI assigns him to a
+ * name the workbook's dropdown does not hold, and the sweep crashed mid-run, after writing his changes
+ * and before reaching Pam Long, Guadalupe Silva and everything after them.
+ */
+function text(value) {
+  return String(value == null ? '' : value).trim();
+}
+
 const context = await launchReiContext();
 const changedRows = [];
 // Leads where REI never answered the question, collected so the closing summary cannot claim
