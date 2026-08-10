@@ -182,7 +182,7 @@ check('an ISO date with a time on it', dateReason('2026-08-12T14:30:00.000Z'), '
  */
 check("Jose's Aug 1 reads as Aug 1, overdue",
   dateReason('2026-08-01'),
-  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled — nobody has recorded what happened');
+  'OVERDUE — visit was Aug 1, 2026 and the tracker still says Scheduled — mark it Completed or Canceled to clear this');
 check('...and lands in Follow Up', dateBucket('2026-08-01'), 'pendingFollowUp');
 /* A serial and a real Date still work — this widened what is accepted, it did not replace it. */
 check('a serial still works', dateBucket(46246), 'upcomingVisit');
@@ -211,7 +211,7 @@ check('a time is included when there is one',
  */
 check('a passed visit stays visible, flagged OVERDUE',
   reason({ ...BASE, 'Visit Date': day(2026, 8, 1) }),
-  'OVERDUE — visit was Aug 1, 2026 and is still marked Scheduled — nobody has recorded what happened');
+  'OVERDUE — visit was Aug 1, 2026 and the tracker still says Scheduled — mark it Completed or Canceled to clear this');
 check('...and it moves to Follow Up, out of the visit list',
   bucket({ ...BASE, 'Visit Date': day(2026, 8, 1) }), 'pendingFollowUp');
 check("...while today's visit stays upcoming", bucket({ ...BASE, 'Visit Date': TODAY }), 'upcomingVisit');
@@ -768,8 +768,16 @@ check('a cancelled visit is routed there, not to its stage bucket',
  */
 check('...while reschedule-needed goes to Follow Up',
   /if \(status === 'Reschedule Needed'\) \{\s*\n\s*return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+/*
+ * The comment block between the `if` and the `return` is deliberate and load-bearing, so this matches
+ * across it rather than demanding the two lines be adjacent. It records why the wording changed: the old
+ * "nobody has recorded what happened" was read in the team channel by a colleague who HAD written the
+ * outcomes up in REI, where this card cannot see them.
+ */
 check('...and so does an overdue visit, which is what Cherry asked for by name',
-  /if \(on < today\) \{\s*\n\s*return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+  /if \(on < today\) \{[\s\S]{0,1400}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+check('...and the reason names the tracker, never a person',
+  /the tracker still says/.test(CHAT_C) && !/nobody has recorded what happened' \}/.test(CHAT_C), true);
 /*
  * The safety line: nothing here writes Current Stage. Moving a card is a display decision; closing a lead
  * out is a business one, and the automation still refuses the second.

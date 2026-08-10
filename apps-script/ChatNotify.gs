@@ -729,9 +729,20 @@ function attentionBucket_(rec, today) {
        * count means what it says.
        */
       if (on < today) {
+        /*
+         * The wording says what THE TRACKER holds, never what a person did or did not do.
+         *
+         * It used to end "— nobody has recorded what happened", and a colleague read that in the team
+         * channel about five leads they had written up properly in REI that morning. They were angry, and
+         * they were right to be: this card can only see the workbook. An outcome sitting in REI's notes is
+         * invisible to it, so the old line accused somebody of negligence on evidence it did not have.
+         *
+         * A work queue is read by the people whose work it lists. It may say a field is empty; it may not
+         * say who failed to fill it.
+         */
         return { key: 'pendingFollowUp', attention: true, sort: at,
-          reason: 'OVERDUE — visit was ' + fmt_(on) + ' and is still marked ' + (status || 'Scheduled')
-            + ' — nobody has recorded what happened' };
+          reason: 'OVERDUE — visit was ' + fmt_(on) + ' and the tracker still says ' + (status || 'Scheduled')
+            + ' — mark it Completed or Canceled to clear this' };
       }
       var when = on.getTime() === today.getTime() ? 'TODAY' : fmt_(on);
       var time = timeCell_(rec['Visit Time']);
