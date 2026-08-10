@@ -775,32 +775,36 @@ check('...while reschedule-needed goes to Follow Up',
  * outcomes up in REI, where this card cannot see them.
  */
 check('...and so does an overdue visit, which is what Cherry asked for by name',
-  /if \(on < today\) \{[\s\S]{0,1400}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
-console.log('\n--- an outcome already recorded in REI is not asked for again ---');
+  /if \(on < today\) \{[\s\S]{0,2600}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+console.log('\n--- REI activity after the visit: report the date, never the text ---');
 /*
- * The client, three times over: "my colleague already updated that in REI." The card kept listing five
- * leads under "Outcome Not Known Yet" and saying nobody had recorded anything.
+ * Two mistakes here, in order, and the client caught the second one in the preview before it posted.
  *
- * The wording was the visible fault; this was the real one. The re-check copies REI's latest note into
- * Last Contact Result and stamps Last Contact Date — so the answer was already in the workbook, one
- * column away from the rule that declared it missing. A card that ignores the answer and then blames
- * people for not answering is worse than no card at all.
+ * First the rule never looked at REI at all: it went from "the date has passed" to "nobody has recorded
+ * what happened" and published that to the people it was accusing. Their reply, three times: "my
+ * colleague already updated that in REI."
+ *
+ * So I quoted REI's latest note — and that was wrong too. Last Contact Result holds whatever REI noted
+ * MOST RECENTLY, which for Joe Dickerson was "107 Virginia Street, Hayward, CA 94544 Offer deadline: No
+ * offer deadline stated in MLS" — listing boilerplate. Prefixed "REI says:" it reads as the visit
+ * outcome. The client: "we should check first if that is accurate, it will confuse the reader in the gc."
+ *
+ * Nothing here can tell an outcome from a comp note. So the claim is narrowed to what is provable —
+ * somebody was working the lead in REI after the visit — and the text is not quoted at all.
  */
-check('a contact result dated after the visit is treated as the outcome',
-  /lastSaid && lastOn && lastOn\.getTime\(\) >= on\.getTime\(\)/.test(CHAT_C), true);
-check('...and the line quotes REI rather than accusing anyone',
-  /REI says: ' \+ clipReason_\(lastSaid\)/.test(CHAT_C), true);
-check('...asking only for the click that is genuinely outstanding',
-  /tick it Completed on the dashboard/.test(CHAT_C), true);
+check('REI activity after the visit is recognised',
+  /lastOn && lastOn\.getTime\(\) >= on\.getTime\(\)/.test(CHAT_C), true);
+check('...reported as a DATE', /REI was last noted ' \+ fmt_\(lastOn\)/.test(CHAT_C), true);
+check('...and the note text is never quoted on this line',
+  /REI says: ' \+ clipReason_\(lastSaid\)/.test(CHAT_C), false);
+check('...and it still asks for the one outstanding click',
+  /tick it Completed or Canceled to clear this/.test(CHAT_C), true);
 /*
- * Dated BEFORE the visit proves nothing — a call last week is not the outcome of a visit yesterday — so
- * that case must still fall through to the OVERDUE line.
+ * Activity dated BEFORE the visit proves nothing — a call last week is not evidence about a visit
+ * yesterday — so that case must still fall through to the plain OVERDUE line.
  */
-check('an older contact result does not count as the outcome',
+check('older activity does not count',
   CHAT_C.indexOf('lastOn.getTime() >= on.getTime()') < CHAT_C.indexOf('OVERDUE — visit was'), true);
-/* It stays listed: Visit Status is still wrong, and the dashboard, reports and counts all read it. */
-check('...and the lead is still listed for the one click',
-  /reason: 'visit was ' \+ fmt_\(on\) \+ ' · REI says: /.test(CHAT_C), true);
 
 check('...and the reason names the tracker, never a person',
   /the tracker still says/.test(CHAT_C) && !/nobody has recorded what happened' \}/.test(CHAT_C), true);

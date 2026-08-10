@@ -331,11 +331,25 @@ function attentionBucket_(rec, today) {
          * what REI says rather than an accusation.
          */
         var lastOn = dateCell_(rec['Last Contact Date']);
-        var lastSaid = String(rec['Last Contact Result'] || '').trim();
-        if (lastSaid && lastOn && lastOn.getTime() >= on.getTime()) {
+        if (lastOn && lastOn.getTime() >= on.getTime()) {
+          /*
+           * The DATE of REI's latest note, never its text.
+           *
+           * Quoting the text was my first attempt and it was wrong. Last Contact Result holds whatever REI
+           * noted most recently, which for Joe Dickerson was "107 Virginia Street, Hayward, CA 94544 Offer
+           * deadline: No offer deadline stated in MLS" — listing boilerplate. Prefixed with "REI says:" it
+           * reads as the visit outcome, which is precisely the confusion this line is meant to remove. The
+           * client caught it in the preview before it ever posted.
+           *
+           * Nothing here can tell an outcome from a comp note, and guessing from prose is how a card starts
+           * asserting things nobody checked. So the claim is narrowed to what is actually provable: somebody
+           * was working this lead in REI after the visit date. That is enough to stop implying neglect, and
+           * it stops short of saying what happened — which only the person who was there can record.
+           */
           return { key: 'pendingFollowUp', attention: true, sort: at,
-            reason: 'visit was ' + fmt_(on) + ' · REI says: ' + clipReason_(lastSaid)
-              + ' — tick it Completed on the dashboard to clear this' };
+            reason: 'visit was ' + fmt_(on) + ' · the tracker still says ' + (status || 'Scheduled')
+              + ' · REI was last noted ' + fmt_(lastOn)
+              + ' — tick it Completed or Canceled to clear this' };
         }
         return { key: 'pendingFollowUp', attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and the tracker still says ' + (status || 'Scheduled')
