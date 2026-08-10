@@ -314,16 +314,29 @@ function attentionBucket_(rec, today) {
        */
       if (on < today) {
         /*
-         * The wording says what THE TRACKER holds, never what a person did or did not do.
+         * If somebody HAS recorded the outcome, say so and quote it. Do not ask again.
          *
-         * It used to end "— nobody has recorded what happened", and a colleague read that in the team
+         * The old line ended "— nobody has recorded what happened", and a colleague read that in the team
          * channel about five leads they had written up properly in REI that morning. They were angry, and
-         * they were right to be: this card can only see the workbook. An outcome sitting in REI's notes is
-         * invisible to it, so the old line accused somebody of negligence on evidence it did not have.
+         * they were right to be.
          *
-         * A work queue is read by the people whose work it lists. It may say a field is empty; it may not
-         * say who failed to fill it.
+         * The deeper fault was not the wording, it was that this rule never looked. The re-check copies
+         * REI's latest note into Last Contact Result and stamps Last Contact Date, so their work was
+         * already sitting in the workbook — one column away from the rule that declared it missing. A card
+         * that ignores the answer and then blames people for not answering is worse than no card.
+         *
+         * So: a contact result dated ON OR AFTER the visit is treated as the outcome. It is still listed,
+         * because Visit Status remains wrong and the dashboard, the reports and the counts all read that
+         * field — but the ask becomes the one click that is genuinely outstanding, and the line carries
+         * what REI says rather than an accusation.
          */
+        var lastOn = dateCell_(rec['Last Contact Date']);
+        var lastSaid = String(rec['Last Contact Result'] || '').trim();
+        if (lastSaid && lastOn && lastOn.getTime() >= on.getTime()) {
+          return { key: 'pendingFollowUp', attention: true, sort: at,
+            reason: 'visit was ' + fmt_(on) + ' · REI says: ' + clipReason_(lastSaid)
+              + ' — tick it Completed on the dashboard to clear this' };
+        }
         return { key: 'pendingFollowUp', attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and the tracker still says ' + (status || 'Scheduled')
             + ' — mark it Completed or Canceled to clear this' };

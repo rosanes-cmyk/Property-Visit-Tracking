@@ -776,6 +776,32 @@ check('...while reschedule-needed goes to Follow Up',
  */
 check('...and so does an overdue visit, which is what Cherry asked for by name',
   /if \(on < today\) \{[\s\S]{0,1400}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+console.log('\n--- an outcome already recorded in REI is not asked for again ---');
+/*
+ * The client, three times over: "my colleague already updated that in REI." The card kept listing five
+ * leads under "Outcome Not Known Yet" and saying nobody had recorded anything.
+ *
+ * The wording was the visible fault; this was the real one. The re-check copies REI's latest note into
+ * Last Contact Result and stamps Last Contact Date — so the answer was already in the workbook, one
+ * column away from the rule that declared it missing. A card that ignores the answer and then blames
+ * people for not answering is worse than no card at all.
+ */
+check('a contact result dated after the visit is treated as the outcome',
+  /lastSaid && lastOn && lastOn\.getTime\(\) >= on\.getTime\(\)/.test(CHAT_C), true);
+check('...and the line quotes REI rather than accusing anyone',
+  /REI says: ' \+ clipReason_\(lastSaid\)/.test(CHAT_C), true);
+check('...asking only for the click that is genuinely outstanding',
+  /tick it Completed on the dashboard/.test(CHAT_C), true);
+/*
+ * Dated BEFORE the visit proves nothing — a call last week is not the outcome of a visit yesterday — so
+ * that case must still fall through to the OVERDUE line.
+ */
+check('an older contact result does not count as the outcome',
+  CHAT_C.indexOf('lastOn.getTime() >= on.getTime()') < CHAT_C.indexOf('OVERDUE — visit was'), true);
+/* It stays listed: Visit Status is still wrong, and the dashboard, reports and counts all read it. */
+check('...and the lead is still listed for the one click',
+  /reason: 'visit was ' \+ fmt_\(on\) \+ ' · REI says: /.test(CHAT_C), true);
+
 check('...and the reason names the tracker, never a person',
   /the tracker still says/.test(CHAT_C) && !/nobody has recorded what happened' \}/.test(CHAT_C), true);
 /*
