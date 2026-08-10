@@ -29,7 +29,7 @@ function onOpen() {
     .addItem('💬 Send "needs attention" digest now', 'sendAttentionDigestNow')
     .addItem('💬 Turn ON morning visit digest (9am)', 'installChatDigestTrigger')
     .addItem('💬 Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
-    .addItem('💬 Turn ON work-queue digest (11am + 3pm)', 'installChatAttentionTrigger')
+    .addItem('💬 Turn ON work-queue digest (9am + 11am + 4pm)', 'installChatAttentionTrigger')
     .addItem('💬 Turn OFF morning visit digest', 'removeChatDigestTrigger')
     .addItem('💬 Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
     .addItem('💬 Turn OFF attention digest', 'removeChatAttentionTrigger')
@@ -3552,6 +3552,57 @@ function removeChatNewBookingTrigger() {
  * the message is that she can see what to start on without scrolling. The count in the heading is
  * always the true total, so nothing is hidden by shortening the list; the section says so itself.
  */
+/**
+ * How fresh REI is, read from the sweep's own stamp in the Automation Log.
+ *
+ * The client, after a card told the whole team nobody had recorded five outcomes their colleague had
+ * written up in REI that morning: "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * Because the sweep and this card are on separate timers with nothing between them. The card published
+ * whatever the sheet happened to hold, with no way to know it was stale and no way to say so. The client
+ * had asked about exactly this earlier — "but all lead in 8 bucket should be chekd before sending the notif
+ * right?" — and the sequencing was described and never built.
+ *
+ * This is the honest half of the fix: the sweep runs 15 minutes before each posting and records when it
+ * finished; this reads that line. When it is recent the card says so, and when it is not the card says THAT
+ * instead of implying freshness it does not have. A reader who knows the data is two hours old can discount
+ * it; a reader who is not told cannot.
+ *
+ * Deliberately never blocks the post. A queue that goes silent because a sweep failed is a queue nobody can
+ * rely on, and the leads on it still need working.
+ */
+function reiFreshness_() {
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName('Automation Log');
+    if (!sh) return '';
+    var last = sh.getLastRow();
+    if (last < 2) return '';
+    /*
+     * The tail only. This log grows all day, and a card must not read thousands of rows to print six words
+     * — the sweep's line is always among the most recent when it has run at all.
+     */
+    var from = Math.max(2, last - 120);
+    var vals = sh.getRange(from, 1, last - from + 1, 2).getValues();
+    var when = null;
+    for (var i = vals.length - 1; i >= 0; i--) {
+      if (String(vals[i][1]).trim().toUpperCase() !== 'SWEEP') continue;
+      var d = new Date(vals[i][0]);
+      if (!isNaN(d.getTime())) { when = d; }
+      break;
+    }
+    if (!when) return ' · REI freshness unknown';
+    var mins = Math.round((Date.now() - when.getTime()) / 60000);
+    var clock = Utilities.formatDate(when, Session.getScriptTimeZone(), 'h:mm a');
+    /*
+     * Ninety minutes, because the sweep runs hourly: anything older means a sweep was missed, not merely
+     * that this card came a little after one.
+     */
+    return mins <= 90 ? ' · REI checked ' + clock : ' · REI last checked ' + clock + ' — may be out of date';
+  } catch (e) {
+    return '';                                    // never let a stamp stop the queue going out
+  }
+}
+
 var DIGEST_LINES_PER_SECTION = 5;
 
 /*
@@ -4145,6 +4196,7 @@ function sendAttentionDigestToChat() {
     header: {
       title: 'Work queue — ' + leads + ' lead(s)' + (gifts ? ' · ' + gifts + ' gift(s) to action' : ''),
       subtitle: fmt_(today_()) + ' · start with ' + top.title + ' (' + found[top.key].length + ')'
+        + reiFreshness_()
     },
     sections: [{ widgets: widgets }]
   } }] });
@@ -4166,9 +4218,19 @@ function sendAttentionDigestNow() {
  * Two posts a day, at the client's request: "we will update start from shift before lunch and then few
  * hours before we go home the notif."
  *
- * 11am and 3pm. The first lands while there is still a morning left to act in — a visit confirmed at 11
- * can still be rearranged; the same news at 3 cannot. The second is late enough that the day's work is
- * reflected in it and early enough that somebody can still make a call before leaving.
+ * 9am, 11am and 4pm — the client's shift, in their own words: "we start shift 8 am california time, so
+ * before you notif the gc in 9 check the all bucket, and then before lunch 12 in 11 should be cheked again,
+ * and then our shift end 5, before 5 its already checked so 4pm will notf."
+ *
+ * 9 sets the day up while everything is still movable. 11 catches what the morning changed, before lunch
+ * splits the team. 4 lands with an hour left, so the wording there asks what HAPPENED rather than what is
+ * coming — at 4 o'clock a visit booked for the afternoon has either gone ahead or not.
+ *
+ * It was 11 and 3. The 3pm slot was too late to act on a morning visit and too early to know the outcome of
+ * an afternoon one, which is the worst of both.
+ *
+ * Apps Script fires a daily trigger somewhere inside the named HOUR, not on the minute, so the sweep is
+ * scheduled 15 minutes before each one and the card prints when REI was actually last read.
  *
  * Change DIGEST_HOURS to move them. Hours are in the SPREADSHEET'S timezone (File > Settings), not the
  * reader's, so a team spread across timezones sees one schedule rather than each their own.
@@ -4176,7 +4238,7 @@ function sendAttentionDigestNow() {
  * Apps Script fires a daily trigger somewhere inside the named hour rather than on the minute. So the
  * message arrives between 11:00 and 12:00, not at 11:00 exactly, and that cannot be tightened from here.
  */
-var DIGEST_HOURS = [11, 15];
+var DIGEST_HOURS = [9, 11, 16];
 
 function installChatAttentionTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {

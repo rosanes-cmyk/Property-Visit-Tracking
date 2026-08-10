@@ -123,6 +123,26 @@ if (-not $SkipRecheck) {
 if (-not $SkipBuckets) {
   New-VisitTask -Name "Twin Visit Logger Bucket Sweep" -Runner "recheck-buckets.cmd" `
     -Every $BucketIntervalMinutes -What "re-check the 8 work-queue buckets in REI"
+
+  <#
+    Three extra sweeps, timed 15 minutes AHEAD of the 9am, 11am and 4pm Chat cards.
+
+    The hourly sweep alone was not enough, and the client said why: "im asking why did the sysytem nofit
+    the gc nit cheking of those?" — a card went out claiming nobody had recorded five outcomes their
+    colleague had written up in REI that morning. The sweep and the card were on separate clocks with
+    nothing between them, so whether the card was fresh was luck.
+
+    These make it deliberate. Fixed daily times rather than an interval, because they exist to sit in
+    front of a specific posting. The hourly sweep stays for the rest of the day, and a sweep with nothing
+    due exits in seconds without opening a browser.
+  #>
+  foreach ($at in @("08:45", "10:45", "15:45")) {
+    $name = "Twin Visit Logger Sweep Before $($at -replace ':', '')"
+    $cmd = 'wscript.exe "' + $launcher + '" "recheck-buckets.cmd"'
+    & schtasks.exe /Create /SC DAILY /ST $at /TN $name /TR $cmd /F | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$name' failed with exit code $LASTEXITCODE." }
+    Write-Host ("  {0,-38} daily at {1}   sweep before the Chat card" -f $name, $at)
+  }
 } else {
   Write-Host "  (bucket sweep skipped: -SkipBuckets)"
 }

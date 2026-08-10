@@ -724,14 +724,54 @@ console.log('\n=== The work queue posts TWICE a day ===');
  * and early enough that somebody can still make a call before leaving.
  */
 const COMBINED_H = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
-check('the two hours are declared in one place', /var DIGEST_HOURS = \[11, 15\];/.test(COMBINED_H), true);
+/*
+ * THREE hours now: 9, 11 and 16, matching the client's shift — "we start shift 8 am california time, so
+ * before you notif the gc in 9 check the all bucket, and then before lunch 12 in 11 should be cheked again,
+ * and then our shift end 5, before 5 its already checked so 4pm will notf."
+ *
+ * It was 11 and 15. Three in the afternoon is too late to act on a morning visit and too early to know the
+ * outcome of an afternoon one — the worst of both.
+ */
+check('the three hours are declared in one place', /var DIGEST_HOURS = \[9, 11, 16\];/.test(COMBINED_H), true);
 check('a trigger is created for each', /DIGEST_HOURS\.forEach\(function \(h\) \{[\s\S]*?\.atHour\(h\)\.create\(\);/.test(COMBINED_H), true);
 // Installing twice must not leave four triggers behind: the old ones are cleared first.
 check('existing triggers are cleared before installing',
   COMBINED_H.indexOf("if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);")
     < COMBINED_H.indexOf('DIGEST_HOURS.forEach'), true);
 check('the toast names both times, not one', /posts daily in the ' \+ when \+ ' hours/.test(COMBINED_H), true);
-check('the menu says both times', /Turn ON work-queue digest \(11am \+ 3pm\)/.test(COMBINED_H), true);
+check('the menu says all three times',
+  /Turn ON work-queue digest \(9am \+ 11am \+ 4pm\)/.test(COMBINED_H), true);
+
+console.log('\n--- the card says how fresh REI is ---');
+/*
+ * The client, after a card told the team nobody had recorded five outcomes their colleague had written up in
+ * REI that morning: "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * Because the sweep and the card are on separate timers with nothing between them, so the card published
+ * whatever the sheet held, with no way to know it was stale and no way to say so. They had asked about this
+ * earlier — "but all lead in 8 bucket should be chekd before sending the notif right?" — and the sequencing
+ * was described and never built.
+ *
+ * The sweep now stamps the Automation Log when it finishes and the card reads that stamp. It cannot make the
+ * data fresher, but it can stop the card implying freshness it does not have.
+ */
+check('the card reads a freshness stamp', /reiFreshness_\(\)/.test(COMBINED_H), true);
+check('...written by the bucket sweep', /level: 'SWEEP'/.test(
+  fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8')), true);
+check('...and read from the Automation Log', /getSheetByName\('Automation Log'\)/.test(COMBINED_H), true);
+check('a recent sweep is stated as a time', /REI checked ' \+ clock/.test(COMBINED_H), true);
+check('a stale one says so instead of implying freshness',
+  /REI last checked ' \+ clock \+ ' — may be out of date/.test(COMBINED_H), true);
+check('no sweep at all is admitted, not hidden', /REI freshness unknown/.test(COMBINED_H), true);
+/*
+ * And it must never block the post. A queue that goes silent because a stamp could not be read is a queue
+ * nobody can rely on, and the leads on it still need working.
+ */
+check('a failure to read the stamp never stops the card',
+  /catch \(e\) \{\s*\n\s*return '';\s*\/\/ never let a stamp stop the queue/.test(COMBINED_H), true);
+/* The tail only: this log grows all day and a card must not read thousands of rows to print six words. */
+check('only the tail of the log is read', /Math\.max\(2, last - 120\)/.test(COMBINED_H), true);
+
 check('turning it off still removes every one of them',
   /function removeChatAttentionTrigger\(\)[\s\S]*?getProjectTriggers\(\)\.forEach/.test(COMBINED_H), true);
 /*

@@ -11,6 +11,8 @@ $ErrorActionPreference = "Continue"
 # Current Stage. Somebody who ran this to stop the automation still had their sheet changing under them.
 foreach ($name in @("Twin Visit Logger Sandbox", "Twin Visit Logger WhatsApp",
                     "Twin Visit Logger REI Recheck", "Twin Visit Logger Board Intake",
+  "Twin Visit Logger Sweep Before 0845", "Twin Visit Logger Sweep Before 1045",
+  "Twin Visit Logger Sweep Before 1545",
   "Twin Visit Logger Notes Audit",
                     "Twin Visit Logger Bucket Sweep")) {
   & schtasks.exe /Query /TN $name > $null 2>&1

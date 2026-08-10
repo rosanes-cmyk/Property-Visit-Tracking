@@ -341,5 +341,31 @@ check('...while a typed run still exits 1 so a person notices',
 /* And the waiting message stops repeating every five seconds. */
 check('the waiting notice is throttled', /Date\.now\(\) - lastSaid < 30000/.test(FILL), true);
 
+
+console.log('\n--- a sweep sits in front of every Chat card ---');
+/*
+ * The client: "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * A card had gone out claiming nobody had recorded five outcomes their colleague had written up in REI that
+ * morning. The hourly sweep and the card were on separate clocks with nothing between them, so whether any
+ * given card was fresh came down to luck. They had asked about exactly this earlier — "but all lead in 8
+ * bucket should be chekd before sending the notif right?" — and the sequencing was described, not built.
+ *
+ * Three fixed daily sweeps now sit 15 minutes ahead of the 9am, 11am and 4pm postings.
+ */
+for (const at of ['08:45', '10:45', '15:45']) {
+  check(`a sweep is scheduled at ${at}`, INSTALL.includes(`"${at}"`), true);
+}
+check('...as daily tasks at a fixed time, not an interval', /\/SC DAILY \/ST \$at/.test(INSTALL), true);
+check('...running the bucket sweep', /"recheck-buckets\.cmd"'/.test(INSTALL), true);
+/* The hourly sweep stays for the rest of the day. */
+check('the hourly sweep is still there',
+  INSTALL.includes('-Name "Twin Visit Logger Bucket Sweep"'), true);
+/* And the uninstaller must remove all three, or "nothing is scheduled" is untrue again. */
+const UNINST = fs.readFileSync('twin-visit-logger-sandbox/scripts/uninstall-windows-task.ps1', 'utf8');
+for (const name of ['Sweep Before 0845', 'Sweep Before 1045', 'Sweep Before 1545']) {
+  check(`uninstall removes "${name}"`, UNINST.includes(name), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

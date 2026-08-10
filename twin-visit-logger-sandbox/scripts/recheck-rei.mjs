@@ -839,6 +839,30 @@ console.log('Every change above is in the workbook\'s "Automation Log" with its 
  * team's audit trail with things that never happened.
  */
 if (APPLY && auditRows.length) {
+  /*
+   * A bucket sweep stamps WHEN it finished, so the Chat card can say how fresh it is.
+   *
+   * The client, after a card went out claiming nobody had recorded five outcomes their colleague had
+   * written up in REI that morning: "im asking why did the sysytem nofit the gc nit cheking of those?"
+   *
+   * The answer was that the sweep and the card are on separate timers with nothing between them, so the
+   * card published whatever the sheet happened to hold. They had asked me about exactly this weeks earlier
+   * — "but all lead in 8 bucket should be chekd before sending the notif right?" — and I described the
+   * sequencing and never built it.
+   *
+   * This is the link. The sweep runs 15 minutes before each posting and records the moment it finished;
+   * the card reads that line and prints "REI checked 8:52 AM". If the sweep did not run, the card says so
+   * instead of implying freshness it does not have. Written to the Automation Log rather than a new tab or
+   * a Script Property, because Node cannot write Script Properties and the log is already there, already
+   * append-only, and already read by people looking for what the automation did.
+   */
+  if (BUCKETS_ONLY) {
+    auditRows.push({
+      level: 'SWEEP',
+      message: `Bucket sweep finished — ${candidates.length} lead(s) checked, ${changedRows.length} updated.`
+    });
+  }
+
   const n = await appendAuditLog(sheets, config.spreadsheetId, auditRows);
   if (n) console.log(`\nLogged ${n} line(s) to the workbook's "Automation Log" tab.`);
 }

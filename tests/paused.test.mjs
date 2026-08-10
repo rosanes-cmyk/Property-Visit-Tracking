@@ -127,7 +127,9 @@ const UNINSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/script
 const INSTALL = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/install-windows-task.ps1'), 'utf8');
 const created = [...INSTALL.matchAll(/New-VisitTask -Name "([^"]+)"/g)].map((m) => m[1]);
 /*
- * SIX now — the five, plus the board intake. The COUNT is asserted so adding a seventh is a deliberate act that
+ * SIX New-VisitTask calls — the five, plus the board intake. The three pre-card sweeps are created by a
+ * loop calling schtasks directly (fixed daily times, not an interval), so they are counted separately in
+ * tests/scheduled-tasks.test.mjs. The COUNT is asserted so adding a seventh is a deliberate act that
  * updates this line, rather than a task nobody notices is running.
  */
 check('the installer creates six tasks', created.length, 6);
