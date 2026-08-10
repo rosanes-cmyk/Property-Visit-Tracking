@@ -45,6 +45,19 @@ import { DateTime } from 'luxon';
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
 const FORCE = args.includes('--force');
+/*
+ * --scheduled: this run came from the 2-minute timer, not from a person.
+ *
+ * The two want very different things from a busy lock, and I had them both on the long wait. The timer
+ * fires every 120 seconds while the wait ran for 12 MINUTES, so up to six copies queued at once, each
+ * printing "REI is busy" every five seconds and each finally exiting 1 — which Task Scheduler records as
+ * a failed task and status.cmd reports as a problem. Hundreds of lines of noise describing a system that
+ * was working correctly.
+ *
+ * A scheduled run has a successor 120 seconds away, so standing down costs nothing. A run somebody TYPED
+ * has no successor, which is why that one still waits the full twelve minutes.
+ */
+const SCHEDULED = args.includes('--scheduled');
 
 /*
  * Must match PENDING_REI_PREFIX in apps-script/WebApp.gs. If the two ever disagree, rows sit on the board
@@ -152,10 +165,30 @@ async function main() {
    * it finishes is one a colleague is watching on the board, so "skipped, try again in ten minutes" is a
    * person staring at a record that never completes.
    */
+  /*
+   * A scheduled run waits 90 seconds — comfortably inside its own 2-minute period, so copies cannot stack
+   * — and a typed one waits the full twelve, because nothing is coming after it.
+   */
+  let lastSaid = 0;
   const release = await acquireLockWaiting('run', {
-    onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
+    timeoutMs: SCHEDULED ? 90 * 1000 : 12 * 60 * 1000,
+    onWait: (secondsLeft) => {
+      // Once every 30s rather than every 5s. The old rate said nothing new and buried the real output.
+      if (Date.now() - lastSaid < 30000) return;
+      lastSaid = Date.now();
+      console.log(`  REI is busy — waiting, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`);
+    }
   });
   if (!release) {
+    if (SCHEDULED) {
+      /*
+       * Exit 0, deliberately. This is not a failure: REI was busy and the next run is two minutes away.
+       * Exiting 1 made Task Scheduler record a failed task and status.cmd report a problem, which trains
+       * somebody to ignore both.
+       */
+      console.log('REI was busy — standing down, the next run in 2 minutes will pick these up.');
+      process.exit(0);
+    }
     console.log('\nREI stayed busy for 12 minutes. These rows will be picked up by the next run.');
     process.exit(1);
   }

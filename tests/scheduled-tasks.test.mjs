@@ -313,5 +313,33 @@ check('the since-stamp is always stripped', /\\s\*\\\[since \[\^\\\]\]\*\\\]/.te
  */
 check('the A1 range handles two-letter columns', /function columnLetter/.test(FILL), true);
 
+
+console.log('\n--- a 2-minute timer must not wait 12 minutes for the lock ---');
+/*
+ * The client's screen filled with hundreds of "REI is busy — retrying" lines and then a failure.
+ *
+ * The timer fires every 120 seconds and the wait ran for 12 MINUTES, so up to six copies queued at once,
+ * each printing every five seconds, each finally exiting 1 — which Task Scheduler records as a failed
+ * task and status.cmd reports as a problem. All of it describing a system that was working correctly.
+ *
+ * A scheduled run has a successor two minutes away, so standing down costs nothing. A run somebody TYPED
+ * has no successor, which is why that one still waits the full twelve.
+ */
+check('the scheduled runner identifies itself', /--scheduled/.test(FILLCMD), true);
+check('...and the script knows the difference',
+  /const SCHEDULED = args\.includes\('--scheduled'\)/.test(FILL), true);
+check('a scheduled run waits 90 seconds, a typed one twelve minutes',
+  /timeoutMs: SCHEDULED \? 90 \* 1000 : 12 \* 60 \* 1000/.test(FILL), true);
+/*
+ * Exit 0 on a scheduled timeout. Exiting 1 made a busy REI look like a broken task, and a status screen
+ * that cries wolf is one nobody reads.
+ */
+check('a busy REI is not reported as a failed task',
+  /standing down, the next run in 2 minutes[\s\S]{0,120}process\.exit\(0\)/.test(FILL), true);
+check('...while a typed run still exits 1 so a person notices',
+  /stayed busy for 12 minutes[\s\S]{0,120}process\.exit\(1\)/.test(FILL), true);
+/* And the waiting message stops repeating every five seconds. */
+check('the waiting notice is throttled', /Date\.now\(\) - lastSaid < 30000/.test(FILL), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

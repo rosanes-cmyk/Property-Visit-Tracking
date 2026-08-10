@@ -17,5 +17,5 @@ if exist "logs\fill-pending.log" (
 
 echo. >> "logs\fill-pending.log"
 echo ==== %DATE% %TIME% ==== >> "logs\fill-pending.log"
-node scripts\fill-pending-rei.mjs --yes >> "logs\fill-pending.log" 2>&1
+node scripts\fill-pending-rei.mjs --yes --scheduled >> "logs\fill-pending.log" 2>&1
 endlocal
