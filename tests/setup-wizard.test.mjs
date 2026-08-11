@@ -106,6 +106,45 @@ check('...and it says the password is deliberately not stored',
 check('the file explains why storing it would be worse',
   /copied to every PC and onto whatever stick carries the installer/.test(SETUP), true);
 
+console.log('\n=== the first Google sign-in must use the same client as every later one ===');
+/*
+ * FOUND DURING A LIVE RECOVERY on a replacement PC, and it cost an hour.
+ *
+ * Google sign-in reported success, and the very next call — reading the workbook — failed with:
+ *
+ *   Method doesn't allow unregistered callers (callers without established identity).
+ *
+ * Which reads exactly like a permissions problem, and is not one. `@google-cloud/local-auth` depends on
+ * `google-auth-library` separately from `googleapis`; when npm resolves them to different versions, each gets
+ * its own copy of the class, and `google.sheets({ auth })` does not recognise local-auth's client as an auth
+ * client at all. So it makes the request UNAUTHENTICATED.
+ *
+ * It had never happened before because every dependency in this project is pinned to "latest": the old PC's
+ * node_modules was installed months earlier with a combination that happened to dedupe. A fresh install got
+ * that day's versions and behaved differently — which is the worst kind of bug, one that appears only on a
+ * machine being set up in a hurry because the previous one died.
+ *
+ * The fix routes the first run through loadSavedCredentials, the same path every later run uses, which builds
+ * the client with googleapis' OWN google.auth.fromJSON. Asserted here because the line looks redundant and is
+ * exactly the sort of thing somebody tidies away.
+ */
+{
+  const AUTH = read('twin-visit-logger-sandbox/src/google/auth.mjs');
+  check('the saved token is reloaded rather than local-auth\'s client returned',
+    /const rebuilt = await loadSavedCredentials\(\);\s*\n\s*return rebuilt \|\| client;/.test(AUTH), true);
+  /* Matched across the comment's line wrap — a fixed phrase breaks the moment a sentence is re-flowed. */
+  check('...and the reason is written down so it is not tidied away',
+    /does not recognise local-auth's/.test(AUTH), true);
+  /* Order matters: the token has to be on disk before it can be reloaded. */
+  check('...after the token is saved',
+    AUTH.indexOf('await saveCredentials(client)') < AUTH.indexOf('const rebuilt ='), true);
+  /*
+   * And it falls back to the original client rather than returning null. If the token could not be re-read for
+   * any reason, a working-but-fragile client beats no client at all — the run should degrade, not die.
+   */
+  check('...falling back rather than returning nothing', /return rebuilt \|\| client;/.test(AUTH), true);
+}
+
 console.log('\n=== every step can fail without wrecking the install ===');
 /*
  * A wizard that half-completes and cannot be re-run is worse than one that fails cleanly. Each step writes
