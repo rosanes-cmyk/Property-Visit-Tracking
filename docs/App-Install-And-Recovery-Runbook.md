@@ -17,9 +17,23 @@ not in a chat somebody has to go and find.
 | The active PC is broken | In the sheet: 🏠 Twin Visit Logger → **💻 Release the PC** |
 | Install an update | **Check for an update** in the Start menu, then Install |
 | An update broke something | `scripts\update-app.cmd --rollback` |
+| Get a visit briefing now | **Send briefing** — type a name, or "today" |
 | Stop everything | **Pause everything** in the Start menu |
 
 ---
+
+## Nothing needs starting
+
+This is the most common misunderstanding, so it goes near the top.
+
+The automation is a set of **Windows scheduled tasks**, not a program anybody opens. Switch the PC on, log
+into Windows, and it works — with every window closed. It checks booking emails every 2 minutes, finishes
+board bookings every 2 minutes, sweeps REI every 20, briefs at 07:30 and posts the work queue at 9, 11 and 4.
+
+The shortcuts are for **watching** it (Dashboard), **fixing** it (Sign in to REI), or **deliberately stopping**
+it (Pause). Closing them changes nothing.
+
+Three things stop it, and only these three: the PC is off, the PC is asleep, or nobody is logged into Windows.
 
 ## What lives where
 
@@ -139,6 +153,37 @@ alongside, and `scripts\update-app.cmd --rollback` puts it back.
 window to be closed — the server is running from the folder being replaced. The page says so.
 
 ---
+
+## The visit briefings
+
+The PROPERTY INSPECTION block — the one a colleague copies into the visit's WhatsApp group.
+
+**It arrives on its own.** A daily task at **07:30** posts one briefing to Chat for every visit booked that
+day, half an hour before the shift starts. Nothing to open, nothing to type.
+
+A visit booked *during* the day still gets its briefing the moment it's booked, as it always did. Between
+the two, nothing falls through.
+
+**To ask for one anyway:**
+
+```
+scripts\send-briefing.cmd          double-click, type a seller name — or "today"
+```
+
+Why it exists: the briefing used to go out *only* at the moment a booking was first processed. A visit booked
+last week, or booked on a PC that has since been replaced, produced nothing — and a message posted three days
+ago, above four hundred others, is the same as never.
+
+Three things worth knowing:
+
+- **It's built from the calendar event's own description**, not a fresh REI scrape. That's what the visitor is
+  already reading, so the two can't disagree — and it needs no browser, so it answers in a second and works
+  even when REI is logged out. The trade: if REI has changed since the event was written, you get the older
+  picture. The hourly sweep is what keeps the event current.
+- **One per lead per day.** A PC that restarts, or a run you kick off by hand, won't post the same briefing
+  twice. Add `--force` if you deliberately want another.
+- **A lead with no calendar event is skipped and says so**, rather than being improvised out of the tracker's
+  columns — that would look the same and say less, with no way to tell which you were reading.
 
 ## When something looks wrong
 
