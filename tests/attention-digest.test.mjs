@@ -1087,7 +1087,54 @@ check('...while reschedule-needed goes to Follow Up',
  * outcomes up in REI, where this card cannot see them.
  */
 check('...and so does an overdue visit, which is what Cherry asked for by name',
-  /if \(on < today\) \{[\s\S]{0,3200}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+  /if \(on < today \|\| alreadyStarted\) \{[\s\S]{0,3800}?return \{ key: 'pendingFollowUp'/.test(CHAT_C), true);
+
+console.log('\n--- a visit that has ALREADY STARTED today is not upcoming either ---');
+/*
+ * The client, on the 4pm card: "its not accurate the notif this was alreday update with my colleaguse."
+ *
+ * It listed a 2:00 PM visit and a 3:00 PM visit under "Confirm the visit is going ahead" — at 4:04 PM. Both
+ * had been and gone. The rule compared DATES at midnight, so `on < today` only ever caught yesterday, and a
+ * visit booked for this afternoon stayed "upcoming" until midnight.
+ *
+ * Telling the team to confirm visits their colleagues had already been to is the same failure that made a
+ * colleague angry once before: the card asserting something about their work that was not true.
+ */
+{
+  const at2pm = { ...BASE, 'Current Stage': 'Visit Scheduled', 'Visit Date': '2026-08-05', 'Visit Time': '2:00 PM' };
+  const noon = new Date(2026, 7, 5, 12, 0);
+  const fourPm = new Date(2026, 7, 5, 16, 4);
+  const twoThirty = new Date(2026, 7, 5, 14, 30);
+
+  check('before it starts, it is upcoming', attentionBucket_(at2pm, TODAY, noon).key, 'upcomingVisit');
+  /*
+   * DURING the visit it stays upcoming, deliberately. Nagging somebody for an outcome while they are stood
+   * in the property would be worse than the problem being fixed — hence the hour of grace.
+   */
+  check('during it, still upcoming', attentionBucket_(at2pm, TODAY, twoThirty).key, 'upcomingVisit');
+  check('two hours later, it is a follow-up', attentionBucket_(at2pm, TODAY, fourPm).key, 'pendingFollowUp');
+  /*
+   * And the WORDING changes with it. "OVERDUE" about something that happened ninety minutes ago reads as an
+   * accusation; "visit was earlier today at 2:00 PM — how did it go?" is the same ask without the tone.
+   */
+  check('...worded as a question, not an accusation',
+    /visit was earlier today at 2:00 PM — how did it go/.test(attentionBucket_(at2pm, TODAY, fourPm).reason), true);
+  check('...and OVERDUE is kept for visits from previous days',
+    /OVERDUE/.test(attentionBucket_(
+      { ...at2pm, 'Visit Date': '2026-08-01' }, TODAY, fourPm).reason), true);
+  /* A visit with no time recorded cannot be judged this way, and must keep the old date-only behaviour. */
+  check('a visit with no time is left alone',
+    attentionBucket_({ ...at2pm, 'Visit Time': '' }, TODAY, fourPm).key, 'upcomingVisit');
+  /*
+   * `now` DEFAULTS to midnight. Without that, every existing caller and every test in this file would start
+   * comparing fixture dates against the wall clock, and the suite would pass or fail depending on the hour
+   * it was run at.
+   */
+  check('omitting the clock keeps the old behaviour exactly',
+    attentionBucket_(at2pm, TODAY).key, 'upcomingVisit');
+  check('...and the live card is the only caller that passes one',
+    /attentionBucket_\(rec, today, new Date\(\)\)/.test(CHAT_C), true);
+}
 console.log('\n--- REI activity after the visit: report the date, never the text ---');
 /*
  * Two mistakes here, in order, and the client caught the second one in the preview before it posted.

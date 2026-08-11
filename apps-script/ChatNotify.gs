@@ -683,6 +683,39 @@ function timeCell_(raw) {
   return clock_(h % 24, Number(m[2]));
 }
 
+/**
+ * The MOMENT a visit starts — its date and its time together — or null when the time is unknown.
+ *
+ * Everything else in this file compares dates at midnight, which is right for "is this booked for today".
+ * It is wrong for "has this already happened", and the client saw exactly that: the 4pm card listed a visit
+ * at 2:00 PM and one at 3:00 PM under "Confirm the visit is going ahead", two hours after they had been and
+ * gone. Their words: "its not accurate the notif this was alreday update with my colleaguse."
+ *
+ * A visit is only upcoming until it starts. After that the question is what happened, which is a different
+ * section with a different ask.
+ */
+function visitStartsAt_(rec, on) {
+  if (!on) return null;
+  var hhmm = timeCell_(rec['Visit Time']);          // '2:00 PM' or ''
+  if (!hhmm) return null;                            // no time: date-only comparison is all we have
+  var m = /(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/.exec(hhmm);
+  if (!m) return null;
+  var h = Number(m[1]);
+  if (m[3]) { h = h % 12; if (/p/i.test(m[3])) h += 12; }
+  var at = new Date(on.getTime());
+  at.setHours(h % 24, Number(m[2]), 0, 0);
+  return at;
+}
+
+/*
+ * How long after a visit STARTS before the card stops calling it upcoming.
+ *
+ * An hour, matching DEFAULT_VISIT_DURATION_MINUTES: during the visit itself "confirm it is going ahead" is
+ * merely redundant, and nagging somebody about an outcome while they are standing in the property would be
+ * worse than the problem being fixed. An hour after the start, asking what happened is the right question.
+ */
+var VISIT_GRACE_MS = 60 * 60 * 1000;
+
 /** Is this lead finished, or not a lead at all? Nothing excluded here ever reaches the notification. */
 function excludedFromDigest_(rec) {
   var stage = String(rec['Current Stage'] || '').trim();
@@ -722,8 +755,17 @@ function excludedFromDigest_(rec) {
  *
  * `today` is injected so the decision is testable and does not depend on when the tests run.
  */
-function attentionBucket_(rec, today) {
+/*
+ * `now` is the actual moment, and it DEFAULTS TO `today` — midnight — on purpose.
+ *
+ * Without a default, every existing caller and every test would silently start comparing fixture dates
+ * against the wall clock, and a suite built on a fixed today would begin passing or failing depending on
+ * the hour it was run at. Defaulting to midnight means "no now supplied" behaves exactly as this rule did
+ * before: a visit's time can never be in the past, so nothing changes. Only the live card passes a real now.
+ */
+function attentionBucket_(rec, today, now) {
   if (excludedFromDigest_(rec)) return null;
+  var nowAt = now || today;
   var stage = String(rec['Current Stage'] || '').trim();
 
   for (var i = 0; i < ATTENTION_BUCKETS.length; i++) {
@@ -803,7 +845,16 @@ function attentionBucket_(rec, today) {
        * A side effect worth having: Upcoming Visit now contains only visits that really are upcoming, so its
        * count means what it says.
        */
-      if (on < today) {
+      /*
+       * Started more than an hour ago counts as past, even when the date is today.
+       *
+       * This is the half the date comparison could not see. `on < today` only catches yesterday and earlier,
+       * so a visit at 2:00 PM stayed under "Confirm the visit is going ahead" until midnight — which is what
+       * the 4pm card showed the client, about two visits that had already been and gone.
+       */
+      var startsAt = visitStartsAt_(rec, on);
+      var alreadyStarted = startsAt && nowAt.getTime() > startsAt.getTime() + VISIT_GRACE_MS;
+      if (on < today || alreadyStarted) {
         /*
          * If somebody HAS recorded the outcome, say so and quote it. Do not ask again.
          *
@@ -845,6 +896,20 @@ function attentionBucket_(rec, today) {
           return { key: 'pendingFollowUp', attention: true, sort: at,
             reason: 'visit was ' + fmt_(on) + ' · tracker says ' + (status || 'Scheduled')
               + ' · REI noted ' + fmt_(lastOn) + ' — tick Completed or Canceled' };
+        }
+        /*
+         * A visit earlier TODAY is not "overdue" — it is simply finished, and nobody has said how it went.
+         *
+         * The same word for both would be wrong in opposite directions: calling a visit from last Tuesday
+         * "today at 2:00 PM" hides how long it has been sitting, and shouting OVERDUE about something that
+         * happened ninety minutes ago reads as an accusation. The client's complaint was precisely this
+         * tone — the card told the team to chase visits their colleagues had already been to.
+         */
+        if (on.getTime() === today.getTime()) {
+          var clockText = timeCell_(rec['Visit Time']);
+          return { key: 'pendingFollowUp', attention: true, sort: at,
+            reason: 'visit was earlier today' + (clockText ? ' at ' + clockText : '')
+              + ' — how did it go? mark it Completed or Canceled' };
         }
         return { key: 'pendingFollowUp', attention: true, sort: at,
           reason: 'OVERDUE — visit was ' + fmt_(on) + ' and the tracker still says ' + (status || 'Scheduled')
@@ -1258,7 +1323,12 @@ function postAttentionDigest_() {
         ' · Owner: ' + (owner || '<b>UNASSIGNED</b>') + ' · <i>' + clipReason_(reason) + '</i>';
     };
 
-    var hit = attentionBucket_(rec, today);
+    /*
+     * The real clock, so a visit that has already started today drops out of Upcoming Visit. Every other
+     * caller omits it and keeps the old date-only behaviour — see attentionBucket_ for why that default
+     * matters to the tests.
+     */
+    var hit = attentionBucket_(rec, today, new Date());
     if (hit) {
       found[hit.key].push({ text: line(hit.reason), attention: hit.attention ? 0 : 1, at: hit.sort });
     }
