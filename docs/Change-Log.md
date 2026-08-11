@@ -7,6 +7,63 @@
 > stale snapshot live (e.g. the first web-app deploy shipped the pre-WebApp build and lacked the
 > JSON API until it was re-synced). The `/exec` URL stays the same across new versions.
 
+## 2026-08-11 — the work-queue card checks the buckets BEFORE it sends
+
+Asked for in these words: *"it should be like this ok do you get me you will check first the 8 bucket
+send ing the updates in to the gc."* Twice before that, in other words: *"but all lead in 8 bucket should
+be chekd before sending the notif right?"* and, after a card told the whole team nobody had recorded five
+outcomes a colleague had written up in REI that morning, *"im asking why did the sysytem nofit the gc nit
+cheking of those?"*
+
+**What was there before:** two independent clocks. The bucket sweep was *scheduled* 15 minutes ahead of
+each card (08:45 / 10:45 / 15:45 on the PC), and the card printed how old the sweep was. If the sweep was
+slow, crashed, or the PC was asleep, the card still went out — carrying an old picture with a small
+apology attached. That is "send, and hope the sweep ran".
+
+**What it does now.** The 9am / 11am / 4pm trigger no longer posts. It reads the sweep's stamp and:
+
+| sweep finished | what happens |
+| --- | --- |
+| within 90 minutes | posts immediately, as before |
+| older, or never | **posts nothing**, and comes back in 10 minutes — up to 3 times |
+| still not swept after 3 waits | posts anyway, with the card saying the data may be out of date |
+
+Ninety minutes is not a slack allowance: Apps Script fires a daily trigger anywhere inside the named
+*hour*, so the 08:45 sweep is legitimately 74 minutes old when a 09:59 card runs.
+
+**The one trade-off, stated plainly.** A card can now arrive up to **30 minutes after its hour**. And the
+wait is bounded on purpose — if the PC is off, no amount of waiting produces a sweep, and a work queue
+that goes *silent* on those days is worse than one that arrives late with a warning, because silence
+reads as "nothing needs doing". So the guarantee is: the buckets are checked before the card is sent, and
+on the days that is impossible the card says so instead of leaving anyone to assume.
+
+**A real bug found while building it.** The sweep's stamp was written inside `if (APPLY &&
+auditRows.length)` — and `auditRows` only gets a line when something *changed*. So the ordinary sweep, the
+one that reads a dozen leads and finds them all still correct, wrote no stamp at all. Under the old
+"print how fresh it is" behaviour that produced a slightly wrong subtitle. Under check-first it would have
+held **every** card for half an hour and then posted "may be out of date" on the days everything was
+fine — which is the most damaging thing this could do, because it trains the team to ignore the warning.
+A sweep that found nothing to change is a completed check, and now says so; so is a sweep that finds the
+card empty. The two lock exits ("REI is busy", "a run died holding the lock") still stamp nothing, which
+is the whole point.
+
+**Also fixed:** the region of `ChatNotify.gs` copied verbatim into the sandbox used to *end* at the words
+"Post the 3pm work queue" in a doc comment. Renaming that comment made the copy silently truncate to
+nothing. The boundary is now an explicit sentinel comment, and `sync-attention-rules.mjs` refuses to write
+rather than emptying the copy when a marker is missing.
+
+**Menu behaviour is unchanged:** *"💬 Post work queue now"* posts immediately and never waits — somebody
+standing at the screen is asking for what the sheet holds this second. The toast tells them how stale REI
+is instead.
+
+**Turning the digest OFF now also cancels any pending retry**, so "OFF" is not followed by one more card
+ten minutes later.
+
+**To deploy:** re-paste `apps-script/Code.combined.gs` into the bound `Code.gs`, Save, then
+Deploy → Manage deployments → ✏️ → New version. On the PC, replace
+`twin-visit-logger-sandbox/scripts/recheck-rei.mjs`. No trigger or scheduled-task changes are needed —
+the same five triggers and eight tasks carry this.
+
 ## 2026-08-01 — dashboard URL corrected
 
 The live dashboard is the deployment already recorded in `Cowork-Zapier-Setup-Task.md`:

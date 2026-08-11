@@ -35,7 +35,12 @@ const slice = (from, to) => CHAT.slice(CHAT.indexOf(from), CHAT.indexOf(to));
  * They were added just above the old start marker, which left the preview free to print full addresses
  * while the card printed short ones.
  */
-const source = slice('var DIGEST_LINES_PER_SECTION', '/**\n * Post the 3pm work queue');
+/*
+ * The end is a sentinel comment. It used to be the words "Post the 3pm work queue" in the doc comment
+ * below the region — so renaming that comment silently sliced the region down to nothing.
+ */
+const RULES_END_MARK = '/* ====== END OF THE RULES COPIED INTO THE SANDBOX ====== */';
+const source = slice('var DIGEST_LINES_PER_SECTION', RULES_END_MARK);
 
 /*
  * A FIXED today, so a gift's visibility window is tested rather than the wall clock. Without this, "sent
@@ -771,6 +776,217 @@ check('a failure to read the stamp never stops the card',
   /catch \(e\) \{\s*\n\s*return '';\s*\/\/ never let a stamp stop the queue/.test(COMBINED_H), true);
 /* The tail only: this log grows all day and a card must not read thousands of rows to print six words. */
 check('only the tail of the log is read', /Math\.max\(2, last - 120\)/.test(COMBINED_H), true);
+
+console.log('\n=== Check the buckets FIRST, then send ===');
+/*
+ * The client, plainly: "it should be like this ok do you get me you will check first the 8 bucket send ing
+ * the updates in to the gc." Twice before that, in other words: "but all lead in 8 bucket should be chekd
+ * before sending the notif right?" and "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * The stamp above is not that. It says how old the data is; it does not stop a stale card going out. Two
+ * independent clocks — a sweep scheduled 15 minutes ahead, a card that posts regardless — is "send, and
+ * hope the sweep ran". The day it did not is the day a card told the team nobody had recorded five outcomes
+ * their colleague had written up that morning.
+ *
+ * So these tests RUN the sequencing rather than reading it: the shipped functions are lifted out of
+ * ChatNotify.gs and driven with a stubbed Apps Script, because "does it actually stand down?" is a question
+ * about behaviour and a regex cannot answer it.
+ */
+function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hook', triggerThrows = false }) {
+  const src = CHAT.slice(CHAT.indexOf('var DIGEST_FRESH_MINUTES = 90;'), CHAT.indexOf('function reiSweptAt_'))
+    + CHAT.slice(CHAT.indexOf('var DIGEST_RETRY_MINUTES = 10;'), CHAT.indexOf('function postAttentionDigest_'));
+  const state = {
+    posted: 0, logs: [], triggersMade: [], triggersDeleted: 0,
+    props: waitCount ? { DIGEST_WAITING_FOR_SWEEP: JSON.stringify({ n: waitCount, at: Date.now() }) } : {},
+  };
+  const existing = [{ getHandlerFunction: () => 'retryAttentionDigest' },
+    { getHandlerFunction: () => 'sendAttentionDigestToChat' }];
+  const api = {
+    chatWebhookUrl_: () => webhook,
+    postAttentionDigest_: () => { state.posted++; return { posted: true, count: 7 }; },
+    logAuto_: (_a, _b, msg) => state.logs.push(String(msg)),
+    reiSweepAgeMinutes_: () => age,
+    ScriptApp: {
+      getProjectTriggers: () => existing,
+      deleteTrigger: () => { state.triggersDeleted++; },
+      newTrigger: (h) => ({ timeBased: () => ({ after: (ms) => ({ create: () => {
+        if (triggerThrows) throw new Error('quota');
+        state.triggersMade.push({ handler: h, ms });
+      } }) }) }),
+    },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperty: (k) => (k in state.props ? state.props[k] : null),
+      setProperty: (k, v) => { state.props[k] = v; },
+      deleteProperty: (k) => { delete state.props[k]; },
+    }) },
+  };
+  const names = Object.keys(api);
+  /*
+   * The stubs are declared with `var` AFTER the source so they overwrite the real reiSweepAgeMinutes_,
+   * which would need a live spreadsheet. Everything else the source calls has no definition here at all,
+   * so a call this harness has not stubbed fails loudly instead of passing silently.
+   */
+  const fn = new Function(...names, src + `
+    reiSweepAgeMinutes_ = arguments[${names.indexOf('reiSweepAgeMinutes_')}];
+    return { run: digestWithFreshRei_, retry: retryAttentionDigest, entry: sendAttentionDigestToChat,
+             waits: digestWaitCount_, FRESH: DIGEST_FRESH_MINUTES, EVERY: DIGEST_RETRY_MINUTES,
+             MAX: DIGEST_MAX_WAITS };`);
+  return { ...fn(...names.map((n) => api[n])), state };
+}
+
+console.log('\n--- a fresh sweep posts immediately ---');
+{
+  const s = loadSequencer({ age: 12 });
+  const r = s.run();
+  check('it posts', s.state.posted, 1);
+  check('...and reports the count', r.count, 7);
+  check('...and schedules no wait', s.state.triggersMade, []);
+}
+{
+  /* The boundary: the 08:45 sweep can be 74 minutes old by the time a 09:59 trigger fires. That is FRESH. */
+  const s = loadSequencer({ age: 90 });
+  check('90 minutes still counts as swept', s.run().posted, true);
+  check('...because the card fires anywhere inside its hour', s.FRESH, 90);
+}
+
+console.log('\n--- a stale sweep posts NOTHING and comes back ---');
+{
+  const s = loadSequencer({ age: 91 });
+  const r = s.run();
+  check('nothing is posted', s.state.posted, 0);
+  check('...and the caller is told it was held', r.held, true);
+  check('...a retry is scheduled', s.state.triggersMade.length, 1);
+  check('...for the retry handler, not the daily one', s.state.triggersMade[0].handler, 'retryAttentionDigest');
+  check('...ten minutes out', s.state.triggersMade[0].ms, 10 * 60 * 1000);
+  check('...and the log says why, with the age', /HELD/.test(s.state.logs[0]) && /91 min ago/.test(s.state.logs[0]), true);
+  check('...and counts the wait', s.waits(), 1);
+}
+{
+  /*
+   * No stamp at all is NOT freshness. Reading "we have never managed to look" as "it is fine" is the
+   * confident wrong answer this whole mechanism exists to stop — the same distinction the sweep itself
+   * draws between visitTaskState 'none' and 'unknown'.
+   */
+  const s = loadSequencer({ age: null });
+  check('a missing stamp holds the card too', s.run().held, true);
+  check('...and says the stamp is missing rather than inventing an age',
+    /no sweep stamp found/.test(s.state.logs[0]), true);
+}
+
+console.log('\n--- but the wait ends, because silence is worse than late ---');
+/*
+ * The one trade-off, stated where it cannot be lost: if the PC is asleep no amount of waiting produces a
+ * sweep. A queue that goes SILENT on those days reads as "nothing needs doing", which is a lie the leads on
+ * it pay for. So after three waits it posts, and the card carries "may be out of date" so the reader knows.
+ */
+{
+  const s = loadSequencer({ age: 400, waitCount: 3 });
+  s.run();
+  check('after three waits it posts anyway', s.state.posted, 1);
+  check('...scheduling no further retry', s.state.triggersMade, []);
+  check('...and the log admits it was not swept',
+    /WITHOUT a fresh REI sweep/.test(s.state.logs[0]), true);
+  check('...naming how long it waited', /waited 30 min/.test(s.state.logs[0]), true);
+  check('...and the counter is cleared for the next posting', s.waits(), 0);
+  check('the wait is bounded at three', s.MAX, 3);
+}
+{
+  /*
+   * Half an hour is the whole exposure: 3 waits x 10 minutes. Worth stating as arithmetic, because the
+   * user-visible cost of this feature is "a card can arrive up to 30 minutes late" and nothing else.
+   */
+  const s = loadSequencer({ age: 400 });
+  check('the longest a card can be delayed is 30 minutes', s.MAX * s.EVERY, 30);
+}
+{
+  /* A stale counter from hours ago is not this posting's. Anything older than an hour starts again at 0. */
+  const s = loadSequencer({ age: 400 });
+  s.state.props.DIGEST_WAITING_FOR_SWEEP = JSON.stringify({ n: 3, at: Date.now() - 61 * 60 * 1000 });
+  check('a counter older than an hour does not count', s.waits(), 0);
+  s.run();
+  check('...so the next posting waits rather than inheriting an exhausted count', s.state.posted, 0);
+}
+{
+  /* Garbage in the property must not throw inside a trigger, where nobody would see the stack trace. */
+  const s = loadSequencer({ age: 400 });
+  s.state.props.DIGEST_WAITING_FOR_SWEEP = 'not json';
+  check('an unreadable counter reads as zero', s.waits(), 0);
+}
+
+console.log('\n--- failure modes, none of which may lose the posting ---');
+{
+  /*
+   * Apps Script caps a project at 20 triggers. If the retry cannot be scheduled there is nothing left to
+   * wait FOR, so posting now beats losing the card entirely.
+   */
+  const s = loadSequencer({ age: 400, triggerThrows: true });
+  s.run();
+  check('a trigger that cannot be created posts instead of vanishing', s.state.posted, 1);
+  check('...and says so', /Could not schedule/.test(s.state.logs[0]), true);
+}
+{
+  const s = loadSequencer({ age: 400, webhook: '' });
+  s.run();
+  check('no webhook means no card and no wait', [s.state.posted, s.state.triggersMade.length], [0, 0]);
+}
+{
+  /*
+   * A fired one-off trigger still counts against the cap until it is deleted, so the retry clears its own
+   * before running. Missing this would show up weeks later as "the 9am card stopped coming".
+   */
+  const s = loadSequencer({ age: 12 });
+  s.retry();
+  check('the retry deletes the trigger that fired it', s.state.triggersDeleted > 0, true);
+  check('...and then posts, because the sweep is now fresh', s.state.posted, 1);
+}
+{
+  const s = loadSequencer({ age: 400 });
+  s.run();
+  check('holding clears any older retry before making a new one', s.state.triggersDeleted > 0, true);
+}
+check('the scheduled trigger runs the waiting path, not the raw post',
+  /function sendAttentionDigestToChat\(\) \{\s*\n\s*return digestWithFreshRei_\(\);/.test(COMBINED_H), true);
+
+/*
+ * And the file that actually gets DEPLOYED must carry the same bytes.
+ *
+ * The tests above drive ChatNotify.gs, but Code.combined.gs is what is pasted into the editor, and it is
+ * maintained by hand. A proven behaviour in a file nobody deploys is not a proven behaviour.
+ */
+{
+  const region = (src) => src.slice(src.indexOf('var DIGEST_RETRY_MINUTES = 10;'),
+    src.indexOf('function postAttentionDigest_'));
+  check('the deployed copy carries the sequencing byte for byte',
+    region(COMBINED_H) === region(CHAT) && region(CHAT).length > 500, true);
+  const fresh = (src) => src.slice(src.indexOf('var DIGEST_FRESH_MINUTES = 90;'),
+    src.indexOf('var DIGEST_LINES_PER_SECTION'));
+  check('...and the freshness reader too', fresh(COMBINED_H) === fresh(CHAT) && fresh(CHAT).length > 500, true);
+}
+
+console.log('\n--- the menu does NOT wait ---');
+/*
+ * Somebody who has clicked "post now" is asking for what the sheet holds this second. Standing them down
+ * for half an hour would read as a broken menu item, and they are standing at the screen — they can run the
+ * sweep by hand. So the toast tells them how stale REI is instead.
+ */
+check('"post now" calls the poster directly',
+  /function sendAttentionDigestNow\(\)[\s\S]{0,400}?var r = postAttentionDigest_\(\);/.test(COMBINED_H), true);
+check('...and it never routes through the waiting path',
+  /function sendAttentionDigestNow\(\)[\s\S]{0,600}?digestWithFreshRei_/.test(COMBINED_H), false);
+check('...but the toast says how stale REI is',
+  /REI last swept ' \+ age \+ ' min ago/.test(COMBINED_H), true);
+
+console.log('\n--- turning the digest OFF turns the waits off too ---');
+/*
+ * A pending retry is a posting that has not happened yet. Leaving one behind means "OFF" is followed by one
+ * more card ten minutes later — and this project has already learned once, over the scheduled tasks, what a
+ * switch that does not switch things off costs.
+ */
+check('removing the digest removes pending retries as well',
+  /function removeChatAttentionTrigger\(\)[\s\S]{0,900}?h === DIGEST_RETRY_HANDLER/.test(COMBINED_H), true);
+check('...and clears the wait counter', /function removeChatAttentionTrigger\(\)[\s\S]{0,900}?setDigestWaitCount_\(0\)/.test(COMBINED_H), true);
+check('re-installing does not inherit a half-finished wait',
+  /function installChatAttentionTrigger\(\)[\s\S]{0,600}?clearDigestRetryTriggers_\(\)/.test(COMBINED_H), true);
 
 check('turning it off still removes every one of them',
   /function removeChatAttentionTrigger\(\)[\s\S]*?getProjectTriggers\(\)\.forEach/.test(COMBINED_H), true);

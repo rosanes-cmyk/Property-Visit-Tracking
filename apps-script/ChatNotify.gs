@@ -451,41 +451,65 @@ function removeChatNewBookingTrigger() {
  * had asked about exactly this earlier — "but all lead in 8 bucket should be chekd before sending the notif
  * right?" — and the sequencing was described and never built.
  *
- * This is the honest half of the fix: the sweep runs 15 minutes before each posting and records when it
- * finished; this reads that line. When it is recent the card says so, and when it is not the card says THAT
- * instead of implying freshness it does not have. A reader who knows the data is two hours old can discount
- * it; a reader who is not told cannot.
+ * The sweep runs 15 minutes before each posting and records when it finished; this reads that line.
  *
- * Deliberately never blocks the post. A queue that goes silent because a sweep failed is a queue nobody can
- * rely on, and the leads on it still need working.
+ * Two things are built on it, and they are different jobs. This function only WORDS the card. Whether the
+ * card goes out at all is decided by digestWithFreshRei_, which holds it back until the stamp is recent —
+ * the client's instruction: "you will check first the 8 bucket send ing the updates in to the gc."
+ *
+ * This half still matters after that one, because holding is not infinite: after three waits the card is
+ * posted anyway rather than going silent, and then this is what tells the reader the data is old.
  */
-function reiFreshness_() {
+/*
+ * Ninety minutes, because the sweep runs hourly AND again at :45 before each card. Apps Script fires a
+ * daily trigger anywhere inside the named hour, so the intended sweep can be as much as 74 minutes old by
+ * the time the card runs (08:45 sweep, 09:59 card) and must still count as fresh. Anything past 90 means a
+ * sweep was genuinely MISSED, not that this card came a little late.
+ */
+var DIGEST_FRESH_MINUTES = 90;
+
+/**
+ * When the bucket sweep last finished, as a Date, or null if it has never stamped the log.
+ * Never throws — a missing tab or an unreadable cell reads as "no stamp".
+ */
+function reiSweptAt_() {
   try {
     var sh = SpreadsheetApp.getActive().getSheetByName('Automation Log');
-    if (!sh) return '';
+    if (!sh) return null;
     var last = sh.getLastRow();
-    if (last < 2) return '';
+    if (last < 2) return null;
     /*
      * The tail only. This log grows all day, and a card must not read thousands of rows to print six words
      * — the sweep's line is always among the most recent when it has run at all.
      */
     var from = Math.max(2, last - 120);
     var vals = sh.getRange(from, 1, last - from + 1, 2).getValues();
-    var when = null;
     for (var i = vals.length - 1; i >= 0; i--) {
       if (String(vals[i][1]).trim().toUpperCase() !== 'SWEEP') continue;
       var d = new Date(vals[i][0]);
-      if (!isNaN(d.getTime())) { when = d; }
-      break;
+      return isNaN(d.getTime()) ? null : d;
     }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Minutes since the last sweep, or null when there is no stamp to measure from. */
+function reiSweepAgeMinutes_() {
+  var when = reiSweptAt_();
+  return when ? Math.round((Date.now() - when.getTime()) / 60000) : null;
+}
+
+function reiFreshness_() {
+  try {
+    var when = reiSweptAt_();
     if (!when) return ' · REI freshness unknown';
     var mins = Math.round((Date.now() - when.getTime()) / 60000);
     var clock = Utilities.formatDate(when, Session.getScriptTimeZone(), 'h:mm a');
-    /*
-     * Ninety minutes, because the sweep runs hourly: anything older means a sweep was missed, not merely
-     * that this card came a little after one.
-     */
-    return mins <= 90 ? ' · REI checked ' + clock : ' · REI last checked ' + clock + ' — may be out of date';
+    return mins <= DIGEST_FRESH_MINUTES
+      ? ' · REI checked ' + clock
+      : ' · REI last checked ' + clock + ' — may be out of date';
   } catch (e) {
     return '';                                    // never let a stamp stop the queue going out
   }
@@ -983,13 +1007,161 @@ function digestMoney_(v) {
   return '$' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+/* ====== END OF THE RULES COPIED INTO THE SANDBOX ====== */
+/*
+ * Everything ABOVE this line, back to `var DIGEST_LINES_PER_SECTION`, is copied byte-for-byte into
+ * twin-visit-logger-sandbox/src/rei/attention-rules.mjs and scripts/preview-3pm-digest.mjs by
+ * scripts/sync-attention-rules.mjs, so the hourly sweep and the preview work the same buckets as the card.
+ *
+ * This sentinel exists because the end of that region used to be found by the words "Post the 3pm work
+ * queue" in the doc comment below — so renaming a comment silently truncated the copy to nothing, and the
+ * only sign was two tests failing with "the rules are carried verbatim: false". A marker that means
+ * something is one that cannot be edited by accident.
+ */
+
+/*
+ * ── Check the buckets FIRST, then send. ──────────────────────────────────────────────────────────
+ *
+ * The client, in as many words: "it should be like this ok do you get me you will check first the 8 bucket
+ * send ing the updates in to the gc." And earlier, twice: "but all lead in 8 bucket should be chekd before
+ * sending the notif right?" / "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * What existed was two independent clocks. The sweep was SCHEDULED 15 minutes before the card, and the card
+ * printed how old the sweep was — but if the sweep was slow, or the PC was asleep, or it crashed, the card
+ * went out anyway carrying yesterday's picture with a small apology attached. That is not "check first, then
+ * send"; that is "send, and hope". It is how a card came to tell the whole team nobody had recorded five
+ * outcomes their colleague had written up in REI that morning.
+ *
+ * So the trigger no longer posts. It asks one question — has the sweep finished recently? — and:
+ *
+ *   fresh   → post now.
+ *   stale   → post NOTHING, and come back in 10 minutes. Up to three times.
+ *   still stale after the third wait → post anyway, with the card saying the data may be out of date.
+ *
+ * The last line is deliberate and it is the one trade-off worth understanding. The wait cannot be infinite:
+ * if the PC is off, no amount of waiting produces a sweep, and a work queue that goes SILENT on those days is
+ * worse than one that arrives late with a warning — silence looks identical to "nothing needs doing", and the
+ * leads on the list still need working. So the guarantee is: the buckets are checked before the card is sent,
+ * and on the days that is impossible you are told, in the card, rather than left to assume.
+ *
+ * The visible cost: a card can now arrive up to half an hour after its hour. That is the price of it being
+ * true when it does arrive.
+ *
+ * The menu item does NOT wait. Somebody who clicked "post now" is standing there asking for what the sheet
+ * holds this second, and making them wait 30 minutes for it would be absurd.
+ */
+var DIGEST_RETRY_MINUTES = 10;
+var DIGEST_MAX_WAITS = 3;
+var DIGEST_WAIT_KEY = 'DIGEST_WAITING_FOR_SWEEP';
+var DIGEST_RETRY_HANDLER = 'retryAttentionDigest';
+
+/** The scheduled 9am / 11am / 4pm posting. Waits for a fresh sweep before it says anything. */
+function sendAttentionDigestToChat() {
+  return digestWithFreshRei_();
+}
+
 /**
- * Post the 3pm work queue to Chat. Silent when there is nothing to do.
+ * The one-off trigger digestWithFreshRei_ sets when it decides to wait.
+ *
+ * It clears itself first. Apps Script caps a project at 20 triggers and a one-off that has already fired is
+ * still counted until it is deleted, so leaving them behind would eventually stop the digest installing at
+ * all — a failure that would show up weeks later as "the 9am card stopped coming".
+ */
+function retryAttentionDigest() {
+  clearDigestRetryTriggers_();
+  return digestWithFreshRei_();
+}
+
+function clearDigestRetryTriggers_() {
+  try {
+    ScriptApp.getProjectTriggers().forEach(function (t) {
+      if (t.getHandlerFunction() === DIGEST_RETRY_HANDLER) ScriptApp.deleteTrigger(t);
+    });
+  } catch (e) { /* a trigger we cannot delete must not stop the queue going out */ }
+}
+
+/**
+ * How many times this posting has already stood down, and when it started.
+ *
+ * Keyed on nothing but a timestamp on purpose. Keying it on the hour looked tidier and was wrong: a card
+ * that fires at 9:55 and waits twice is asking again at 10:15, in a different hour, and the counter would
+ * have reset every time — an unbounded loop that never posts. Anything older than an hour is a new posting.
+ */
+function digestWaitCount_() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(DIGEST_WAIT_KEY);
+    if (!raw) return 0;
+    var o = JSON.parse(raw);
+    if (!o || !o.at || (Date.now() - o.at) > 60 * 60 * 1000) return 0;
+    return Number(o.n) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function setDigestWaitCount_(n) {
+  try {
+    var p = PropertiesService.getScriptProperties();
+    if (!n) { p.deleteProperty(DIGEST_WAIT_KEY); return; }
+    p.setProperty(DIGEST_WAIT_KEY, JSON.stringify({ n: n, at: Date.now() }));
+  } catch (e) { /* the counter is a convenience; losing it costs one extra wait, not correctness */ }
+}
+
+/**
+ * The sequencing itself: check the buckets, then send.
+ *
+ * Reads the sweep's stamp BEFORE reading the tracker, so a held posting costs one small range read rather
+ * than a full sheet scan it is going to throw away.
+ */
+function digestWithFreshRei_() {
+  if (!chatWebhookUrl_()) return { posted: false, count: 0 };
+
+  var age = reiSweepAgeMinutes_();
+  if (age !== null && age <= DIGEST_FRESH_MINUTES) {
+    setDigestWaitCount_(0);
+    return postAttentionDigest_();
+  }
+
+  var waited = digestWaitCount_();
+  if (waited >= DIGEST_MAX_WAITS) {
+    setDigestWaitCount_(0);
+    logAuto_('CHAT', '', 'Work queue posted WITHOUT a fresh REI sweep — waited '
+      + (DIGEST_MAX_WAITS * DIGEST_RETRY_MINUTES) + ' min and the sweep never reported in'
+      + (age === null ? ' (no sweep has ever stamped the log).' : ' (last sweep ' + age + ' min ago).')
+      + ' The card says the data may be out of date.');
+    return postAttentionDigest_();
+  }
+
+  setDigestWaitCount_(waited + 1);
+  clearDigestRetryTriggers_();
+  try {
+    ScriptApp.newTrigger(DIGEST_RETRY_HANDLER).timeBased()
+      .after(DIGEST_RETRY_MINUTES * 60 * 1000).create();
+  } catch (e) {
+    /*
+     * If the retry cannot be scheduled there is nothing left to wait FOR, so post now rather than lose the
+     * posting entirely. A queue that vanishes because a trigger quota was full is the failure this whole
+     * mechanism exists to avoid.
+     */
+    setDigestWaitCount_(0);
+    logAuto_('CHAT', '', 'Could not schedule the REI re-check wait (' + e + ') — posting the work queue now.');
+    return postAttentionDigest_();
+  }
+
+  logAuto_('CHAT', '', 'Work queue HELD — buckets not swept yet'
+    + (age === null ? ' (no sweep stamp found)' : ' (last sweep ' + age + ' min ago)')
+    + '. Checking again in ' + DIGEST_RETRY_MINUTES + ' min · wait '
+    + (waited + 1) + ' of ' + DIGEST_MAX_WAITS + '.');
+  return { posted: false, count: 0, held: true, waits: waited + 1, sweepAgeMinutes: age };
+}
+
+/**
+ * Post the work queue to Chat. Silent when there is nothing to do.
  *
  * Every line carries the four things a manager needs to act without opening anything: who the seller
  * is, which property, who owns it, and the exact reason it is on the list.
  */
-function sendAttentionDigestToChat() {
+function postAttentionDigest_() {
   if (!chatWebhookUrl_()) return { posted: false, count: 0 };
   var sh = dataSheet_();
   var last = sh.getLastRow();
@@ -1093,11 +1265,22 @@ function sendAttentionDigestToChat() {
 }
 
 /** Menu: post the attention digest now. */
+/*
+ * Calls postAttentionDigest_ directly, NOT the waiting path. A person who has just clicked "post now" is
+ * asking for what the sheet holds this second; standing them down for half an hour waiting on a sweep would
+ * read as a broken menu item. The toast says how fresh REI is instead, which is the same information in the
+ * form somebody standing at the screen can act on — they can run the sweep by hand and click again.
+ */
 function sendAttentionDigestNow() {
   if (!chatWebhookUrl_()) { SpreadsheetApp.getUi().alert('Save a Google Chat webhook first.'); return; }
-  var r = sendAttentionDigestToChat();
+  var r = postAttentionDigest_();
+  var age = reiSweepAgeMinutes_();
+  var fresh = age === null ? ' (REI freshness unknown)'
+    : age <= DIGEST_FRESH_MINUTES ? '' : ' (REI last swept ' + age + ' min ago)';
   SpreadsheetApp.getActive().toast(
-    r.error ? ('Failed: ' + r.error) : (r.count ? ('Posted ' + r.count + ' item(s) needing attention.') : 'Nothing overdue, stalled or flagged — nothing posted.'),
+    r.error ? ('Failed: ' + r.error)
+      : (r.count ? ('Posted ' + r.count + ' item(s) needing attention.' + fresh)
+        : 'Nothing overdue, stalled or flagged — nothing posted.'),
     'Google Chat', 10);
 }
 
@@ -1132,6 +1315,8 @@ function installChatAttentionTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'sendAttentionDigestToChat') ScriptApp.deleteTrigger(t);
   });
+  clearDigestRetryTriggers_();          // a wait left over from a previous install is not this one's
+  setDigestWaitCount_(0);
   DIGEST_HOURS.forEach(function (h) {
     ScriptApp.newTrigger('sendAttentionDigestToChat').timeBased().everyDays(1).atHour(h).create();
   });
@@ -1144,8 +1329,15 @@ function installChatAttentionTrigger() {
 
 function removeChatAttentionTrigger() {
   var n = 0;
+  /*
+   * BOTH handlers. A pending retry is a posting that has not happened yet, so leaving one behind means
+   * "OFF" is followed by one more card ten minutes later — exactly the kind of thing that makes an off
+   * switch untrustworthy, and this project has already learned that lesson once over the scheduled tasks.
+   */
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'sendAttentionDigestToChat') { ScriptApp.deleteTrigger(t); n++; }
+    var h = t.getHandlerFunction();
+    if (h === 'sendAttentionDigestToChat' || h === DIGEST_RETRY_HANDLER) { ScriptApp.deleteTrigger(t); n++; }
   });
+  setDigestWaitCount_(0);
   SpreadsheetApp.getActive().toast('Attention digest OFF (' + n + ' trigger removed).', 'Google Chat', 6);
 }

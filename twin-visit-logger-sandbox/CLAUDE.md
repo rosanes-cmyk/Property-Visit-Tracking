@@ -235,8 +235,30 @@ one of the two tasks, so the documented workaround did not even work.
 `--force` runs one command anyway. Pausing is about the automation acting unattended; it must not stop the
 person debugging it from checking a lead.
 
-**Not covered:** the 11am/3pm Chat digest, which Apps Script posts from Google's own timers. Stopping that
-means deleting its triggers in the Apps Script editor, and `pause.cmd` says so on screen.
+**Not covered:** the 9am/11am/4pm Chat digest, which Apps Script posts from Google's own timers. Stopping
+that means deleting its triggers in the Apps Script editor, and `pause.cmd` says so on screen.
+
+## The work-queue card checks the buckets before it sends
+
+At the client's instruction — *"you will check first the 8 bucket send ing the updates in to the gc"* — the
+9am/11am/4pm trigger does not post directly. `digestWithFreshRei_` reads the bucket sweep's `SWEEP` stamp
+from the `Automation Log`; if it is older than 90 minutes (or absent) the card posts **nothing** and a
+one-off trigger tries again in 10 minutes, up to three times. Only then does it post anyway, with the
+subtitle saying the data may be out of date — because a queue that goes silent reads as "nothing needs
+doing", and the leads on it still need working. The visible cost is that a card can arrive up to 30 minutes
+after its hour.
+
+Two rules about that stamp, both learned the hard way, that must not be undone:
+
+- **A sweep that changed nothing still stamps.** It was written inside `if (APPLY && auditRows.length)`,
+  and `auditRows` only fills when something changed — so the ordinary sweep wrote nothing, and check-first
+  would have held every card on the days everything was fine. An empty card stamps too: that is a finished
+  check with a result of zero.
+- **The lock exits stamp nothing.** "Another REI run is active" and "REI stayed busy for 12 minutes" are
+  precisely the cases where the card must know the buckets were *not* checked.
+
+The menu item posts immediately and never waits; a person who clicked it is asking for what the sheet holds
+this second.
 
 ## Calendar behavior
 

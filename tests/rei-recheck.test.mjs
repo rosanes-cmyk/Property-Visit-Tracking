@@ -1666,5 +1666,43 @@ for (const file of scriptFiles) {
   }
 }
 
+console.log('\n=== the sweep stamp the Chat card now depends on ===');
+/*
+ * The card no longer merely PRINTS how fresh REI is — it refuses to post until this stamp is recent, at the
+ * client's instruction: "you will check first the 8 bucket send ing the updates in to the gc." That turns a
+ * cosmetic log line into the thing that decides whether the team hears from the system at all, so the rules
+ * about when it is and is not written are now worth holding down.
+ */
+{
+  const R = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
+  const stampAt = R.indexOf("if (APPLY && BUCKETS_ONLY) auditRows.push(sweepStamp(");
+  check('the sweep stamps when it finishes', stampAt > 0, true);
+  /*
+   * THE bug this section exists for. The stamp used to sit inside `if (APPLY && auditRows.length)`, and
+   * auditRows only gets a line when something CHANGED — so the ordinary sweep, the one that reads twelve
+   * leads and finds them all still correct, wrote nothing. Under check-first that would hold every card for
+   * half an hour and then post "may be out of date" on the days everything was fine, which teaches the team
+   * to ignore the warning. A sweep that found nothing to change is a completed check.
+   */
+  check('...whether or not anything changed',
+    stampAt < R.indexOf('if (APPLY && auditRows.length) {'), true);
+  /* And an empty card is a finished check with a result of zero, not a check that never happened. */
+  check('a sweep with an empty card stamps too',
+    /if \(APPLY && BUCKETS_ONLY\) \{\s*\n\s*await appendAuditLog\(/.test(R), true);
+  check('...only in bucket mode, never the ordinary rotation',
+    (R.match(/if \(APPLY && BUCKETS_ONLY\)/g) || []).length, 2);
+  /*
+   * The lock exits must NOT stamp. "REI is busy" and "a run died holding the lock" are the exact cases
+   * where the card has to know the buckets were not checked — stamping there would make the guarantee a
+   * lie in precisely the situation it was built for.
+   */
+  const lockExit = R.indexOf('Another REI run is active — skipped');
+  const busyExit = R.indexOf('REI stayed busy for 12 minutes');
+  const between = R.slice(Math.min(lockExit, busyExit) - 800, Math.max(lockExit, busyExit) + 400);
+  check('a run that could not take the lock stamps nothing', /SWEEP|sweepStamp\(/.test(between), false);
+  check('the stamp is only ever written after --yes', /sweepStamp\(|level: 'SWEEP'/.test(
+    R.split('const APPLY = args.includes')[0]), false);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

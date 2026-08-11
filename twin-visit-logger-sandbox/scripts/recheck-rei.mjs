@@ -293,6 +293,25 @@ if (ONLY) {
 }
 
 if (!candidates.length) {
+  /*
+   * An EMPTY sweep still stamps, and only in --buckets mode.
+   *
+   * "Nothing on the card" is a finished check with a result of zero, not a check that failed to happen —
+   * and the Chat digest now refuses to post without a recent stamp. Without this line, the quietest days
+   * (an empty work queue, which is the good outcome) would be the days the card held for half an hour and
+   * then announced the data might be out of date.
+   *
+   * The ordinary rotation is deliberately excluded: "nothing is DUE" there means the clock has not come
+   * round yet, which says nothing about whether the card's leads were looked at.
+   *
+   * This is the ONLY early exit that stamps. The two above it are the lock — REI busy, or a run that died
+   * holding it — and those are exactly the case where the card must not be told the buckets were checked.
+   */
+  if (APPLY && BUCKETS_ONLY) {
+    await appendAuditLog(sheets, config.spreadsheetId,
+      [{ level: 'SWEEP', message: 'Bucket sweep finished — 0 lead(s) checked, 0 updated.' }]);
+    console.log('Stamped the Automation Log so the Chat card knows the buckets were checked.');
+  }
   console.log('\nNothing is due for a re-check. Everything active was checked recently.');
   process.exit(0);
 }
@@ -838,31 +857,45 @@ console.log('Every change above is in the workbook\'s "Automation Log" with its 
  * Written last, and only when applying. A dry run logging "here is what I would have done" would fill the
  * team's audit trail with things that never happened.
  */
-if (APPLY && auditRows.length) {
-  /*
-   * A bucket sweep stamps WHEN it finished, so the Chat card can say how fresh it is.
-   *
-   * The client, after a card went out claiming nobody had recorded five outcomes their colleague had
-   * written up in REI that morning: "im asking why did the sysytem nofit the gc nit cheking of those?"
-   *
-   * The answer was that the sweep and the card are on separate timers with nothing between them, so the
-   * card published whatever the sheet happened to hold. They had asked me about exactly this weeks earlier
-   * — "but all lead in 8 bucket should be chekd before sending the notif right?" — and I described the
-   * sequencing and never built it.
-   *
-   * This is the link. The sweep runs 15 minutes before each posting and records the moment it finished;
-   * the card reads that line and prints "REI checked 8:52 AM". If the sweep did not run, the card says so
-   * instead of implying freshness it does not have. Written to the Automation Log rather than a new tab or
-   * a Script Property, because Node cannot write Script Properties and the log is already there, already
-   * append-only, and already read by people looking for what the automation did.
-   */
-  if (BUCKETS_ONLY) {
-    auditRows.push({
-      level: 'SWEEP',
-      message: `Bucket sweep finished — ${candidates.length} lead(s) checked, ${changedRows.length} updated.`
-    });
-  }
+/*
+ * A bucket sweep stamps WHEN it finished, so the Chat card knows whether it may go out.
+ *
+ * The client, after a card went out claiming nobody had recorded five outcomes their colleague had
+ * written up in REI that morning: "im asking why did the sysytem nofit the gc nit cheking of those?"
+ *
+ * The answer was that the sweep and the card are on separate timers with nothing between them, so the
+ * card published whatever the sheet happened to hold. They had asked me about exactly this weeks earlier
+ * — "but all lead in 8 bucket should be chekd before sending the notif right?" — and I described the
+ * sequencing and never built it. Then, in as many words: "you will check first the 8 bucket send ing the
+ * updates in to the gc."
+ *
+ * This line IS that check. sendAttentionDigestToChat reads it, and if it is not recent the card does not
+ * post at all — it stands down for ten minutes and asks again. So the stamp is now load-bearing rather
+ * than decorative, and the rules about when it is written matter more than they did.
+ *
+ * Written to the Automation Log rather than a new tab or a Script Property, because Node cannot write
+ * Script Properties and the log is already there, already append-only, and already read by people looking
+ * for what the automation did.
+ *
+ * NOT inside `if (auditRows.length)`, which is where it started, and that was a real bug rather than a
+ * tidiness point: auditRows only gets a line when something CHANGED, so the ordinary sweep — the one that
+ * reads twelve leads and finds them all still correct — wrote no stamp at all. Under the old "print how
+ * fresh it is" behaviour that produced a slightly wrong subtitle. Under check-first it would have held
+ * every card for half an hour and then posted "may be out of date" on the days everything was fine, which
+ * is the most damaging thing this could do: it trains the team to ignore the warning.
+ *
+ * A sweep that checked its leads and found nothing to change is a COMPLETED check, and says so.
+ */
+function sweepStamp(checked, updated) {
+  return {
+    level: 'SWEEP',
+    message: `Bucket sweep finished — ${checked} lead(s) checked, ${updated} updated.`
+  };
+}
 
+if (APPLY && BUCKETS_ONLY) auditRows.push(sweepStamp(candidates.length, changedRows.length));
+
+if (APPLY && auditRows.length) {
   const n = await appendAuditLog(sheets, config.spreadsheetId, auditRows);
   if (n) console.log(`\nLogged ${n} line(s) to the workbook's "Automation Log" tab.`);
 }

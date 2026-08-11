@@ -33,7 +33,15 @@ console.log('=== the copy is the same text as the card ===');
  * here rather than a lead quietly falling off the hourly sweep — which nobody would notice, because the
  * symptom is a lead being checked less often, not an error.
  */
-const source = CHAT.slice(CHAT.indexOf('var DIGEST_LINES_PER_SECTION'), CHAT.indexOf('/**\n * Post the 3pm work queue'));
+const END_MARK = '/* ====== END OF THE RULES COPIED INTO THE SANDBOX ====== */';
+const source = CHAT.slice(CHAT.indexOf('var DIGEST_LINES_PER_SECTION'), CHAT.indexOf(END_MARK));
+/*
+ * The boundary is a sentinel comment, not the title of the doc comment that used to follow it. Renaming
+ * that comment made indexOf return -1, the slice ran backwards, and the "verbatim" check compared against
+ * an empty string. Asserting the marker EXISTS turns that class of mistake into a message that names it.
+ */
+check('the end of the copied region is marked explicitly', CHAT.includes(END_MARK), true);
+check('...and the region is not empty', source.length > 1000, true);
 check('the rules are carried verbatim', RULES.includes(source.trim()), true);
 check('it is marked as a copy', /VERBATIM FROM apps-script\/ChatNotify\.gs/.test(RULES), true);
 check('...and says how to regenerate it', /sync-attention-rules/.test(RULES), true);
