@@ -36,6 +36,7 @@ import { visitOutcomeFromNotes } from '../src/rei/cancel-signal.mjs';
 import { STAGE_ADVANCE_FROM, STAGE_ON_COMPLETION } from '../src/rei/recheck.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
+import { recordActivity } from '../src/utils/heartbeat.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -123,6 +124,16 @@ console.log(`${noEvidence} row(s) say nothing about an outcome — left alone.\n
 
 if (!willChange.length && !conflicts.length) {
   console.log('No lead\'s notes contradict its status. The board matches what the team has written down.');
+  /*
+   * Recorded on the QUIET path too, and this is the more important of the two.
+   *
+   * "Nothing to correct" is the normal outcome and the whole evidence that the job is alive. Without a line
+   * here the feed would only ever show the notes audit on the days it changed something — so a job that had
+   * silently stopped running weeks ago would look identical to a job finding nothing wrong. That ambiguity
+   * is the exact thing the dashboard was asked for: "know its wroking".
+   */
+  recordActivity('Notes audit — the board matches what the team has written down.',
+    { kind: 'ok', job: 'notes-audit' });
   process.exit(0);
 }
 
@@ -200,6 +211,22 @@ if (applied.length) {
     { kind: 'warn' }
   );
 }
+
+/*
+ * Recorded for the app's dashboard. No per-lead beat: this job opens no browser and reads the whole tab in
+ * one API call, so it is over in seconds — a progress bar would flash past unread. What is worth showing is
+ * that it RAN and what it found, which is the difference between "the board matches the notes" and "nothing
+ * has looked at the notes since Tuesday".
+ */
+recordActivity(
+  applied.length
+    ? `Notes audit — ${applied.length} status(es) corrected from the notes`
+      + (conflicts.length ? `, ${conflicts.length} left for a person.` : '.')
+    : (conflicts.length
+      ? `Notes audit — nothing to correct, ${conflicts.length} disagree with a status somebody set.`
+      : 'Notes audit — the board matches what the team has written down.'),
+  { kind: conflicts.length ? 'warn' : 'ok', job: 'notes-audit' }
+);
 
 /** 1-based column index to an A1 letter. */
 function columnLetter(n) {

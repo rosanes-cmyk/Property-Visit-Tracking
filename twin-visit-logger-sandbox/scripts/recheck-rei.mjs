@@ -42,6 +42,7 @@ import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
+import { beginJob, updateJob, endJob, recordActivity } from '../src/utils/heartbeat.mjs';
 import { onTheCard, bucketOf } from '../src/rei/attention-rules.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
@@ -464,9 +465,25 @@ const auditRows = [];
  * able to close by claiming agreement over the top of it.
  */
 const failures = [];
+/*
+ * Say what is happening, lead by lead, so the app's dashboard can show it.
+ *
+ * The client: "if the procerss is loading ... know its wroking." A sweep takes five to eight minutes with
+ * nothing on screen, and a wedged run and a run with nothing to do look identical from outside. One small
+ * file write per lead is what makes "REI sweep · reading Marlene Ruiz (4 of 12)" possible.
+ */
+beginJob(BUCKETS_ONLY ? 'bucket-sweep' : 'recheck', { total: candidates.length, phase: 'opening REI' });
+let checkedSoFar = 0;
 try {
   for (const row of candidates) {
     const link = String(row['REI BlackBook Link']).trim();
+    checkedSoFar += 1;
+    updateJob({
+      phase: 'reading REI',
+      item: String(row['Seller Name'] || '(no name)'),
+      index: checkedSoFar,
+      total: candidates.length
+    });
     console.log(`\n--- row ${row.__rowNumber}  ${row['Seller Name']}`);
     let scraped;
     try {
@@ -795,6 +812,16 @@ try {
   // State is written even when a lead threw, so a crash mid-run does not re-check the same three leads
   // forever while the fourth is never reached.
   await writeState(state);
+  /*
+   * In the finally, so a run that THREW still marks itself finished. Otherwise the dashboard would show a
+   * crashed sweep as "running" until the next one started — and the states it exists to tell apart are
+   * exactly "working" and "stuck".
+   */
+  const summary = `${candidates.length} checked, ${changedRows.length} updated`
+    + (failures.length ? `, ${failures.length} unreadable` : '');
+  endJob({ summary, ok: !failures.length });
+  recordActivity(`${BUCKETS_ONLY ? 'REI sweep' : 'REI re-check'} finished — ${summary}.`,
+    { kind: failures.length ? 'warn' : 'ok', job: BUCKETS_ONLY ? 'bucket-sweep' : 'recheck' });
 }
 
 console.log(`\n${'='.repeat(60)}`);

@@ -6,6 +6,7 @@ import { processInbox } from './services/process.mjs';
 import { acquireLock } from './utils/lock.mjs';
 import { createLogger } from './utils/logger.mjs';
 import { haltIfNotActiveMachine } from './google/agent-settings.mjs';
+import { beginJob, endJob, recordActivity } from './utils/heartbeat.mjs';
 
 export async function runOnce() {
   const logger = createLogger(config.logLevel);
@@ -34,8 +35,19 @@ export async function runOnce() {
       { log: (m) => logger.info(m) })) {
       return { skipped: true, reason: 'not the active machine' };
     }
+    /*
+     * The intake reports itself too, but WITHOUT a per-item beat.
+     *
+     * It fires every two minutes and almost always has nothing to do, so a heartbeat per run would rewrite
+     * the file 720 times a day to say "idle" — and worse, it would overwrite a genuinely interesting beat
+     * from a sweep that is still going. So it only announces itself when it actually processed something.
+     */
+    beginJob('intake', { phase: 'reading booking emails' });
     const result = await processInbox(auth, logger);
     logger.info('Run completed.', result);
+    const handled = Number(result?.processed ?? result?.logged ?? 0);
+    endJob({ summary: handled ? `${handled} booking(s) logged` : 'no new booking emails', ok: true });
+    if (handled) recordActivity(`Booking intake — ${handled} logged.`, { kind: 'ok', job: 'intake' });
     return result;
   } finally {
     await release();

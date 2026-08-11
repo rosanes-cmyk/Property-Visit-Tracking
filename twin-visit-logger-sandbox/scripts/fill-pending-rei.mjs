@@ -42,6 +42,7 @@ import { shouldCompleteTask } from '../src/rei/task-gate.mjs';
 import fsp from 'node:fs/promises';
 import { DateTime } from 'luxon';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
+import { beginJob, updateJob, endJob, recordActivity } from '../src/utils/heartbeat.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -205,9 +206,19 @@ async function main() {
   let filled = 0;
   let stuck = 0;
 
+  /*
+   * This is the job the dashboard matters most for. A colleague types a booking on the board and watches
+   * that row: "Being added…" with a timer. Until now the only thing they could see was the timer. Now the
+   * app can show which lead is being looked up and how far through it is.
+   */
+  beginJob('board-intake', { total: pending.length, phase: 'opening REI' });
+  let seen = 0;
+
   try {
     for (const row of pending) {
       const who = text(row['Seller Name']) || `row ${row.__rowNumber}`;
+      seen += 1;
+      updateJob({ phase: 'looking up REI', item: who, index: seen, total: pending.length });
       const { link, phone } = lookupKeyFor(row);
       console.log(`\n--- ${who}`);
 
@@ -437,6 +448,10 @@ async function main() {
   } finally {
     await context.close();
     await release();
+    // In the finally, so a crash still marks the job finished rather than leaving it reading as "running".
+    const summary = `${filled} finished, ${stuck} could not be looked up`;
+    endJob({ summary, ok: !stuck });
+    recordActivity(`Board intake — ${summary}.`, { kind: stuck ? 'warn' : 'ok', job: 'board-intake' });
   }
 
   console.log(`\n${filled} row(s) ${APPLY ? 'filled in' : 'would be filled in'}, ${stuck} left parked.`);
