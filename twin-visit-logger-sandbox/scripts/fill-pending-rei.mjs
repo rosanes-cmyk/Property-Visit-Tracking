@@ -221,6 +221,23 @@ async function main() {
       updateJob({ phase: 'looking up REI', item: who, index: seen, total: pending.length });
       const { link, phone } = lookupKeyFor(row);
       console.log(`\n--- ${who}`);
+      /*
+       * ONE ROW MUST NOT BE ABLE TO KILL THE BATCH.
+       *
+       * The client's board showed a booking stuck at "Still not finished — 206m", while the run reported
+       * "0 finished, 0 could not be looked up" every two minutes. Neither number was a skip: every skip path
+       * in this loop counts. The run was THROWING partway through that row — after REI had been read — which
+       * left the loop through the finally with nothing counted and nothing written.
+       *
+       * The reason it threw hardly matters next to the consequence: everything queued behind it was never
+       * reached either. A single row with a value the sheet's validation rejects — the documented failure
+       * here, where one bad cell fails the ENTIRE row write — would silently stall every booking after it.
+       * On a busy morning that is the whole board.
+       *
+       * So each row gets its own try. A row that blows up is counted, named with its error, and the next one
+       * carries on. The batch degrades one row at a time instead of all at once.
+       */
+      try {
 
       if (!link && !phone) {
         console.log('    no phone and no REI link on this row — cannot look anything up');
@@ -444,6 +461,16 @@ async function main() {
         console.log(`    cleared the parked row ${row.__rowNumber} — one record, not two`);
       }
       filled += 1;
+      } catch (error) {
+        /*
+         * Named, counted, and the run continues. The row keeps its PENDING placeholder, so the next run
+         * tries it again — and if it is genuinely un-processable it will say the same thing every time,
+         * which is a diagnosable pattern rather than a silent stall.
+         */
+        console.log(`    FAILED on this row: ${error.message}`);
+        console.log('    It keeps its placeholder and the next run will try again.');
+        stuck += 1;
+      }
     }
   } finally {
     await context.close();

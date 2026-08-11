@@ -189,6 +189,33 @@ for (const [file, job] of [
   check('...and marks itself finished even if it threw', RECHECK.indexOf('endJob(', fin) > fin, true);
   const FILL = read('scripts/fill-pending-rei.mjs');
   check('the board intake does the same', FILL.indexOf('endJob(', FILL.lastIndexOf('} finally {')) > 0, true);
+
+  /*
+   * ONE ROW MUST NOT KILL THE BATCH.
+   *
+   * The client's board showed a booking stuck at "Still not finished — 206m" while the run reported "0
+   * finished, 0 could not be looked up" every two minutes. Neither zero was a skip — every skip path in that
+   * loop counts. The run was THROWING partway through the row, after REI had been read, leaving the loop
+   * through its finally with nothing counted and nothing written.
+   *
+   * The consequence matters more than the cause: everything queued behind it was never reached either. One
+   * row carrying a value the sheet's validation rejects — the documented failure here, where a single bad
+   * cell fails the ENTIRE row write — would silently stall every booking after it. On a busy morning that is
+   * the whole board.
+   */
+  check('each row is wrapped so one failure cannot stall the rest',
+    /ONE ROW MUST NOT BE ABLE TO KILL THE BATCH/.test(FILL), true);
+  check('...a failed row is counted, not silently dropped',
+    /FAILED on this row: \$\{error\.message\}[\s\S]{0,300}?stuck \+= 1;/.test(FILL), true);
+  check('...and keeps its placeholder so the next run retries it',
+    /It keeps its placeholder and the next run will try again/.test(FILL), true);
+  /*
+   * And the summary counts rows it never reached at all, by arithmetic rather than a flag on each branch —
+   * a flag can be forgotten by a path added later, which is how this stayed invisible for hours.
+   */
+  check('rows never reached are reported',
+    /const unaccounted = Math\.max\(0, pending\.length - filled - stuck\);/.test(FILL), true);
+  check('...and named as such in the summary', /NOT REACHED/.test(FILL), true);
 }
 {
   const AUDIT = read('scripts/audit-notes.mjs');
