@@ -4284,11 +4284,29 @@ function digestWithFreshRei_() {
   var waited = digestWaitCount_();
   if (waited >= DIGEST_MAX_WAITS) {
     setDigestWaitCount_(0);
-    logAuto_('CHAT', '', 'Work queue posted WITHOUT a fresh REI sweep — waited '
-      + (DIGEST_MAX_WAITS * DIGEST_RETRY_MINUTES) + ' min and the sweep never reported in'
+    /*
+     * The waits are exhausted. Post a NOTICE, not the queue.
+     *
+     * This is the third answer to the same question, and the first two were both wrong.
+     *
+     * First it posted the queue with a small "may be out of date" note on the subtitle. The client saw that
+     * fire for real — the morning after their PC died, so the last sweep was 17 hours old — and said: "as you
+     * see this was 43 mins ago its not accurate and send." They are right. Six leads published with a warning
+     * attached puts the reader in the worst position available: act on it, or ignore it, with no way to tell
+     * which is correct. That is precisely how a colleague got blamed for outcomes they had already recorded.
+     *
+     * Then the temptation is silence. Also wrong, and for a reason that has not changed: a queue that simply
+     * does not arrive reads as "nothing needs doing today", and the leads on it still need working.
+     *
+     * So neither. It publishes the ONE fact it can actually stand behind — REI has not been checked, since
+     * when, and on which machine — and no lead data at all. Nobody can act on stale information they were
+     * never shown, and nobody can mistake the silence for an empty queue.
+     */
+    logAuto_('CHAT', '', 'Work queue HELD BACK — waited '
+      + (DIGEST_MAX_WAITS * DIGEST_RETRY_MINUTES) + ' min and REI was never swept'
       + (age === null ? ' (no sweep has ever stamped the log).' : ' (last sweep ' + age + ' min ago).')
-      + ' The card says the data may be out of date.');
-    return postAttentionDigest_();
+      + ' Posted the outage notice instead of the queue.');
+    return postQueueHeldNotice_(age);
   }
 
   setDigestWaitCount_(waited + 1);
@@ -4312,6 +4330,63 @@ function digestWithFreshRei_() {
     + '. Checking again in ' + DIGEST_RETRY_MINUTES + ' min · wait '
     + (waited + 1) + ' of ' + DIGEST_MAX_WAITS + '.');
   return { posted: false, count: 0, held: true, waits: waited + 1, sweepAgeMinutes: age };
+}
+
+/**
+ * What goes out INSTEAD of the queue when REI could not be checked.
+ *
+ * Deliberately carries no lead names, addresses, statuses or counts. The whole point is that the tracker
+ * cannot be vouched for, so publishing anything out of it — even a number — invites somebody to act on it.
+ *
+ * It names the machine, read from the same Automation Settings tab the PC app claims, because "the
+ * automation is not running" is not actionable and "DESKTOP-M4C8U38 has not swept since 4:59 PM" is.
+ */
+function postQueueHeldNotice_(age) {
+  var since = '';
+  try {
+    var at = reiSweptAt_();
+    if (at) since = Utilities.formatDate(at, Session.getScriptTimeZone(), 'h:mm a \'on\' EEE d MMM');
+  } catch (e) { /* fall through to the vaguer wording */ }
+
+  var who = '';
+  try {
+    /*
+     * Guarded with typeof: this file is pasted into projects that may not carry AgentSettings.gs yet, and a
+     * missing helper must not turn the outage notice — the one message that says nothing is working — into a
+     * failure of its own.
+     */
+    if (typeof getAgentSetting_ === 'function' && typeof AGENT_SETTING_KEYS === 'object') {
+      who = getAgentSetting_(AGENT_SETTING_KEYS.ACTIVE_MACHINE) || '';
+    }
+  } catch (e) { /* the notice is worth sending without it */ }
+
+  var hours = age === null ? null : Math.round(age / 60);
+  var howOld = age === null ? 'never' : (age < 90 ? age + ' minutes ago' : hours + ' hours ago');
+
+  var body =
+    '<b>The work queue is being held back.</b><br><br>'
+    + 'REI has not been checked ' + (age === null ? '<b>at all</b>' : '<b>since ' + (since || howOld) + '</b>')
+    + (who ? ' — the automation runs on <b>' + who + '</b>.' : '.')
+    + '<br><br>'
+    + 'So today\'s list is <b>not being published</b>: it would be built from a tracker nobody has verified, '
+    + 'and a work queue you cannot trust is worse than none. <b>No lead has been left out — none has been '
+    + 'shown.</b><br><br>'
+    + '<b>What to check on that PC:</b><br>'
+    + '• is it switched on and logged in to Windows?<br>'
+    + '• is REI still signed in? — run <b>scripts\\login-rei.cmd</b><br>'
+    + '• open <b>scripts\\dashboard.cmd</b> — it says which of these it is<br><br>'
+    + 'The queue posts itself as soon as one sweep finishes. Nothing needs restarting.';
+
+  var widgets = [{ textParagraph: { text: body } }];
+  var url = dashboardUrl_();
+  if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard', onClick: { openLink: { url: url } } }] } });
+
+  var err = chatPost_({ cardsV2: [{ cardId: 'queueHeld', card: {
+    header: { title: '⚠️ Work queue held — REI not checked', subtitle: fmt_(today_()) + ' · nothing published' },
+    sections: [{ widgets: widgets }]
+  } }] });
+  logAuto_('CHAT', '', err ? ('Outage notice FAILED: ' + err) : 'Outage notice posted instead of the work queue.');
+  return { posted: !err, count: 0, held: true, stale: true, error: err };
 }
 
 /**

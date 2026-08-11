@@ -793,10 +793,18 @@ console.log('\n=== Check the buckets FIRST, then send ===');
  * about behaviour and a regex cannot answer it.
  */
 function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hook', triggerThrows = false }) {
+  /*
+   * Ends at postQueueHeldNotice_ on purpose, so the STUB of it is what runs.
+   *
+   * This harness tests the sequencing — fresh posts, stale holds, exhausted waits post the notice rather than
+   * the queue — and which of the two functions gets called is the whole question. Lifting the real notice in
+   * would drag chatPost_, dashboardUrl_, Utilities and fmt_ with it, and then the test would be about card
+   * formatting instead. The notice's CONTENT is asserted textually further down, where it belongs.
+   */
   const src = CHAT.slice(CHAT.indexOf('var DIGEST_FRESH_MINUTES = 90;'), CHAT.indexOf('function reiSweptAt_'))
-    + CHAT.slice(CHAT.indexOf('var DIGEST_RETRY_MINUTES = 10;'), CHAT.indexOf('function postAttentionDigest_'));
+    + CHAT.slice(CHAT.indexOf('var DIGEST_RETRY_MINUTES = 10;'), CHAT.indexOf('function postQueueHeldNotice_'));
   const state = {
-    posted: 0, logs: [], triggersMade: [], triggersDeleted: 0,
+    posted: 0, held: [], logs: [], triggersMade: [], triggersDeleted: 0,
     props: waitCount ? { DIGEST_WAITING_FOR_SWEEP: JSON.stringify({ n: waitCount, at: Date.now() }) } : {},
   };
   const existing = [{ getHandlerFunction: () => 'retryAttentionDigest' },
@@ -804,6 +812,12 @@ function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hoo
   const api = {
     chatWebhookUrl_: () => webhook,
     postAttentionDigest_: () => { state.posted++; return { posted: true, count: 7 }; },
+    /*
+     * Stubbed separately from postAttentionDigest_ so the tests can assert WHICH of the two went out. The
+     * distinction is the entire point of this change — a run that posts the queue and one that posts the
+     * outage notice both "post something", and conflating them is how the old behaviour would sneak back.
+     */
+    postQueueHeldNotice_: (age) => { state.held.push(age); return { posted: true, count: 0, held: true }; },
     logAuto_: (_a, _b, msg) => state.logs.push(String(msg)),
     reiSweepAgeMinutes_: () => age,
     ScriptApp: {
@@ -882,13 +896,55 @@ console.log('\n--- but the wait ends, because silence is worse than late ---');
 {
   const s = loadSequencer({ age: 400, waitCount: 3 });
   s.run();
-  check('after three waits it posts anyway', s.state.posted, 1);
+  /*
+   * THE QUEUE ITSELF IS NOT PUBLISHED — and this is the third answer to the same question, the first two
+   * both wrong.
+   *
+   * Version one posted the queue with "may be out of date" on the subtitle. The client saw it fire for real,
+   * the morning after their PC died so the last sweep was 17 hours old: "as you see this was 43 mins ago its
+   * not accurate and send." They were right. Six leads published with a warning attached puts the reader in
+   * the worst position available — act on it, or ignore it, with no way to tell which is correct. That is
+   * exactly how a colleague was blamed for outcomes they had already recorded.
+   *
+   * Version two would be silence. Also wrong, for a reason that has not changed: a card that simply does not
+   * arrive reads as "nothing needs doing", and the leads on it still need working.
+   *
+   * So: an outage notice carrying the one fact it can stand behind, and no lead data at all.
+   */
+  check('after three waits the QUEUE is not posted', s.state.posted, 0);
+  check('...an outage notice goes instead', s.state.held.length, 1);
   check('...scheduling no further retry', s.state.triggersMade, []);
-  check('...and the log admits it was not swept',
-    /WITHOUT a fresh REI sweep/.test(s.state.logs[0]), true);
+  check('...and the log says the queue was held back',
+    /Work queue HELD BACK/.test(s.state.logs[0]), true);
   check('...naming how long it waited', /waited 30 min/.test(s.state.logs[0]), true);
   check('...and the counter is cleared for the next posting', s.waits(), 0);
   check('the wait is bounded at three', s.MAX, 3);
+}
+{
+  /*
+   * What the notice may and may not contain. The rule is absolute: nothing out of the tracker. A count, a
+   * name, even "6 leads" invites somebody to act on a figure nobody verified — which is the whole failure.
+   */
+  const NOTICE = CHAT.slice(CHAT.indexOf('function postQueueHeldNotice_'),
+    CHAT.indexOf('function postAttentionDigest_'));
+  check('the notice reads no lead data at all', /dataSheet_\(|ATTENTION_BUCKETS|Seller Name/.test(NOTICE), false);
+  check('...and says explicitly that nothing was omitted',
+    /No lead has been left out — none has been/.test(NOTICE), true);
+  check('...it says when REI was last checked', /since /.test(NOTICE), true);
+  check('...and which machine should be running', /ACTIVE_MACHINE/.test(NOTICE), true);
+  /*
+   * Guarded with typeof, because this file gets pasted into projects that may not carry AgentSettings.gs yet
+   * — and a missing helper must not turn the one message that says nothing is working into a failure itself.
+   */
+  check('...without depending on that helper existing',
+    /typeof getAgentSetting_ === 'function'/.test(NOTICE), true);
+  /* Three things to check, in the order they are likely, so the message is actionable rather than alarming. */
+  check('it says what to check', /is REI still signed in/.test(NOTICE), true);
+  check('...naming the file to run', /login-rei\.cmd/.test(NOTICE), true);
+  check('...and points at the dashboard', /dashboard\.cmd/.test(NOTICE), true);
+  check('...and says nothing needs restarting', /Nothing needs restarting/.test(NOTICE), true);
+  check('the deployed copy carries it',
+    COMBINED_H.includes('function postQueueHeldNotice_'), true);
 }
 {
   /*
