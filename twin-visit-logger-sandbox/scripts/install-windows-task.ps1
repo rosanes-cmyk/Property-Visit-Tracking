@@ -136,6 +136,25 @@ if (-not $SkipBuckets) {
     front of a specific posting. The hourly sweep stays for the rest of the day, and a sweep with nothing
     due exits in seconds without opening a browser.
   #>
+  <#
+    The day's visit briefings, waiting in Chat before anybody starts.
+
+    The client, after being shown the command that asks for one: "its already added in the gc i shuould be
+    this autmatic at all i dont need to open or type." Right - a feature you have to know the name of is a
+    feature most of the team will never use.
+
+    07:30, half an hour before the 8am shift, so the visitor has the property, the numbers and the call in
+    front of them before the day begins rather than while they are driving to it.
+
+    It sends one briefing per lead per day, so this firing twice cannot double-post.
+  #>
+  $briefAt = "07:30"
+  $briefName = "Twin Visit Logger Morning Briefings"
+  $briefCmd = 'wscript.exe "' + $launcher + '" "morning-briefings.cmd"'
+  & schtasks.exe /Create /SC DAILY /ST $briefAt /TN $briefName /TR $briefCmd /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$briefName' failed with exit code $LASTEXITCODE." }
+  Write-Host ("  {0,-38} daily at {1}   today's visit briefings to Chat" -f $briefName, $briefAt)
+
   foreach ($at in @("08:45", "10:45", "15:45")) {
     $name = "Twin Visit Logger Sweep Before $($at -replace ':', '')"
     $cmd = 'wscript.exe "' + $launcher + '" "recheck-buckets.cmd"'

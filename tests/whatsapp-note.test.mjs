@@ -418,6 +418,44 @@ console.log('\n=== asking for a briefing after the fact ===');
 
   check('there is a double-clickable version',
     fs.existsSync(new URL('../twin-visit-logger-sandbox/scripts/send-briefing.cmd', import.meta.url)), true);
+
+  console.log('\n--- and it sends itself, every morning ---');
+  /*
+   * The client, having been shown the command: "its already added in the gc i shuould be this autmatic at
+   * all i dont need to open or type."
+   *
+   * Right, and it is the more important half. A feature you have to know the name of is a feature most of a
+   * team will never use — so the day's briefings now simply wait in Chat before anybody starts, and the
+   * typed command becomes the exception rather than the mechanism.
+   */
+  const INSTALL = fs.readFileSync(
+    new URL('../twin-visit-logger-sandbox/scripts/install-windows-task.ps1', import.meta.url), 'utf8');
+  const UNINSTALL = fs.readFileSync(
+    new URL('../twin-visit-logger-sandbox/scripts/uninstall-windows-task.ps1', import.meta.url), 'utf8');
+  check('a daily task posts the day\'s briefings', /Twin Visit Logger Morning Briefings/.test(INSTALL), true);
+  /* 07:30 — half an hour before the 8am shift, so it is read before the day rather than during the drive. */
+  check('...before the shift starts, not during it', /\$briefAt = "07:30"/.test(INSTALL), true);
+  check('...and uninstalling removes it too',
+    UNINSTALL.includes('"Twin Visit Logger Morning Briefings"'), true);
+  check('...running the whole day at once', /send-briefing\.mjs --today/.test(
+    fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/morning-briefings.cmd', import.meta.url), 'utf8')), true);
+
+  /*
+   * ONE PER LEAD PER DAY. A timer that fires twice — a PC that restarts, somebody running it by hand to
+   * check it works — must not put the same briefing in the space twice. Two identical briefings is how a
+   * person starts skimming past them, which costs more than the feature gives.
+   */
+  check('a lead already briefed today is skipped', /already \[sentKey\]|already\[sentKey\]/.test(SEND), true);
+  check('...keyed on the row AND the day, so a moved visit can be briefed again tomorrow',
+    /\$\{row\.__rowNumber\}\|\$\{stamp\}/.test(SEND), true);
+  /* But a person asking by hand always gets it — refusing them because a timer went first would be maddening. */
+  check('--force overrides it', /const FORCE = args\.includes\('--force'\)/.test(SEND), true);
+  /*
+   * Recorded only on a SUCCESSFUL send, the same rule the REI logout alert follows: stamping the attempt
+   * would let one Chat outage silence that lead's briefing for the whole day.
+   */
+  check('...and only a successful send is recorded',
+    SEND.indexOf('if (posted) {') < SEND.indexOf('already[sentKey] ='), true);
 }
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);

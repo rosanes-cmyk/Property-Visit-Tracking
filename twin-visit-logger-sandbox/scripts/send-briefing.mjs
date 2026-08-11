@@ -33,6 +33,8 @@
  * hourly sweep is what keeps the event current, and the briefing says when it was last written so a reader
  * can judge for themselves.
  */
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { authorizeGoogle } from '../src/google/auth.mjs';
@@ -43,7 +45,31 @@ import { notifyChat } from '../src/utils/notify.mjs';
 const args = process.argv.slice(2);
 const TODAY = args.includes('--today');
 const TOMORROW = args.includes('--tomorrow');
+/*
+ * --force re-sends something already sent today. Without it, a lead briefed this morning is skipped.
+ *
+ * The client's whole point was "i dont need to open or type" — which means this runs on a timer, and a
+ * timer that fires twice (a PC that restarts, a task run by hand to check it works) must not put the same
+ * briefing in the space twice. Two identical briefings is how a person starts skimming past them.
+ */
+const FORCE = args.includes('--force');
 const NEEDLE = args.filter((a) => !a.startsWith('--')).join(' ').trim().toLowerCase();
+
+/*
+ * Which briefings have already gone out, by day. A local file, not a sheet column: it is bookkeeping about a
+ * message, nobody needs it in the workbook, and adding a column is the one change in this project guaranteed
+ * to break something else.
+ */
+const SENT_FILE = path.resolve('./data/briefed.json');
+async function readSent() {
+  try { return JSON.parse(await fs.readFile(SENT_FILE, 'utf8')); } catch { return {}; }
+}
+async function writeSent(state) {
+  try {
+    await fs.mkdir(path.dirname(SENT_FILE), { recursive: true });
+    await fs.writeFile(SENT_FILE, JSON.stringify(state, null, 2));
+  } catch { /* bookkeeping must never fail the send it is recording */ }
+}
 
 if (!NEEDLE && !TODAY && !TOMORROW) {
   console.log('\nWho is the briefing for?\n');
@@ -131,11 +157,25 @@ if (config.calendarName) {
 
 let sent = 0;
 let skipped = 0;
+const already = await readSent();
+const stamp = dayKey(DateTime.now());
 
 for (const row of matches) {
   const who = text(row['Seller Name']) || `row ${row.__rowNumber}`;
   const address = text(row['Property Address']);
   const eventId = text(row['Calendar Event ID']);
+
+  /*
+   * Keyed on the ROW plus the day, so the same lead can legitimately be briefed again tomorrow (a visit that
+   * moved) but not twice this morning. A typed request with --force always goes: somebody asking by hand has
+   * a reason, and refusing them because a timer already sent one would be maddening.
+   */
+  const sentKey = `${row.__rowNumber}|${stamp}`;
+  if (!FORCE && already[sentKey]) {
+    console.log(`  ${who} — already briefed today at ${already[sentKey]}. Add --force to send it again.`);
+    skipped += 1;
+    continue;
+  }
 
   if (!eventId) {
     /*
@@ -186,8 +226,20 @@ for (const row of matches) {
     { kind: 'ok', keepContactDetails: true }
   );
 
-  if (posted) { sent += 1; console.log(`  ${who} — briefing posted to Chat.`); }
-  else { skipped += 1; console.log(`  ${who} — COULD NOT POST. Check the Chat webhook.`); }
+  if (posted) {
+    sent += 1;
+    console.log(`  ${who} — briefing posted to Chat.`);
+    /*
+     * Recorded only on a SUCCESSFUL send. Stamping the attempt would mean one Chat outage silences that
+     * lead's briefing for the whole day — the same rule the REI logout alert follows, and for the same
+     * reason: the failure mode of over-recording is silence nobody notices.
+     */
+    already[sentKey] = DateTime.now().setZone(zone).toFormat('h:mm a');
+    await writeSent(already);
+  } else {
+    skipped += 1;
+    console.log(`  ${who} — COULD NOT POST. Check the Chat webhook.`);
+  }
 }
 
 console.log(`\n${sent} briefing(s) sent${skipped ? `, ${skipped} skipped` : ''}.`);

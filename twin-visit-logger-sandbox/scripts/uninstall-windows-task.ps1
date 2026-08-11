@@ -19,6 +19,7 @@ foreach ($name in @("Twin Visit Logger Sandbox", "Twin Visit Logger WhatsApp",
                     "Twin Visit Logger REI Recheck", "Twin Visit Logger Board Intake",
   "Twin Visit Logger Sweep Before 0845", "Twin Visit Logger Sweep Before 1045",
   "Twin Visit Logger Sweep Before 1545",
+  "Twin Visit Logger Morning Briefings",
   "Twin Visit Logger Notes Audit",
                     "Twin Visit Logger Bucket Sweep")) {
   & schtasks.exe /Query /TN $name > $null 2>&1
