@@ -449,9 +449,28 @@ async function main() {
     await context.close();
     await release();
     // In the finally, so a crash still marks the job finished rather than leaving it reading as "running".
-    const summary = `${filled} finished, ${stuck} could not be looked up`;
-    endJob({ summary, ok: !stuck });
-    recordActivity(`Board intake — ${summary}.`, { kind: stuck ? 'warn' : 'ok', job: 'board-intake' });
+    /*
+     * The count of rows it never accounted for, and this exists because the client's dashboard showed
+     * "Board intake — 0 finished, 0 could not be looked up" every two minutes while one row sat waiting.
+     *
+     * Both zeros with a row queued is not a tidy result, it is a row that was passed over: either the run
+     * threw before reaching it, or it left the loop through a path that forgot to count. And "0 and 0" reads
+     * as "nothing to do", so the report looked CLEAN while a booking went unprocessed — the silent failure
+     * this project exists to make impossible.
+     *
+     * Arithmetic rather than a new flag on every branch: seen minus what was accounted for cannot be fooled
+     * by a path added later that forgets to increment, which is exactly how this happened.
+     */
+    const unaccounted = Math.max(0, pending.length - filled - stuck);
+    const summary = `${filled} finished, ${stuck} could not be looked up`
+      + (unaccounted ? `, ${unaccounted} NOT REACHED` : '');
+    endJob({ summary, ok: !stuck && !unaccounted });
+    recordActivity(`Board intake — ${summary}.`,
+      { kind: (stuck || unaccounted) ? 'warn' : 'ok', job: 'board-intake' });
+    if (unaccounted) {
+      console.log(`\n${unaccounted} row(s) were never reached. They are still waiting and the next run will`);
+      console.log('try again — but if this repeats, the run is stopping partway rather than skipping them.');
+    }
   }
 
   console.log(`\n${filled} row(s) ${APPLY ? 'filled in' : 'would be filled in'}, ${stuck} left parked.`);
