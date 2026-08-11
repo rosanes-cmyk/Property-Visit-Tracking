@@ -148,6 +148,29 @@ if (-not $SkipBuckets) {
 
     It sends one briefing per lead per day, so this firing twice cannot double-post.
   #>
+  <#
+    The parked leads - Lost / Closed Out and Long-Term Nurture - on a slow clock.
+
+    The client asked whether these should join the ordinary auto-check. Both extremes are wrong: adding ~214
+    mostly-dead leads to the 20-minute rotation roughly doubles REI page loads (the thing that keeps logging
+    this account out) and puts them in front of a booking a colleague is watching. Never reading them is also
+    wrong - Long-Term Nurture is DEFINED as "check back later", and a closed lead somebody reopens in REI
+    would say Lost on the board for ever.
+
+    So: once a day, forty leads, oldest-checked first. Every parked lead comes round about weekly for roughly
+    twenty minutes of browser time a day. It writes nothing and reports what looks alive again.
+
+    13:00 - the middle of the day, after the 10:45 sweep and well before the 15:45 one, so it is not queued
+    behind anything that matters. And it does not wait for the lock: it is the lowest-priority job here, so
+    if REI is busy it stands down and tomorrow will do.
+  #>
+  $parkedAt = "13:00"
+  $parkedName = "Twin Visit Logger Parked Leads"
+  $parkedCmd = 'wscript.exe "' + $launcher + '" "sweep-parked.cmd"'
+  & schtasks.exe /Create /SC DAILY /ST $parkedAt /TN $parkedName /TR $parkedCmd /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$parkedName' failed with exit code $LASTEXITCODE." }
+  Write-Host ("  {0,-38} daily at {1}   closed/nurture leads that look alive again" -f $parkedName, $parkedAt)
+
   $briefAt = "07:30"
   $briefName = "Twin Visit Logger Morning Briefings"
   $briefCmd = 'wscript.exe "' + $launcher + '" "morning-briefings.cmd"'
