@@ -336,3 +336,57 @@ export function parseReiMoney(value) {
   // An offer under a thousand is a typo or a placeholder, not a Bay Area property price.
   return Number.isFinite(n) && n >= 1000 ? String(n) : '';
 }
+
+/**
+ * Does REI's tag list carry this tag?
+ *
+ * The client: "there is a tag propery evaluated if the lead has been visit and note and if re sched tag
+ * property and double check as well the notes."
+ *
+ * A substring test, not a split. The contact page flattens the tags together with no separator — one real
+ * lead reads `Follow upProperty EvaluatedTHB Inquiry CallTwin Home Buyer Web Inquiries` — so splitting
+ * would have to guess where one tag ends and the next begins. Asking whether a known tag is PRESENT needs
+ * no guess and cannot get that wrong.
+ *
+ * Case- and space-insensitive, because a tag typed by hand in a CRM will eventually differ in both.
+ */
+export function hasReiTag(reiTags, tag) {
+  const flat = String(reiTags == null ? '' : reiTags).toLowerCase().replace(/\s+/g, '');
+  const want = String(tag || '').toLowerCase().replace(/\s+/g, '');
+  return !!want && flat.includes(want);
+}
+
+/**
+ * The tag REI carries once a property has been visited and written up.
+ *
+ * Named as a constant rather than typed at each call site: it is the client's wording, it will be compared
+ * in more than one place, and a typo in one of them would silently mean "this visit never happened".
+ */
+export const TAG_PROPERTY_EVALUATED = 'Property Evaluated';
+
+/**
+ * Has this visit demonstrably happened, according to REI?
+ *
+ * TWO signals required, and the second is the important one.
+ *
+ * The tag alone cannot be trusted. A real lead in this account carries `Follow up` AND `Property Evaluated`
+ * at the same time: tags get added and never tidied up, exactly as `Dead Lead` + `Lost Deal` + `Follow up`
+ * all sit on David Jackowitz at once. A stale tag moving a visit to Completed would be the automation
+ * asserting something about somebody's work that is not true — which is the specific failure that made a
+ * colleague angry, and the one this project has spent the most effort designing out.
+ *
+ * So the tag must be joined by a note dated ON OR AFTER the visit. The pair is what the client described:
+ * "tag property and double check as well the notes." Either on its own returns false.
+ */
+export function visitEvidencedByRei({ reiTags, lastContactAt, visitAt } = {}) {
+  if (!hasReiTag(reiTags, TAG_PROPERTY_EVALUATED)) return false;
+  if (!(lastContactAt instanceof Date) || Number.isNaN(lastContactAt.getTime())) return false;
+  if (!(visitAt instanceof Date) || Number.isNaN(visitAt.getTime())) return false;
+  /*
+   * Compared at DAY granularity. A note written the same morning as an afternoon visit is still the write-up
+   * of that visit as far as anybody is concerned, and demanding it be later to the minute would reject the
+   * normal case — somebody typing up the day's visits in one sitting.
+   */
+  const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return day(lastContactAt) >= day(visitAt);
+}

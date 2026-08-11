@@ -187,7 +187,12 @@
       "Next Action",
       "Next Step"
     ],
-    "_comment": "DEAD BLOCK -- nothing reads this. The scraper reads listItemLabels (see `const L = selectorConfig.listItemLabels` in src/rei/scraper.mjs); grep for `.labels` finds only Gmail's own API. Kept because deleting a block no test covers is its own risk, but do NOT edit it expecting an effect: I changed assignedOwner here to fix 'Missing: Assigned Owner' and nothing happened, because listItemLabels.assignedOwner already said 'Appointment Assigned To'. The label was never the bug."
+    "_comment": "DEAD BLOCK -- nothing reads this. The scraper reads listItemLabels (see `const L = selectorConfig.listItemLabels` in src/rei/scraper.mjs); grep for `.labels` finds only Gmail's own API. Kept because deleting a block no test covers is its own risk, but do NOT edit it expecting an effect: I changed assignedOwner here to fix 'Missing: Assigned Owner' and nothing happened, because listItemLabels.assignedOwner already said 'Appointment Assigned To'. The label was never the bug.",
+    "reiTags": [
+      "Tag(s)",
+      "Tags",
+      "Tag"
+    ]
   },
   "tabs": {
     "notes": [

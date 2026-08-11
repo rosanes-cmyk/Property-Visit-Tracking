@@ -22,7 +22,8 @@
 import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseOut, closeOutRefusal,
   stageContractCancelled, dispositionFromRei,
   reiSaysLost, nextActionReplaceable, parseReiMoney,
-  AUTOMATION_NEXT_ACTIONS }
+  AUTOMATION_NEXT_ACTIONS,
+  hasReiTag, visitEvidencedByRei, TAG_PROPERTY_EVALUATED }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
 import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS, followUpBlocker, blockerFromRei }
   from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
@@ -456,6 +457,72 @@ check('the amount is written as digits, not a formatted string',
 check('the scraper exposes the raw amount rather than re-parsing a sentence',
   /amountOffer: normalize\(amountOffer\)/.test(
     fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8')), true);
+
+
+console.log('\n=== REI tags: "Property Evaluated" ===');
+/*
+ * The client: "there is a tag propery evaluated if the lead has been visit and note and if re sched tag
+ * property and double check as well the notes."
+ *
+ * A page dump confirmed the contact carries a `Tag(s)` label whose value reads, on one real lead:
+ *
+ *     Follow upProperty EvaluatedTHB Inquiry CallTwin Home Buyer Web Inquiries
+ *
+ * Flattened, with no separator between tags — which is why this is a substring test rather than a split.
+ */
+{
+  const REAL = 'Follow upProperty EvaluatedTHB Inquiry CallTwin Home Buyer Web Inquiries';
+  check('the tag is found in a real flattened list', hasReiTag(REAL, TAG_PROPERTY_EVALUATED), true);
+  check('a tag that is not there is not found', hasReiTag(REAL, 'Under Contract'), false);
+  check('spacing does not matter', hasReiTag('propertyevaluated', 'Property Evaluated'), true);
+  check('case does not matter', hasReiTag('PROPERTY EVALUATED', TAG_PROPERTY_EVALUATED), true);
+  check('an empty tag list finds nothing', hasReiTag('', TAG_PROPERTY_EVALUATED), false);
+  /* Guard: an empty needle must not match everything, or every lead would look evaluated. */
+  check('an empty tag name matches nothing', hasReiTag(REAL, ''), false);
+  check('null is safe', hasReiTag(null, TAG_PROPERTY_EVALUATED), false);
+}
+
+console.log('\n--- the tag is only half the evidence ---');
+/*
+ * THE point of this rule. That same real lead carries `Follow up` AND `Property Evaluated` at once — tags
+ * get added and never tidied, exactly as David Jackowitz holds `Dead Lead`, `Lost Deal` and `Follow up`
+ * simultaneously. A stale tag moving a visit to Completed would be the automation asserting something about
+ * somebody's work that is not true: the specific failure that made a colleague angry.
+ */
+{
+  const visit = new Date(2026, 7, 11);
+  const REAL = 'Follow upProperty Evaluated';
+  check('tag plus a note after the visit is evidence',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: new Date(2026, 7, 12), visitAt: visit }), true);
+  /* Same day counts: somebody typing up the day's visits in one sitting is the normal case, not the exception. */
+  check('a note the same day counts',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: new Date(2026, 7, 11, 9), visitAt: visit }), true);
+  check('a note from BEFORE the visit does not',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: new Date(2026, 7, 10), visitAt: visit }), false);
+  check('the tag alone is not enough',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: null, visitAt: visit }), false);
+  check('a note alone is not enough',
+    visitEvidencedByRei({ reiTags: 'Follow up', lastContactAt: new Date(2026, 7, 12), visitAt: visit }), false);
+  check('no visit date means nothing can be judged',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: new Date(2026, 7, 12), visitAt: null }), false);
+  check('an unparseable date is refused, not guessed',
+    visitEvidencedByRei({ reiTags: REAL, lastContactAt: new Date('nonsense'), visitAt: visit }), false);
+  check('called with nothing at all is false', visitEvidencedByRei(), false);
+}
+
+console.log('\n--- and the scraper actually reads the tags ---');
+{
+  const SCRAPER = fs.readFileSync(
+    new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
+  check('tags are extracted', /const reiTags = valueForLabel\(pairs, L\.reiTags/.test(SCRAPER), true);
+  check('...and returned', /reiTags: normalize\(reiTags\)/.test(SCRAPER), true);
+  const SEL = JSON.parse(fs.readFileSync(
+    new URL('../twin-visit-logger-sandbox/config/rei-selectors.json', import.meta.url), 'utf8'));
+  check('...with the label REI actually uses', SEL.labels.reiTags.includes('Tag(s)'), true);
+  /* Kept as one string: the page gives no separator, so splitting would have to guess. */
+  check('the tags are kept as one string, not split',
+    /Kept as ONE STRING rather than split/.test(SCRAPER), true);
+}
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

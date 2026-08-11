@@ -194,6 +194,25 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     const assignedOwner = valueForLabel(pairs, L.assignedOwner || ['Appointment Assigned To', 'Sales Agent']);
     const leadSource = valueForLabel(pairs, L.leadSource || ['Source']);
     const contactStage = valueForLabel(pairs, L.contactStage || ['Lead Stage', 'Category']);
+    /*
+     * REI's TAGS, read from the same label/value pairs as everything else.
+     *
+     * The client: "there is a tag propery evaluated if the lead has been visit and note." A page dump
+     * confirmed it — the contact carries a `Tag(s)` label whose value reads, on one real lead:
+     *
+     *     Follow up · Property Evaluated · THB Inquiry Call · Twin Home Buyer Web Inquiries
+     *
+     * Kept as ONE STRING rather than split into a list, on purpose. The page flattens the tags together
+     * with no separator, so splitting would have to guess where "Follow up" ends and "Property Evaluated"
+     * begins — and guessing wrong on a field that decides whether a visit counts as done is exactly the
+     * kind of confident error this project keeps having to undo. Asking "does this contain the tag I care
+     * about" needs no split and cannot be wrong in that way.
+     *
+     * Note what that same lead proves: `Follow up` and `Property Evaluated` are present AT ONCE. Tags are
+     * added and never tidied, so a tag alone can never be enough to move a status — it is one half of a
+     * pair, the other being a note dated after the visit.
+     */
+    const reiTags = valueForLabel(pairs, L.reiTags || ['Tag(s)', 'Tags']);
     const nextAction = valueForLabel(pairs, L.nextAction || ['Next Step']);
     const callDisposition = valueForLabel(pairs, L.callDisposition || ['Call Disposition']);
     /*
@@ -428,6 +447,7 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
       cancelPhrase: cancelEvidence.phrase,
       deadLeadTags: deadTags,
       contactStage: normalize(contactStage),
+      reiTags: normalize(reiTags),
       propertyDetails: normalize(amountOffer ? `Amount Offer: ${amountOffer}` : ''),
       // Exposed separately as well: propertyDetails is a display string, and re-parsing a sentence to
       // recover a number the scraper already had is how rounding and currency bugs get in.
