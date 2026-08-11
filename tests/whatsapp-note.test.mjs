@@ -356,5 +356,69 @@ check('neither builds its own any more',
 check('the Chat side builds it from the calendar description',
   /briefingFromDescription\(buildDescription\(partialVisit\)/.test(PROC), true);
 
+console.log('\n=== asking for a briefing after the fact ===');
+/*
+ * The client, looking at a calendar event that already carried everything: "im asking about the notes for
+ * that should be send in whats app since its already added in caldar the lead."
+ *
+ * The briefing only ever went out at the MOMENT a booking was first processed. A visit booked last week — or
+ * booked on a PC that has since died, which is exactly what happened — produced no briefing ever again. And
+ * since the briefing is what a person copies into the visit's WhatsApp group, "it was posted once, three days
+ * ago, above four hundred other messages" is the same as never.
+ */
+{
+  const SEND = fs.readFileSync(
+    new URL('../twin-visit-logger-sandbox/scripts/send-briefing.mjs', import.meta.url), 'utf8');
+
+  check('there is a way to ask for one', SEND.includes('briefingFromDescription'), true);
+  /*
+   * Built from the CALENDAR EVENT, not a fresh REI scrape. Three reasons, and the first is the one that
+   * matters: it is what the visitor is already reading, so a second version built from REI risks the two
+   * disagreeing — and the one nobody checks would be the one in the car.
+   */
+  check('...from the calendar event the visitor is already reading',
+    /calendar\.events\.get\(\{ calendarId, eventId \}\)/.test(SEND), true);
+  check('...and the reason is written down', /not a fresh REI scrape/.test(SEND), true);
+  /* No browser: it must answer in a second for somebody who is about to leave, and work when REI is out. */
+  check('it opens no browser', /launchReiContext|scrapeReiVisit/.test(SEND), false);
+  check('...which is why it still works when REI is logged out',
+    /works when REI is logged out/.test(SEND), true);
+  /*
+   * The trade is real and stated: if REI has moved on since the event was written, this sends the older
+   * picture. Saying so beats implying a freshness it has not got — the same rule the work-queue card follows.
+   */
+  check('the staleness trade is admitted, not hidden', /The trade, stated/.test(SEND), true);
+
+  /* A row with no event is REPORTED, never faked from the tracker's own columns. */
+  check('a lead with no calendar event is skipped, not improvised',
+    /no calendar event on this row, so there is nothing to build from/.test(SEND), true);
+  check('...and says what to do instead', /Book it through the dashboard/.test(SEND), true);
+
+  /*
+   * Name matching in tiers, address only if no name matched — the same shape --only uses in the re-check, and
+   * for the same reason: a bare search for "Jose" also finds "San Jose" in an address, which is how a request
+   * for one seller once returned five.
+   */
+  check('seller name is matched before address',
+    SEND.indexOf("text(r['Seller Name']).toLowerCase()") < SEND.indexOf("text(r['Property Address']).toLowerCase()"), true);
+  /* --today is the shape somebody actually wants each morning: every briefing for the day, in one go. */
+  check('a whole day can be asked for at once', /const TODAY = args\.includes\('--today'\)/.test(SEND), true);
+
+  /*
+   * The calendar is resolved BY NAME first. The client's events live on "Juan's Official Calendar", not the
+   * account's own, and an id pointing at the wrong one would silently build briefings from the wrong events.
+   */
+  check('the calendar is found by name first', /c\.summary\) === text\(config\.calendarName\)/.test(SEND), true);
+
+  /*
+   * keepContactDetails, exactly as the intake does. A redacted phone means the visitor arrives at a house
+   * unable to ring ahead, goes hunting in REI, and the briefing has saved nothing. Same team-only space.
+   */
+  check('contact details survive, as in the intake', /keepContactDetails: true/.test(SEND), true);
+
+  check('there is a double-clickable version',
+    fs.existsSync(new URL('../twin-visit-logger-sandbox/scripts/send-briefing.cmd', import.meta.url)), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
