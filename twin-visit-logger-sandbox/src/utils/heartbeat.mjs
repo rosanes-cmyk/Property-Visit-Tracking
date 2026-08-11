@@ -44,11 +44,24 @@ const ACTIVITY_KEEP = 200;
 /*
  * A heartbeat older than this, from a process that is still alive, is reported as possibly stuck.
  *
- * Three minutes because one REI lead takes 20-40 seconds and a slow one has been seen at ninety. A tighter
- * window would cry stuck at every slow page; a looser one would take longer to notice a hang than a person
- * would take to notice it themselves, which defeats the point.
+ * SIX minutes, raised from three after it cried wolf on the client's first morning — "Possibly stuck. The REI
+ * sweep has not reported for 3 minutes" on a sweep that was working perfectly and finished shortly after.
+ *
+ * Three was set from how long a lead USUALLY takes, 20-40 seconds, which was the wrong number to reason from.
+ * The beat is written once per lead, so the gap between beats is the WORST case for a single lead, and the
+ * worst case is bounded by the timeouts rather than the average:
+ *
+ *   45s   REI_PAGE_TIMEOUT_MS, a page that never finishes rendering
+ * + 45s   the one retry an empty scrape is given
+ * + 45s   opening the Tasks panel on top of that
+ *   ----
+ *   ~2m15  before anything has actually gone wrong, plus whatever the network is doing
+ *
+ * Six leaves real headroom over that while still noticing a genuine hang long before a person would. A
+ * monitoring feature that reports healthy work as broken is worse than one that says nothing: it teaches
+ * the reader to ignore the warning, which is the one thing it cannot afford.
  */
-export const STUCK_AFTER_MS = 3 * 60 * 1000;
+export const STUCK_AFTER_MS = 6 * 60 * 1000;
 
 function ensureDir() {
   try { fs.mkdirSync(DIR, { recursive: true }); } catch { /* see rule 1 */ }

@@ -84,8 +84,19 @@ console.log('=== running, idle, stuck, died — the four states ===');
     job: 'bucket-sweep', pid: process.pid, startedAt: old, updatedAt: old, done: false, item: 'Pam Long'
   }));
   check('a live process that has gone quiet reads as stuck', HB.readHeartbeat().state, 'stuck');
-  /* Three minutes: one lead takes 20-40 seconds and a slow one has been seen at ninety. */
-  check('...after three minutes', HB.STUCK_AFTER_MS, 3 * 60 * 1000);
+  /*
+   * SIX minutes, raised from three after it cried wolf on the client's first morning: "Possibly stuck. The
+   * REI sweep has not reported for 3 minutes" — on a sweep that was working and finished shortly after.
+   *
+   * Three was reasoned from how long a lead USUALLY takes (20-40s), which is the wrong number. The beat is
+   * written once per lead, so the gap between beats is the WORST case for one lead, and that is bounded by
+   * the timeouts: a 45s page timeout, plus the one retry an empty scrape is given, plus opening the Tasks
+   * panel — over two minutes before anything has actually gone wrong.
+   *
+   * A monitor that reports healthy work as broken is worse than one that says nothing, because it teaches
+   * the reader to ignore it.
+   */
+  check('...after six minutes', HB.STUCK_AFTER_MS, 6 * 60 * 1000);
 }
 {
   fs.rmSync(path.join(SCRATCH, 'data', 'heartbeat.json'));
