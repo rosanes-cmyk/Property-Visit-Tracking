@@ -41,6 +41,7 @@ import { readTasks, pickTaskForVisit, completeTask } from '../src/rei/tasks.mjs'
 import { shouldCompleteTask } from '../src/rei/task-gate.mjs';
 import fsp from 'node:fs/promises';
 import { DateTime } from 'luxon';
+import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -111,6 +112,13 @@ async function main() {
 
   const auth = await authorizeGoogle();
   const sheets = google.sheets({ version: 'v4', auth });
+
+  /*
+   * Only the ACTIVE PC runs. This is the job with the most to lose from two of them: a colleague types a
+   * booking on the board, and two machines both scrape REI for it and both write the row and the calendar
+   * event — the duplicate row and duplicate event the project is built to never create.
+   */
+  if (await haltIfNotActiveMachine(sheets, config.spreadsheetId)) return;
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,

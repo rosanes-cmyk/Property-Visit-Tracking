@@ -41,6 +41,7 @@ import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
+import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 import { onTheCard, bucketOf } from '../src/rei/attention-rules.mjs';
 import {
   pickRecheckCandidates, recheckKey, recheckSkipReason, reiFieldsFromScrape,
@@ -170,6 +171,16 @@ async function alertLoggedOut(failed, checked) {
 
 const auth = await authorizeGoogle();
 const sheets = google.sheets({ version: 'v4', auth });
+
+/*
+ * Only the ACTIVE PC runs. Checked before the lock and before any REI browser opens.
+ *
+ * The client wants the app installed on every machine — "so it can just tranfer on evry pc". The local run
+ * lock cannot make that safe: it is a file on one disk and knows nothing about the other PC, so two machines
+ * would each take their own lock and both drive REI on the same account, which is precisely what kept
+ * logging the client out. The workbook is the only thing both can see, so the claim lives there.
+ */
+if (await haltIfNotActiveMachine(sheets, config.spreadsheetId)) process.exit(0);
 
 const book = await sheets.spreadsheets.get({ spreadsheetId: config.spreadsheetId });
 console.log(`Workbook: "${book.data.properties?.title}"  ·  tab "${config.trackerSheet}"`);

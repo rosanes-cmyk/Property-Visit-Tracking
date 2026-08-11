@@ -35,6 +35,7 @@ import { notifyChat } from '../src/utils/notify.mjs';
 import { visitOutcomeFromNotes } from '../src/rei/cancel-signal.mjs';
 import { STAGE_ADVANCE_FROM, STAGE_ON_COMPLETION } from '../src/rei/recheck.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
+import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');
@@ -64,6 +65,13 @@ if (haltForPause({ force: args.includes('--force') })) process.exit(0);
 
 const auth = await authorizeGoogle();
 const sheets = google.sheets({ version: 'v4', auth });
+
+/*
+ * Only the ACTIVE PC runs. This one opens no browser, so it cannot log REI out — but two machines writing
+ * Visit Status from the same notes would both append to the Automation Log and both post to Chat, so the
+ * team would read every outcome twice and have no way to tell which machine was right.
+ */
+if (await haltIfNotActiveMachine(sheets, config.spreadsheetId)) process.exit(0);
 
 const book = await sheets.spreadsheets.get({ spreadsheetId: config.spreadsheetId });
 console.log(`Workbook: "${book.data.properties?.title}"  ·  tab "${config.trackerSheet}"`);
