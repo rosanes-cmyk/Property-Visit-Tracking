@@ -238,6 +238,55 @@ console.log('\n=== the dashboard itself ===');
   check('it shows when the automation is paused', /s\.paused/.test(DASH), true);
   check('it shows when this PC is on standby', /This PC is on standby/.test(DASH), true);
   check('it shows whether the card can post', /the card will wait for a fresh sweep/.test(DASH), true);
+
+  /*
+   * THE BUG A SCREENSHOT CAUGHT, and the reason this section exists.
+   *
+   * Freshness was taken from the log FILE'S TIMESTAMP, which says when something last wrote to it — not
+   * that a sweep succeeded. A sweep that opened REI, found itself logged out and failed on all twelve leads
+   * writes to the log at that moment, so the tile read "REI swept 0 min ago — the card can post" directly
+   * beside a red tile reading "REI: Logged out".
+   *
+   * Reporting freshness that nothing earned is the exact mistake the check-first work was built to stop, so
+   * "it ran" and "it finished" are now separate facts and the tile needs both.
+   */
+  check('a sweep only counts as fresh if it FINISHED',
+    /const fresh = sw && sw\.finished && !sw\.failed && sw\.minutes <= 90;/.test(DASH), true);
+  check('...and "finished" is read from the log, not from its timestamp',
+    /const finished = \/Bucket sweep finished\/\.test\(lastRun\);/.test(DASH), true);
+  check('...with a failed sweep detected separately',
+    /const failed = \/LOGGED OUT\|COULD NOT BE READ\/i\.test\(lastRun\);/.test(DASH), true);
+  check('a failed sweep is described as failed, not as fresh',
+    /The last sweep <b>could not read REI<\/b>/.test(DASH), true);
+  check('...and an unfinished one says so too',
+    /The last sweep <b>did not finish<\/b>/.test(DASH), true);
+  /* Only the LAST run block is examined: an earlier success must not vouch for a later failure. */
+  check('only the most recent run is judged', /text\.split\(\/\^==== \/m\)\.pop\(\)/.test(DASH), true);
+
+  console.log('\n--- the theme is committed, not inherited from Windows ---');
+  /*
+   * The client: "i need professional look and black theme not white." The first version followed
+   * prefers-color-scheme, which is usually the considerate choice and was wrong here — the page was white on
+   * any PC with Windows in light mode, so the theme depended on a setting nobody had thought about.
+   */
+  check('dark is declared, not conditional', /color-scheme: dark/.test(DASH), true);
+  /*
+   * Asserted on the MEDIA QUERY, not the phrase: the file names prefers-color-scheme in the comment saying
+   * why it is not used. A bare text search fails on a correct file and pushes the next person to delete the
+   * explanation to get a green run — which is the opposite of what a test should encourage.
+   */
+  check('...and there is no light-mode override',
+    /@media\s*\(\s*prefers-color-scheme/.test(DASH), false);
+  /*
+   * Banner icons are CSS dots. The first version used emoji and a screenshot showed the pause glyph
+   * rendering as an empty box — one missing font away from a monitoring page that itself looks broken.
+   */
+  check('banner icons do not depend on an emoji font',
+    /\.banner \.ico\{flex:0 0 7px/.test(DASH), true);
+  /* A silent three-second refresh is indistinguishable from a frozen page without something moving. */
+  check('there is a live indicator', /@keyframes p\{/.test(DASH), true);
+  check('...and losing contact is stated rather than showing stale numbers',
+    /lost contact — close this window/.test(DASH), true);
 }
 {
   const CMD = read('scripts/dashboard.cmd');

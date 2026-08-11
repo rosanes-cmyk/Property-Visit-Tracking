@@ -84,10 +84,23 @@ function lastSweep() {
   try {
     const text = fs.readFileSync(path.join(LOGS, 'bucket-task.log'), 'utf8').slice(-40000);
     const stamps = [...text.matchAll(/^==== (.+?) ====$/gm)].map((m) => m[1]);
-    const finished = /Bucket sweep finished/.test(text.split(/^==== /m).pop() || '');
+    const lastRun = text.split(/^==== /m).pop() || '';
+    /*
+     * Did the last sweep FINISH, or merely run?
+     *
+     * The file's timestamp says when something last wrote to it, which is not the same thing at all — a
+     * sweep that opened REI, found itself logged out and failed on all twelve leads writes to the log at
+     * that moment and looks, from the timestamp alone, like a sweep that finished seconds ago.
+     *
+     * A screenshot caught exactly that: the page said "REI swept 0 min ago — the card can post" directly
+     * beside a red tile reading "REI: Logged out". Reporting freshness nothing earned is the specific
+     * mistake this whole feature was built to stop, so the two facts are kept apart.
+     */
+    const finished = /Bucket sweep finished/.test(lastRun);
+    const failed = /LOGGED OUT|COULD NOT BE READ/i.test(lastRun);
     const at = fs.statSync(path.join(LOGS, 'bucket-task.log')).mtimeMs;
     return { at: new Date(at).toISOString(), minutes: Math.round((Date.now() - at) / 60000),
-      lastStamp: stamps[stamps.length - 1] || '', finished };
+      lastStamp: stamps[stamps.length - 1] || '', finished, failed };
   } catch {
     return null;
   }
@@ -180,50 +193,130 @@ async function snapshot() {
 /* ---------------------------------------------------------------------- page */
 
 /*
- * One self-contained file. No CDN, no fonts, no build step — a page that needs the internet to render is a
- * page that fails on the morning somebody most wants to know whether the automation is alive.
+ * One self-contained file. No CDN, no web fonts, no build step — a page that needs the internet to render is
+ * a page that fails on the morning somebody most wants to know whether the automation is alive.
+ *
+ * DARK ONLY, at the client's instruction: "i need professional look and black theme not white."
+ *
+ * The first version followed prefers-color-scheme, which is usually the considerate choice and was wrong
+ * here: it meant the page was white on any PC with Windows in light mode, so what the theme looked like
+ * depended on a setting nobody had thought about. `color-scheme: dark` is declared too, so the scrollbars
+ * and any native control match the page instead of staying light against it.
  */
 const PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Twin Visit Logger — is it working?</title>
 <style>
-  :root{--bg:#0f1115;--card:#181c23;--line:#262c36;--ink:#e8ebf0;--dim:#93a0b4;
-        --ok:#3ecf8e;--warn:#f5c451;--bad:#ff6b6b;--idle:#6b7789}
-  @media(prefers-color-scheme:light){
-    :root{--bg:#f4f6f9;--card:#fff;--line:#e2e7ee;--ink:#161a20;--dim:#5c6a7d;--idle:#8b98a9}
+  /*
+   * Four surface levels rather than two. A flat panel on a flat background gives no sense of what contains
+   * what, which is most of what makes a dark interface look amateur — the page reads as a list of boxes
+   * instead of a hierarchy. Backdrop, card, raised, and hairline borders that are lighter than the card but
+   * darker than the text.
+   */
+  :root{
+    color-scheme: dark;
+    --backdrop:#080a0d; --card:#111419; --raise:#171b22; --line:#232833; --line-soft:#1a1f28;
+    --ink:#eef1f5; --dim:#98a3b5; --faint:#66707f;
+    --ok:#3ddc97; --warn:#f7c948; --bad:#ff6b6b; --idle:#5a6472; --accent:#5b9dff;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:18px}
-  h1{font-size:17px;margin:0 0 2px}
-  .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
-  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:1100px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
-  .card h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);margin:0 0 8px}
-  .big{font-size:19px;font-weight:600;display:flex;align-items:center;gap:8px}
-  .note{color:var(--dim);font-size:13px;margin-top:6px}
-  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
-  .ok{background:var(--ok)}.warn{background:var(--warn)}.bad{background:var(--bad)}.idle{background:var(--idle)}
-  .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:10px}
-  .bar > i{display:block;height:100%;background:var(--ok);transition:width .4s}
-  .wide{grid-column:1/-1;max-width:1100px}
-  ul{list-style:none;margin:0;padding:0}
-  li{display:flex;gap:9px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
-  li:last-child{border-bottom:0}
-  time{color:var(--dim);flex:0 0 66px;font-variant-numeric:tabular-nums}
-  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
-  a{color:inherit}
-  .banner{background:var(--card);border:1px solid var(--warn);border-left:3px solid var(--warn);
-          border-radius:8px;padding:11px 13px;margin-bottom:12px;max-width:1100px;font-size:14px}
+  html,body{background:var(--backdrop)}
+  body{margin:0;color:var(--ink);padding:26px 24px 40px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       -webkit-font-smoothing:antialiased;
+       /* Numbers line up in columns: counts, times and progress all sit in tabular positions. */
+       font-variant-numeric:tabular-nums}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  /* ---- header ---- */
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+         padding-bottom:14px;margin-bottom:20px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  h1{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0}
+  .tag{font-size:11px;color:var(--faint);letter-spacing:.02em}
+  .meta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--dim)}
+  /*
+   * A pulsing dot, because a page that refreshes silently every three seconds is indistinguishable from a
+   * frozen one — which on a "is it working" screen is the worst possible ambiguity to introduce.
+   */
+  .pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);
+         box-shadow:0 0 0 0 rgba(61,220,151,.55);animation:p 2.4s ease-out infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(61,220,151,.5)}70%{box-shadow:0 0 0 7px rgba(61,220,151,0)}
+               100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
+  .stale .pulse{background:var(--bad);animation:none}
+
+  /* ---- banners ---- */
+  .banner{display:flex;gap:11px;background:var(--card);border:1px solid var(--line);
+          border-left:2px solid var(--warn);border-radius:8px;padding:12px 14px;margin-bottom:10px;
+          font-size:13.5px;color:var(--ink);box-shadow:var(--shadow)}
+  .banner.bad{border-left-color:var(--bad)}
+  .banner.info{border-left-color:var(--accent)}
+  /*
+   * A CSS dot, not an emoji.
+   *
+   * The first version used ⏸ / ⚠️ / 🔴 / 💤, and a screenshot showed the pause glyph rendering as an empty
+   * box — one font away from a monitoring page that looks broken. Mixed emoji also read as less finished than
+   * a consistent shape. The dot takes its colour from the banner's severity, so it cannot disagree with the
+   * border beside it, and there is no font to be missing.
+   */
+  .banner .ico{flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:var(--warn);
+               margin-top:7px}
+  .banner.bad .ico{background:var(--bad)}
+  .banner.info .ico{background:var(--accent)}
+  .banner b{font-weight:600}
+  .banner code{background:var(--raise);border:1px solid var(--line);border-radius:4px;
+               padding:1px 5px;font-size:12px;font-family:ui-monospace,Consolas,monospace;color:var(--ink)}
+
+  /* ---- status tiles ---- */
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(216px,1fr))}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 16px 16px;
+        box-shadow:var(--shadow);position:relative;overflow:hidden}
+  /* A hairline of the status colour along the top edge — readable at a glance, without shouting. */
+  .tile::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--line)}
+  .tile.s-ok::before{background:var(--ok)} .tile.s-warn::before{background:var(--warn)}
+  .tile.s-bad::before{background:var(--bad)} .tile.s-idle::before{background:var(--idle)}
+  .tile h2{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+           color:var(--faint);margin:0 0 9px}
+  .val{font-size:17px;font-weight:600;letter-spacing:-.015em;line-height:1.25;
+       display:flex;align-items:center;gap:8px;min-height:22px}
+  .val .dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+  .s-ok .dot{background:var(--ok)} .s-warn .dot{background:var(--warn)}
+  .s-bad .dot{background:var(--bad)} .s-idle .dot{background:var(--idle)}
+  .sub2{color:var(--dim);font-size:12.5px;margin-top:7px;line-height:1.45}
+  .sub2 b{color:var(--ink);font-weight:600}
+  .sub2 code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--ink)}
+  .bar{height:3px;background:var(--line-soft);border-radius:2px;overflow:hidden;margin-top:12px}
+  .bar > i{display:block;height:100%;background:var(--ok);transition:width .45s ease}
+  .s-warn .bar > i{background:var(--warn)}
+
+  /* ---- activity ---- */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:12px;
+         box-shadow:var(--shadow);overflow:hidden}
+  .panel > h2{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+              color:var(--faint);margin:0;padding:14px 16px 11px;border-bottom:1px solid var(--line-soft)}
+  ul{list-style:none;margin:0;padding:4px 0}
+  li{display:flex;gap:14px;padding:7px 16px;font-size:13px;align-items:baseline}
+  li + li{border-top:1px solid var(--line-soft)}
+  li time{color:var(--faint);flex:0 0 58px;font-size:12px}
+  li .txt{color:var(--dim)}
+  li .txt b{color:var(--ink);font-weight:500}
+  li.k-warn .txt b{color:var(--warn)} li.k-error .txt b{color:var(--bad)}
+  .empty{color:var(--faint);padding:14px 16px;font-size:13px}
+  footer{color:var(--faint);font-size:11.5px;margin-top:18px;text-align:center}
 </style></head><body>
-<h1>Twin Visit Logger</h1>
-<div class="sub" id="sub">connecting…</div>
-<div id="banners"></div>
-<div class="grid" id="cards"></div>
-<div class="card wide" style="margin-top:12px">
-  <h2>Recent activity</h2>
-  <ul id="feed"><li>…</li></ul>
+<div class="wrap">
+  <header id="head">
+    <div class="brand"><h1>Twin Visit Logger</h1><span class="tag">automation monitor</span></div>
+    <div class="meta"><span class="pulse"></span><span id="meta">connecting…</span></div>
+  </header>
+  <div id="banners"></div>
+  <div class="grid" id="cards"></div>
+  <div class="panel"><h2>Recent activity</h2><ul id="feed"></ul>
+    <div class="empty" id="feedEmpty" style="display:none">Nothing yet — the first run will appear here.</div>
+  </div>
+  <footer>Refreshes every 3 seconds · this page is only reachable from this PC</footer>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -231,85 +324,105 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&am
 const clock = (iso) => { try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } catch { return ''; } };
 const mins = (n) => n == null ? '' : (n < 60 ? n + ' min ago' : Math.round(n/60) + ' h ago');
 
-function card(title, dot, big, note, extra) {
-  return '<div class="card"><h2>' + esc(title) + '</h2><div class="big">'
-    + (dot ? '<span class="dot ' + dot + '"></span>' : '') + esc(big) + '</div>'
-    + (note ? '<div class="note">' + note + '</div>' : '') + (extra || '') + '</div>';
+function tile(label, state, value, detail, extra) {
+  return '<div class="tile s-' + state + '"><h2>' + esc(label) + '</h2>'
+    + '<div class="val"><span class="dot"></span>' + esc(value) + '</div>'
+    + (detail ? '<div class="sub2">' + detail + '</div>' : '')
+    + (extra || '') + '</div>';
 }
 
 function render(s) {
-  $('sub').textContent = s.machine + ' · refreshed ' + clock(s.now);
+  $('meta').textContent = 'live · ' + s.machine + ' · ' + clock(s.now);
+  $('head').classList.remove('stale');
 
-  /* Banners are for things that need doing, in the order they block each other. */
+  /* Banners are things that need DOING, ordered by what blocks what. */
   const banners = [];
-  if (s.paused) banners.push('<b>PAUSED.</b> Nothing is running on its own. Run <code>scripts\\\\resume.cmd</code> to start again.');
-  if (s.rei.ok === false) banners.push('<b>REI is logged out.</b> Nothing can be checked until you sign in — run <code>scripts\\\\login-rei.cmd</code>.');
-  if (s.beat.state === 'stuck') banners.push('<b>Possibly stuck.</b> The ' + esc(s.beat.name) + ' has not reported for ' + Math.round(s.beat.silentFor/60000) + ' minutes.');
-  if (s.beat.state === 'died') banners.push('<b>A run stopped without finishing.</b> The next scheduled one will pick up where it left off — nothing is lost.');
-  if (s.lock.held && !s.lock.alive) banners.push('<b>A lock was left behind</b> by a run that died (' + s.lock.ageMinutes + ' min ago). It clears itself after 30 minutes.');
+  /* level: 'info' (deliberate state), 'warn' (worth knowing), 'bad' (nothing works until somebody acts) */
+  const add = (level, html) => banners.push({ level, html });
+  if (s.paused) add('info', '<b>Paused.</b> Nothing is running on its own. Run <code>scripts\\\\resume.cmd</code> to start again.');
+  if (s.rei && s.rei.ok === false) add('bad', '<b>REI is logged out.</b> Nothing can be checked until somebody signs in — run <code>scripts\\\\login-rei.cmd</code> on this PC.');
+  if (s.beat.state === 'stuck') add('warn', '<b>Possibly stuck.</b> The ' + esc(s.beat.name) + ' has not reported for ' + Math.round(s.beat.silentFor/60000) + ' minutes.');
+  if (s.beat.state === 'died') add('warn', '<b>A run stopped without finishing.</b> The next scheduled one picks up where it left off — nothing is lost.');
+  if (s.lock && s.lock.held && !s.lock.alive) add('warn', '<b>A lock was left behind</b> by a run that died ' + s.lock.ageMinutes + ' minutes ago. It clears itself after 30.');
   if (s.sheet && s.sheet.settingsPublished && s.sheet.activeMachine && s.sheet.activeMachine !== s.sheet.thisMachine)
-    banners.push('<b>This PC is on standby.</b> "' + esc(s.sheet.activeMachine) + '" is the active one, so nothing runs here. To move it: <code>scripts\\\\make-this-pc-active.cmd</code>');
-  if (s.sheetError) banners.push('Could not read the workbook just now: ' + esc(s.sheetError));
-  $('banners').innerHTML = banners.map(b => '<div class="banner">' + b + '</div>').join('');
+    add('info', '<b>This PC is on standby.</b> "' + esc(s.sheet.activeMachine) + '" is the active one, so nothing runs here. To move it: <code>scripts\\\\make-this-pc-active.cmd</code>');
+  if (s.sheetError) add('warn', 'Could not read the workbook just now — ' + esc(s.sheetError));
+  $('banners').innerHTML = banners.map(b =>
+    '<div class="banner ' + b.level + '"><span class="ico"></span><span>' + b.html + '</span></div>').join('');
 
   const cards = [];
 
-  /* NOW — the question the whole page exists to answer. */
-  if (s.beat.state === 'running' || s.beat.state === 'stuck') {
-    const pct = s.beat.total ? Math.round(100 * s.beat.index / s.beat.total) : 0;
-    cards.push(card('Now', s.beat.state === 'stuck' ? 'warn' : 'ok', s.beat.name,
-      esc(s.beat.phase) + (s.beat.item ? ' — <b>' + esc(s.beat.item) + '</b>' : '')
-        + (s.beat.total ? ' (' + s.beat.index + ' of ' + s.beat.total + ')' : ''),
-      s.beat.total ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : ''));
-  } else if (s.beat.state === 'idle') {
-    cards.push(card('Now', 'idle', 'Idle',
-      s.beat.summary ? 'Last: ' + esc(s.beat.name) + ' — ' + esc(s.beat.summary) : 'Waiting for the next scheduled run.'));
-  } else if (s.beat.state === 'died') {
-    cards.push(card('Now', 'bad', 'A run stopped', 'It was ' + esc(s.beat.name) + '. The next one carries on.'));
+  /* NOW — the question the whole page exists to answer, so it comes first and gets the progress bar. */
+  const b = s.beat;
+  if (b.state === 'running' || b.state === 'stuck') {
+    const pct = b.total ? Math.round(100 * b.index / b.total) : 0;
+    cards.push(tile('Now', b.state === 'stuck' ? 'warn' : 'ok', b.name,
+      esc(b.phase) + (b.item ? ' · <b>' + esc(b.item) + '</b>' : '')
+        + (b.total ? ' <span style="color:var(--faint)">(' + b.index + ' of ' + b.total + ')</span>' : ''),
+      b.total ? '<div class="bar"><i style="width:' + pct + '%"></i></div>' : ''));
+  } else if (b.state === 'idle') {
+    cards.push(tile('Now', 'idle', 'Idle',
+      b.summary ? 'Last run: ' + esc(b.name) + ' — <b>' + esc(b.summary) + '</b>'
+                : 'Waiting for the next scheduled run.'));
+  } else if (b.state === 'died') {
+    cards.push(tile('Now', 'bad', 'Run stopped', 'It was the ' + esc(b.name) + '. The next one carries on.'));
   } else {
-    cards.push(card('Now', 'idle', 'Nothing reported yet', 'The first scheduled run will show up here.'));
+    cards.push(tile('Now', 'idle', 'Nothing yet', 'The first scheduled run will show up here.'));
   }
 
   /* REI */
-  cards.push(card('REI', s.rei.ok === true ? 'ok' : s.rei.ok === false ? 'bad' : 'idle',
-    s.rei.ok === true ? 'Signed in' : s.rei.ok === false ? 'Logged out' : 'Unknown',
-    s.rei.ok === false ? 'Run <code>scripts\\\\login-rei.cmd</code> on this PC.'
-      : s.rei.ok === true ? 'Last confirmed ' + clock(s.rei.at) : esc(s.rei.why || '')));
+  const r = s.rei || {};
+  cards.push(tile('REI', r.ok === true ? 'ok' : r.ok === false ? 'bad' : 'idle',
+    r.ok === true ? 'Signed in' : r.ok === false ? 'Logged out' : 'Unknown',
+    r.ok === false ? 'Run <code>scripts\\\\login-rei.cmd</code> on this PC.'
+      : r.ok === true ? 'Last confirmed ' + clock(r.at) : esc(r.why || '')));
 
-  /* Queue */
+  /* Queued */
   if (s.sheet) {
-    cards.push(card('Queued', s.sheet.pending ? 'warn' : 'ok',
+    cards.push(tile('Queued', s.sheet.pending ? 'warn' : 'ok',
       s.sheet.pending ? s.sheet.pending + ' waiting' : 'Nothing waiting',
       s.sheet.pending
-        ? 'Booking(s) typed on the board, waiting for REI. Usually done within 2 minutes.'
-        : s.sheet.rows + ' leads on the board · ' + s.sheet.withLink + ' have a REI link to check'));
+        ? 'Booking(s) typed on the board, waiting on REI. Usually done within 2 minutes.'
+        : '<b>' + s.sheet.rows + '</b> leads on the board · <b>' + s.sheet.withLink + '</b> with a REI link to check'));
   } else {
-    cards.push(card('Queued', 'idle', '—', 'Could not read the workbook.'));
+    cards.push(tile('Queued', 'idle', '—', 'Could not read the workbook.'));
   }
 
-  /* Freshness — the same fact the Chat card refuses to post without. */
+  /* Work-queue card — the same freshness fact the Chat card refuses to post without. */
   const sw = s.sweep;
-  cards.push(card('Work-queue card', sw && sw.minutes <= 90 ? 'ok' : 'warn',
-    'Next at ' + s.card.in,
-    sw ? ('REI last swept ' + mins(sw.minutes)
-          + (sw.minutes > 90 ? ' — the card will wait for a fresh sweep before it posts' : ' — the card can post'))
-       : 'No sweep has run yet on this PC.'));
+  /*
+   * A sweep only counts if it FINISHED. "Something wrote to the log 30 seconds ago" is not the same claim,
+   * and conflating them is how this tile once read "the card can post" beside "REI: Logged out".
+   */
+  const fresh = sw && sw.finished && !sw.failed && sw.minutes <= 90;
+  /* Value is just the time: the label already says what it is, and "Next at 9am tomorrow" wrapped. */
+  cards.push(tile('Next work-queue card', fresh ? 'ok' : 'warn', s.card.in,
+    !sw ? 'No sweep has run yet on this PC.'
+      : sw.failed ? 'The last sweep <b>could not read REI</b> — the card will hold, then post saying the data may be out of date.'
+      : !sw.finished ? 'The last sweep <b>did not finish</b> — the card will wait for one that does.'
+      : fresh ? 'REI swept <b>' + mins(sw.minutes) + '</b> — the card can post'
+      : 'REI last swept <b>' + mins(sw.minutes) + '</b> — the card will wait for a fresh sweep before posting'));
 
   /* This PC */
   if (s.sheet && s.sheet.settingsPublished) {
     const mine = s.sheet.activeMachine === s.sheet.thisMachine;
-    cards.push(card('This PC', mine ? 'ok' : 'warn', mine ? 'Active' : 'Standby',
-      mine ? 'This is the machine that runs everything.'
-           : '"' + esc(s.sheet.activeMachine || 'nobody') + '" is active.'));
+    cards.push(tile('This PC', mine ? 'ok' : 'warn', mine ? 'Active' : 'Standby',
+      mine ? 'The machine that runs everything.'
+           : '<b>' + esc(s.sheet.activeMachine || 'nobody') + '</b> is active.'));
   }
 
   $('cards').innerHTML = cards.join('');
 
-  $('feed').innerHTML = (s.activity || []).length
-    ? s.activity.map(a => '<li><time>' + clock(a.at) + '</time><span>'
-        + (a.kind === 'warn' ? '⚠️ ' : a.kind === 'error' ? '❌ ' : '')
-        + esc(a.text) + '</span></li>').join('')
-    : '<li><span class="pill">nothing yet — the first run will appear here</span></li>';
+  const feed = s.activity || [];
+  $('feedEmpty').style.display = feed.length ? 'none' : '';
+  $('feed').innerHTML = feed.map(a => {
+    /* Bold the part before the em dash: the subject reads first, the outcome second. */
+    const parts = String(a.text || '').split(' — ');
+    const head = esc(parts.shift());
+    const tail = parts.length ? ' — ' + esc(parts.join(' — ')) : '';
+    return '<li class="k-' + esc(a.kind || 'info') + '"><time>' + clock(a.at) + '</time>'
+      + '<span class="txt"><b>' + head + '</b>' + tail + '</span></li>';
+  }).join('');
 }
 
 async function tick() {
@@ -317,7 +430,12 @@ async function tick() {
     const r = await fetch('/api');
     render(await r.json());
   } catch (e) {
-    $('sub').textContent = 'The dashboard stopped — close this window and run scripts\\\\dashboard.cmd again.';
+    /*
+     * The server is gone. Say so on the page rather than freezing on stale numbers — a monitor showing
+     * two-minute-old figures as though they were current is worse than one admitting it lost contact.
+     */
+    $('head').classList.add('stale');
+    $('meta').textContent = 'lost contact — close this window and run dashboard.cmd again';
   }
 }
 tick();
