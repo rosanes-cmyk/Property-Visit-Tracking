@@ -28,7 +28,21 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { readHeartbeat, readActivity, JOB_NAMES, STUCK_AFTER_MS } from '../src/utils/heartbeat.mjs';
+
+/*
+ * A per-run secret, printed into the page and required on the one endpoint that DOES something.
+ *
+ * Without it the update button would be a cross-site request forgery hole. This server answers on
+ * 127.0.0.1, and any web page in any tab can POST to 127.0.0.1 — so a page the user visits while the
+ * dashboard is open could trigger an install. It cannot READ the response (same-origin policy stops that),
+ * so a token it has to echo back is exactly the thing it cannot obtain.
+ *
+ * Regenerated every launch, because a token that outlives the process is a token that can be replayed.
+ */
+const TOKEN = crypto.randomBytes(24).toString('hex');
 
 const args = process.argv.slice(2);
 const portArg = (() => {
@@ -171,6 +185,44 @@ async function sheetSnapshot() {
   return sheetCache;
 }
 
+/*
+ * Is there a new version? Cached for half an hour.
+ *
+ * A much longer cache than the sheet's, because the answer changes when I upload a package — a few times a
+ * month at most — and the page polls every three seconds. Checking Drive on each poll would be 1,200 API
+ * calls an hour to answer a question with the same answer every time.
+ *
+ * `installing` is remembered for the life of the process rather than re-derived, so the page keeps saying
+ * "close the dashboard to finish" instead of flipping back to "update available" on the next poll.
+ */
+let updateCache = { at: 0, data: null };
+let installing = null;
+const UPDATE_CACHE_MS = 30 * 60 * 1000;
+
+async function updateSnapshot() {
+  if (installing) return installing;
+  if (Date.now() - updateCache.at < UPDATE_CACHE_MS) return updateCache.data;
+  updateCache = { at: Date.now(), data: updateCache.data };
+  try {
+    const { authorizeGoogle } = await import('../src/google/auth.mjs');
+    const { google } = await import('googleapis');
+    const { checkForUpdate } = await import('../src/google/updates.mjs');
+    const auth = await authorizeGoogle();
+    const drive = google.drive({ version: 'v3', auth });
+    const found = await checkForUpdate(drive, { root: '.' });
+    updateCache = { at: Date.now(), data: found.available
+      ? { available: true, version: found.version, installed: found.installed }
+      : { available: false, installed: found.installed } };
+  } catch {
+    /*
+     * Swallowed on purpose. An update check is the least important thing on this page, and a Drive outage
+     * must not put a red banner on a system that is working perfectly.
+     */
+    updateCache = { at: Date.now(), data: updateCache.data };
+  }
+  return updateCache.data;
+}
+
 async function snapshot() {
   const beat = readHeartbeat();
   const sheet = await sheetSnapshot();
@@ -186,8 +238,29 @@ async function snapshot() {
     paused: fs.existsSync(path.join(DATA, 'PAUSED')),
     sheet: sheet.data,
     sheetError: sheet.error,
+    update: await updateSnapshot(),
     activity: readActivity(25)
   };
+}
+
+/**
+ * Start the updater, and tell it to wait for THIS process too.
+ *
+ * The dashboard server runs from the folder being replaced, so it holds files open and the swap would fail
+ * with a sharing violation — the update would look ready and then quietly not happen. Passing our pid makes
+ * the swap wait for the dashboard window to be closed, which the page then asks the person to do.
+ *
+ * Detached and unref'd so it survives this server, and stdio ignored: its console output goes nowhere useful
+ * from here, and the page reports progress instead.
+ */
+function startInstall() {
+  if (installing) return installing;
+  const child = spawn(process.execPath,
+    ['scripts/update-app.mjs', '--install', '--wait-for', String(process.pid)],
+    { detached: true, stdio: 'ignore' });
+  child.unref();
+  installing = { available: false, installing: true, startedAt: new Date().toISOString() };
+  return installing;
 }
 
 /* ---------------------------------------------------------------------- page */
@@ -268,6 +341,12 @@ const PAGE = `<!doctype html>
   .banner b{font-weight:600}
   .banner code{background:var(--raise);border:1px solid var(--line);border-radius:4px;
                padding:1px 5px;font-size:12px;font-family:ui-monospace,Consolas,monospace;color:var(--ink)}
+  .banner.upd{border-left-color:var(--accent)}
+  .banner .grow{flex:1}
+  button{font:inherit;font-size:12.5px;font-weight:600;color:#04121f;background:var(--accent);
+         border:0;border-radius:6px;padding:6px 13px;cursor:pointer;white-space:nowrap}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{background:var(--raise);color:var(--faint);cursor:default;filter:none}
 
   /* ---- status tiles ---- */
   .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(216px,1fr))}
@@ -319,6 +398,7 @@ const PAGE = `<!doctype html>
   <footer>Refreshes every 3 seconds · this page is only reachable from this PC</footer>
 </div>
 <script>
+const TOKEN = "__TOKEN__";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const clock = (iso) => { try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } catch { return ''; } };
@@ -347,8 +427,41 @@ function render(s) {
   if (s.sheet && s.sheet.settingsPublished && s.sheet.activeMachine && s.sheet.activeMachine !== s.sheet.thisMachine)
     add('info', '<b>This PC is on standby.</b> "' + esc(s.sheet.activeMachine) + '" is the active one, so nothing runs here. To move it: <code>scripts\\\\make-this-pc-active.cmd</code>');
   if (s.sheetError) add('warn', 'Could not read the workbook just now — ' + esc(s.sheetError));
+  /*
+   * The update button. Last in the list because it is the only one that is not a problem — everything above
+   * it is something wrong, and a "new version available" notice sitting on top of "REI is logged out" would
+   * bury the thing that actually needs doing.
+   */
+  const u = s.update || {};
+  if (u.installing) {
+    banners.push({ level: 'upd', html: '<b>Update downloaded.</b> <b>Close this dashboard window</b> to finish '
+      + 'installing — the swap is waiting for it. Your settings and logins are carried over.' });
+  } else if (u.available) {
+    banners.push({ level: 'upd', html: '<span class="grow"><b>Update available — ' + esc(u.version) + '</b> '
+      + '<span style="color:var(--dim)">(you have ' + esc(u.installed) + ')</span></span>',
+      button: 'Install now' });
+  }
   $('banners').innerHTML = banners.map(b =>
-    '<div class="banner ' + b.level + '"><span class="ico"></span><span>' + b.html + '</span></div>').join('');
+    '<div class="banner ' + b.level + '"><span class="ico"></span><span class="grow">' + b.html + '</span>'
+      + (b.button ? '<button id="doUpdate">' + b.button + '</button>' : '') + '</div>').join('');
+
+  const btn = $('doUpdate');
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = 'Downloading…';
+    try {
+      /*
+       * The token is what stops any web page in any other tab from POSTing here and triggering an install.
+       * It is embedded in this page, and same-origin policy means a hostile page cannot read it.
+       */
+      const r = await fetch('/install', { method: 'POST', headers: { 'x-dash-token': TOKEN } });
+      if (!r.ok) throw new Error(await r.text());
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Install now';
+      alert('Could not start the update: ' + e.message);
+    }
+  };
 
   const cards = [];
 
@@ -445,6 +558,35 @@ setInterval(tick, 3000);
 /* -------------------------------------------------------------------- server */
 
 const server = http.createServer(async (req, res) => {
+  /*
+   * The only endpoint that DOES anything, and therefore the only one that needs defending.
+   *
+   * Three conditions, and each covers something the others do not:
+   *
+   *   POST — a GET could be triggered by an <img src> on any page, with no script involved at all.
+   *   the token — this server answers on 127.0.0.1, and any page in any tab can POST to 127.0.0.1. A hostile
+   *     page cannot READ our page (same-origin policy), so a secret it must echo back is exactly what it
+   *     cannot obtain. Compared with timingSafeEqual so the comparison leaks nothing about the value.
+   *   no Origin, or our own — a browser sends Origin on cross-site POSTs, so a mismatch is a positive signal
+   *     that this did not come from our page. Belt and braces with the token, deliberately.
+   */
+  if (req.url === '/install') {
+    const supplied = String(req.headers['x-dash-token'] || '');
+    const expected = TOKEN;
+    const sameLength = supplied.length === expected.length;
+    const tokenOk = sameLength && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+    const origin = String(req.headers.origin || '');
+    const originOk = !origin || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin);
+    if (req.method !== 'POST' || !tokenOk || !originOk) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('refused');
+      return;
+    }
+    startInstall();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ started: true }));
+    return;
+  }
   if (req.url === '/api') {
     let body;
     try {
@@ -463,7 +605,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(PAGE);
+  /*
+   * The token is substituted per response rather than baked into the template, so the constant cannot be
+   * accidentally logged, cached or written to disk as part of the page source.
+   */
+  res.end(PAGE.replace('__TOKEN__', TOKEN));
 });
 
 /*
