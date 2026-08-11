@@ -28,6 +28,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';                 // hostname, so a logout alert says WHICH PC to sign in on
 import { google } from 'googleapis';
 import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
@@ -120,6 +121,51 @@ async function readState() {
 async function writeState(state) {
   await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+/*
+ * "REI is logged out" goes to Chat — at most once every two hours.
+ *
+ * Throttled, and the number matters. Four jobs hit REI on timers: the whole-book re-check every 20
+ * minutes, the bucket sweep hourly, three fixed sweeps before the cards, and the board intake every two
+ * minutes. A logged-out REI means every one of them fails, so an unthrottled alert is roughly forty
+ * identical messages an hour — which is how a space gets muted, and a muted space is worse than no alert
+ * because everyone believes they are covered.
+ *
+ * Two hours is chosen to be longer than the gap between the digest hours is short: you get the message,
+ * and if you fix it you never see it again; if you do not, it reappears before the next card goes out.
+ *
+ * Its own file, not the re-check state: that file is keyed by lead, and a key that is not a lead sitting
+ * in the middle of it is the kind of thing somebody later reads as corruption.
+ */
+const ALERT_FILE = path.resolve('./data/alerts.json');
+const LOGOUT_ALERT_EVERY_MS = 2 * 60 * 60 * 1000;
+
+async function alertLoggedOut(failed, checked) {
+  let seen = {};
+  try { seen = JSON.parse(await fs.readFile(ALERT_FILE, 'utf8')); } catch { seen = {}; }
+  const last = Number(seen.reiLoggedOutAt) || 0;
+  if (Date.now() - last < LOGOUT_ALERT_EVERY_MS) {
+    console.log('  (Chat was already told within the last 2 hours — not repeating it.)');
+    return;
+  }
+  const sent = await notifyChat(
+    `REI is LOGGED OUT on ${os.hostname()} — the sweep read 0 of ${checked} lead(s) `
+    + `(${failed} login redirects). Nothing is being checked, so the work-queue cards will be stale `
+    + 'until somebody signs in. On that PC, run:  scripts\\login-rei.cmd  — sign in, close the window, '
+    + 'and the timers pick the session up on their own. No data is lost: a lead that failed is not '
+    + 'recorded as checked, so it goes straight back to the front of the queue.',
+    { kind: 'error', critical: true }
+  );
+  if (!sent) { console.log('  (Could not reach Chat to report the logout.)'); return; }
+  /*
+   * Stamped only on a SUCCESSFUL send. Recording the attempt would mean a Chat outage silences the alert
+   * for two hours, which is precisely the wrong direction for the one message that says nothing works.
+   */
+  seen.reiLoggedOutAt = Date.now();
+  await fs.mkdir(path.dirname(ALERT_FILE), { recursive: true });
+  await fs.writeFile(ALERT_FILE, JSON.stringify(seen, null, 2));
+  console.log('  Reported it to Google Chat.');
 }
 
 const auth = await authorizeGoogle();
@@ -776,6 +822,23 @@ if (failures.length) {
     console.log('      npm run login:rei');
     console.log('  Sign in, close the window, and the timers pick the session up. Nothing is corrupted —');
     console.log('  a failed lead is not recorded as checked, so it goes straight back to the front.');
+    /*
+     * And SAY SO IN CHAT, because until now this went nowhere but a log file.
+     *
+     * The client asked whether the REI login is a one-time thing. It is not — REI logs this account out on
+     * its own, repeatedly; it is why the browser lock exists at all. That is tolerable, because the fix is
+     * one command and ten seconds. What was not tolerable is that nobody was TOLD: the sweep failed on all
+     * twelve leads, wrote a line into a log nobody opens, and the cards carried on being posted from a
+     * tracker nothing was reading. Days could pass.
+     *
+     * Now the card's own freshness rule holds the digest back when the sweep stops stamping — but "the card
+     * is late and says it may be out of date" tells you something is wrong without telling you WHAT. This
+     * message names it and names the fix, on the machine that needs it.
+     *
+     * critical: true, so CHAT_ALERTS=off does not swallow it. That switch exists for per-lead noise; this
+     * is "nothing is being checked at all", which is the opposite of noise.
+     */
+    await alertLoggedOut(loggedOut, candidates.length);
   }
   for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
     console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);

@@ -76,7 +76,64 @@ check('...defaulting to ON, so nobody loses alerts by upgrading',
 check("...and only the exact word 'off' turns it off",
   /!==\s*'off'/.test(CFG), true);
 check('it is validated like every other setting', /chatAlerts: z\.boolean\(\)/.test(CFG), true);
-check('notifyChat honours it', /if \(cfg && !cfg\.chatAlerts\) return false;/.test(NOTIFY), true);
+check('notifyChat honours it', /if \(cfg && !cfg\.chatAlerts && !critical\) return false;/.test(NOTIFY), true);
+
+/*
+ * ...with ONE exception, and the line between them is what makes the switch safe to leave off.
+ *
+ * What the client asked to silence was per-lead noise: "this visit moved", "that gift went out" — news it
+ * is fine to read tomorrow. `critical: true` is for a message that says the automation CANNOT WORK AT ALL,
+ * and there is exactly one today: REI is logged out, so nothing is being checked and every card from here
+ * is stale. Before this, that condition wrote one line into a log file and stopped. Nobody reads log files,
+ * so it could sit for days while the cards carried on looking authoritative.
+ *
+ * Silencing that is not "fewer interruptions" — it is the system failing quietly, which is the single
+ * failure mode this project has spent the most effort designing out.
+ */
+check('a critical alert is not silenced by the off switch', /critical = false/.test(NOTIFY), true);
+/*
+ * Anchored on the CALL, not the name: `scrubContactDetails` also appears where it is defined, further up
+ * the file, so a bare indexOf compares against the definition and passes for the wrong reason.
+ */
+check('...and it is still redacted like everything else',
+  NOTIFY.indexOf('critical = false') < NOTIFY.indexOf(': scrubContactDetails(text)}`'), true);
+/*
+ * Narrow on purpose. If this list grows, the switch stops meaning anything — so the count is asserted, and
+ * adding a second critical message is a deliberate act that edits this line.
+ */
+{
+  const RECHECK = fs.readFileSync('twin-visit-logger-sandbox/scripts/recheck-rei.mjs', 'utf8');
+  const users = ['scripts/recheck-rei.mjs', 'scripts/fill-pending-rei.mjs', 'scripts/audit-notes.mjs',
+    'src/services/process.mjs', 'src/whatsapp/watch.mjs', 'src/rei/recheck.mjs']
+    /* `critical: true }` — the closing brace anchors this to a real call site rather than a comment. */
+    .flatMap((f) => (fs.readFileSync(`twin-visit-logger-sandbox/${f}`, 'utf8')
+      .match(/critical: true \}/g) || []).map(() => f));
+  check('exactly one message in the project is critical', users, ['scripts/recheck-rei.mjs']);
+  check('...and it is the REI logout', /REI is LOGGED OUT on \$\{os\.hostname\(\)\}/.test(RECHECK), true);
+  /*
+   * Throttled, and the number matters. Four jobs hit REI on timers — the 20-minute whole-book re-check, the
+   * hourly sweep, three fixed pre-card sweeps, and the two-minute board intake. A logged-out REI fails every
+   * one of them, so an unthrottled alert is roughly forty identical messages an hour. That is how a space
+   * gets muted, and a muted space is worse than no alert because everybody believes they are covered.
+   */
+  check('the logout alert is throttled', /LOGOUT_ALERT_EVERY_MS = 2 \* 60 \* 60 \* 1000/.test(RECHECK), true);
+  check('...and the throttle only stamps on a SUCCESSFUL send',
+    RECHECK.indexOf('if (!sent) {') < RECHECK.indexOf('seen.reiLoggedOutAt = Date.now()'), true);
+  /*
+   * Because recording the ATTEMPT would let a Chat outage silence the one message that says nothing works —
+   * exactly the wrong direction, and a mistake that would be invisible for two hours at a time.
+   */
+  check('...so a Chat outage does not silence it for two hours',
+    /Recording the attempt would mean a Chat outage silences the alert/.test(RECHECK), true);
+  check('the alert names a fix a non-developer can run', /scripts\\\\login-rei\.cmd/.test(RECHECK), true);
+  check('...and that file exists', fs.existsSync('twin-visit-logger-sandbox/scripts/login-rei.cmd'), true);
+  /*
+   * It must say no data was lost. "REI is logged out" reads like an emergency, and the honest reassurance —
+   * a failed lead is never recorded as checked, so it returns to the front of the queue — is the difference
+   * between someone fixing it calmly and someone going looking for damage that is not there.
+   */
+  check('...and says nothing was lost', /No data is lost/.test(RECHECK), true);
+}
 /*
  * The order matters: the switch is checked BEFORE the webhook, so turning alerts off works whether or not a
  * webhook is configured, and cannot depend on one being present.

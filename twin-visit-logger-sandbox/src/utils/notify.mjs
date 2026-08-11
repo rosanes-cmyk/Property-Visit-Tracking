@@ -46,7 +46,9 @@ export function scrubContactDetails(text) {
  * `kind` is only used to prefix the message so the space is skimmable: a failure should be
  * distinguishable from a success at a glance, without reading the sentence.
  */
-export async function notifyChat(text, { kind = 'info', webhookUrl = null, keepContactDetails = false } = {}) {
+export async function notifyChat(text, {
+  kind = 'info', webhookUrl = null, keepContactDetails = false, critical = false
+} = {}) {
   const cfg = webhookUrl !== null ? null : (await import('../config.mjs')).config;
   /*
    * CHAT_ALERTS=off silences these without touching the webhook.
@@ -58,8 +60,17 @@ export async function notifyChat(text, { kind = 'info', webhookUrl = null, keepC
    *
    * An explicit webhookUrl bypasses the switch, because that is how the tests exercise this function and how
    * a one-off diagnostic addresses a different space on purpose.
+   *
+   * `critical: true` also bypasses it, and the distinction is the whole reason the switch is safe to leave
+   * off. What the client asked to silence was PER-LEAD noise — "this visit moved", "that gift went out" —
+   * things it is fine to read tomorrow. A critical message says the automation CANNOT DO ITS JOB AT ALL:
+   * REI is logged out, so nothing is being checked and every card from here is stale. Silencing that is not
+   * "fewer interruptions", it is the system failing quietly, which is the failure mode this project has
+   * spent the most effort designing out.
+   *
+   * It is deliberately narrow. Use it only where the message means "nothing works until a person acts".
    */
-  if (cfg && !cfg.chatAlerts) return false;
+  if (cfg && !cfg.chatAlerts && !critical) return false;
   const url = webhookUrl !== null ? webhookUrl : cfg.chatWebhookUrl;
   if (!url) return false;
 
