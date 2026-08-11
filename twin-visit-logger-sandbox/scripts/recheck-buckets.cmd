@@ -1,6 +1,17 @@
 @echo off
 setlocal
 cd /d "%~dp0.."
+
+rem The bundled runtime, when this is the packaged app.
+rem
+rem Without this, an install from the portable folder looks perfect and every scheduled job fails SILENTLY:
+rem the packaged folder deliberately carries no Node on PATH, so a bare "node" is not found, and Task
+rem Scheduler reports the task as having run. The same reasoning covers Chromium - Playwright would try to
+rem download 150 MB on a machine with nobody watching and possibly no internet.
+set "NODE=node"
+if exist "%~dp0..\runtime\node.exe" set "NODE=%~dp0..\runtime\node.exe"
+if exist "%~dp0..\browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0..\browsers"
+set "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
 if not exist logs mkdir logs
 
 rem The hourly sweep: only the leads on the 3pm card. Everything else is covered by the ordinary
@@ -26,5 +37,5 @@ rem
 rem Queueing is affordable here because this sweep is SMALL — only the leads on the card, 7 of them
 rem today, not the 149 the whole-book job walks. The re-check holds the lock about five minutes in
 rem twenty, and the wait gives up after twelve, so it takes its turn rather than stacking browsers.
-node scripts\recheck-rei.mjs --buckets --limit 40 --wait --yes >> "logs\bucket-task.log" 2>&1
+"%NODE%" scripts\recheck-rei.mjs --buckets --limit 40 --wait --yes >> "logs\bucket-task.log" 2>&1
 endlocal

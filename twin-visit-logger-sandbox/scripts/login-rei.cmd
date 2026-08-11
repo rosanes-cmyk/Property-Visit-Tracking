@@ -21,6 +21,11 @@ rem The bundled Node, when this is the packaged app; otherwise whatever is on PA
 set "NODE=node"
 if exist "%~dp0..\runtime\node.exe" set "NODE=%~dp0..\runtime\node.exe"
 
+rem And the bundled Chromium. This file OPENS A BROWSER, so without it Playwright would try to download one
+rem - on the machine of somebody who is only trying to sign in again after REI logged them out.
+if exist "%~dp0..\browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0..\browsers"
+set "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
+
 echo.
 echo   Opening REI so you can sign in.
 echo.
