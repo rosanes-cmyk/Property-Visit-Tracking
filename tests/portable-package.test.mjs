@@ -77,7 +77,24 @@ check('node.exe is packaged', /Copy-Item -Force \$nodeExe/.test(PS), true);
 check('...without npm, because node_modules travels with it',
   /node\.exe alone, not the whole Node installation/.test(PS), true);
 check('Chromium is packaged', /PLAYWRIGHT_BROWSERS_PATH/.test(PS), true);
-check('...only Chromium, not firefox and webkit', /Chromium only\./.test(PS), true);
+check('...only Chromium, not firefox and webkit', /Chromium only/.test(PS), true);
+/*
+ * And only the build Playwright ACTUALLY USES. The ms-playwright folder accumulates a directory per version
+ * forever: the first real build here shipped chromium-1228, chromium-1234 and both headless_shell siblings —
+ * four copies of a browser, and why the package came out at 1.68 GB instead of about 800 MB.
+ *
+ * Which one is right cannot be guessed from the version numbers; it is whichever the PACKAGED node_modules
+ * asks for. So Playwright is asked directly. Guessing "highest number" would eventually package a build the
+ * bundled Playwright does not want, and that lands on a new PC as "Executable doesn't exist" during setup —
+ * the worst possible place for it.
+ */
+check('...and only the build Playwright asks for',
+  /p\.chromium\.executablePath\(\)/.test(PS), true);
+check('...with its headless shell, so REI_HEADLESS=true still works',
+  /chromium_headless_shell/.test(PS), true);
+/* A bigger package still works; a missing browser does not. So the fallback is to over-include. */
+check('...falling back to all builds rather than none',
+  /packaging all Chromium builds/.test(PS), true);
 check('...and a missing browser is explained rather than silently skipped',
   /Run 'npm run install-browser'/.test(PS), true);
 check('a missing Node is explained too', /Node is not on PATH here/.test(PS), true);

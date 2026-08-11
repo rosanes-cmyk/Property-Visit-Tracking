@@ -103,9 +103,40 @@ $pwHome = if ($env:PLAYWRIGHT_BROWSERS_PATH) { $env:PLAYWRIGHT_BROWSERS_PATH }
 if (-not (Test-Path $pwHome)) {
   throw "No Playwright browsers found at $pwHome. Run 'npm run install-browser' here first."
 }
-# Chromium only. The folder also holds firefox and webkit if anyone has ever installed them, and this project
-# drives Chromium exclusively - shipping the other two would triple the package for nothing.
-$chromiumDirs = Get-ChildItem $pwHome -Directory | Where-Object { $_.Name -like "chromium*" }
+# Chromium only, and only the build Playwright ACTUALLY USES.
+#
+# The folder holds firefox and webkit if anyone has ever installed them, and it accumulates a directory per
+# Playwright version forever - the first real build here shipped chromium-1228, chromium-1234 and both of
+# their headless_shell siblings, which is four copies of a browser and why the package came out at 1.68 GB
+# instead of about 800 MB. Nothing was wrong with it; three quarters of a gigabyte was just wasted on every
+# copy, every USB stick and every update upload.
+#
+# Which one is right cannot be guessed from the version numbers: it is whichever the PACKAGED node_modules
+# asks for, so Playwright is asked directly. Guessing "the highest number" would eventually package a build
+# the bundled Playwright does not want, and the failure would land on a new PC as "Executable doesn't exist"
+# during setup - the worst possible place for it.
+$needed = ""
+try {
+  $needed = & node -e "try{const p=require('playwright');console.log(p.chromium.executablePath())}catch(e){console.log('')}"
+} catch { $needed = "" }
+
+$chromiumDirs = @()
+if ($needed -and (Test-Path $needed)) {
+  # .../ms-playwright/chromium-1234/chrome-win/chrome.exe  ->  chromium-1234
+  $rel = $needed.Substring($pwHome.Length).TrimStart('\', '/')
+  $wanted = $rel.Split([char[]]@('\', '/'))[0]
+  # The headless shell is a separate download that Playwright uses for headless launches. Kept alongside so
+  # REI_HEADLESS=true still works on the packaged app; dropped for OTHER versions, which is where the bloat was.
+  $suffix = $wanted -replace '^chromium', ''
+  $chromiumDirs = Get-ChildItem $pwHome -Directory |
+    Where-Object { $_.Name -eq $wanted -or $_.Name -eq ("chromium_headless_shell" + $suffix) }
+  Write-Host "  (Playwright wants $wanted - packaging that build only)"
+}
+if (-not $chromiumDirs) {
+  # Fall back to everything chromium rather than failing: a bigger package still works, a missing one does not.
+  Write-Host "  (could not ask Playwright which build it needs - packaging all Chromium builds)"
+  $chromiumDirs = Get-ChildItem $pwHome -Directory | Where-Object { $_.Name -like "chromium*" }
+}
 if (-not $chromiumDirs) { throw "No chromium build under $pwHome. Run 'npm run install-browser'." }
 New-Item -ItemType Directory -Force -Path (Join-Path $dest "browsers") | Out-Null
 foreach ($d in $chromiumDirs) {
