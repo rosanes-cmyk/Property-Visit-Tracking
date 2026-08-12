@@ -83,6 +83,24 @@ const raw = {
    * the sending back without anyone deciding to.
    */
   whatsappSeedOnly: bool(process.env.WHATSAPP_SEED_ONLY, false),
+  /*
+   * Drive the INSTALLED Chrome instead of Playwright's bundled Chromium.
+   *
+   * Added because WhatsApp Web served the automation a blank page and bounced it to
+   * `?post_logout=1` with no QR at all, while the SAME number in an incognito window on the same PC
+   * got a QR immediately. The client's read was that the automated window was behaving oddly rather
+   * than the account being blocked, and they were right to push on it: Playwright's bundled Chromium
+   * is not the same build as Chrome — it ships without the proprietary media codecs — and WhatsApp Web
+   * is known to refuse builds it does not recognise.
+   *
+   * So this is worth testing, and it may well fix the blank page.
+   *
+   * It does NOT make automating WhatsApp safer. Read that twice. If it links successfully we are back
+   * to exactly the risk that has already cost this project three numbers: what Meta objects to is a
+   * program driving WhatsApp Web, and running it in a nicer browser does not change that. Off by
+   * default for that reason.
+   */
+  whatsappUseSystemChrome: bool(process.env.WHATSAPP_USE_SYSTEM_CHROME, false),
   // Country code for a bare 10-digit number that carries none of its own. '1' is right for the
   // US sellers read from REI. A number that already has a country code is used as-is, and one
   // starting with a 0 (a local trunk prefix) is refused rather than guessed at.
@@ -196,6 +214,7 @@ const schema = z.object({
   reiCompleteTasks: z.boolean(),
   whatsappPostNote: z.boolean(),
   whatsappSeedOnly: z.boolean(),
+  whatsappUseSystemChrome: z.boolean(),
   phoneDefaultCountry: z.string().min(1),
   // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
   // to `raw` alone silently arrives as undefined.

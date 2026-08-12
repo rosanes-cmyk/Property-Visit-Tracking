@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
+import { config } from '../config.mjs';
 import { plausibleTitle, titlesMatch, noteAlreadyPresent } from './post-gate.mjs';
 
 export const WHATSAPP_URL = 'https://web.whatsapp.com/';
@@ -33,8 +34,22 @@ const FORBIDDEN = /send|delete|clear|block|report|exit|leave|logout|log out|remo
 
 export async function launchWhatsApp({ userDataDir, headless = false, timezone = 'America/Los_Angeles' }) {
   await fs.mkdir(userDataDir, { recursive: true });
+  /*
+   * `channel: 'chrome'` drives the Chrome that is INSTALLED on this PC rather than Playwright's own
+   * Chromium, and it is off unless WHATSAPP_USE_SYSTEM_CHROME says otherwise.
+   *
+   * It exists because WhatsApp Web served this automation a blank page and redirected it to
+   * `?post_logout=1` with no QR, while the same number in an incognito window on the same machine got a QR
+   * instantly. Playwright's bundled Chromium is not the same build as Chrome — no proprietary media codecs
+   * — and WhatsApp Web refuses builds it does not recognise, which fits what was seen exactly.
+   *
+   * Worth testing. NOT a safety measure: if it links, the risk is identical to the one that has already
+   * cost three numbers, because what Meta objects to is a program driving WhatsApp Web at all. Anyone
+   * turning this on should read src/config.mjs where that is spelled out.
+   */
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless,
+    ...(config.whatsappUseSystemChrome ? { channel: 'chrome' } : {}),
     timezoneId: timezone,
     locale: 'en-US',
     viewport: { width: 1280, height: 900 },
