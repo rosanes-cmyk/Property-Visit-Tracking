@@ -377,3 +377,33 @@ The visit WhatsApp groups are TEAM ONLY (`WHATSAPP_INCLUDE_SELLER=false`), decid
 after seeing that their own hand-built groups contain no sellers. Adding one would expose whatever
 the team posts — offer numbers, motivation reads, equity estimates — to the person being negotiated
 with. Do not flip that default without the client saying so explicitly.
+
+### The fourth number, 2026-08-11
+
+WhatsApp was switched on again at the client's instruction, in seed-only mode, on **the same number that had
+already been restricted** — their words: *"no its the same number."* The risk was stated once and not
+re-litigated; it is their business and their account.
+
+The sequence took about ten minutes. `whatsapp-login` reported *"Logged in and saved."* A second login attempt
+showed the QR again. `whatsapp-doctor` then found the page sitting at:
+
+```
+web.whatsapp.com/?post_logout=1&logout_reason=0
+```
+
+WhatsApp's own words for "this session has been ended". No group was created, nothing was typed, nothing sent.
+
+**This is the fourth data point, and it is the cheapest one to learn from: the session did not survive
+linking.** It is no longer an estimate that a working number gets restricted — it is four for four.
+
+Two things came out of it worth keeping:
+
+- `whatsapp-doctor` reported **"Looks logged in (no QR on screen)"** on that logout page, because it only
+  checked for a QR canvas. The three missing selectors underneath then read as a selector problem on a working
+  login, when the truth was the opposite and far more serious. It now checks the URL first. A diagnostic that
+  reports the wrong state is worse than none: it sends somebody to fix selectors while the real answer is to
+  stop.
+- The argument for the mode is weaker than it was. The briefing — the only part that carried value — now
+  reaches Google Chat automatically at 07:30 for every visit that day, with nobody running anything. So the
+  automation is risking a working business number to save the few seconds it takes a colleague to create a
+  group by hand.

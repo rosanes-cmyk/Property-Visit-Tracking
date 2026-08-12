@@ -51,7 +51,30 @@ const state = await page.evaluate(() => {
 console.log(`URL:   ${state.url}`);
 console.log(`Title: ${state.title}\n`);
 
-if (state.qrCanvas || state.mentionsLinkDevice) {
+/*
+ * The URL is checked BEFORE the QR, because a logged-out page does not always show one.
+ *
+ * This tool reported "Looks logged in (no QR on screen)" on a page whose address was
+ * `web.whatsapp.com/?post_logout=1&logout_reason=0` — WhatsApp's own words for "this session has been
+ * ended". The three missing selectors underneath followed from exactly that: no chat list because there was
+ * no session. Read together it looked like a selector problem on a working login, and the honest reading was
+ * the opposite and far more serious — the account had terminated an automated session within minutes, on a
+ * number that had already been restricted once.
+ *
+ * A diagnostic that reports the wrong state is worse than no diagnostic: it sends somebody to fix selectors
+ * while the real answer is to stop.
+ */
+var loggedOut = /post_logout=1|logout_reason=/i.test(String(state.url || ''));
+if (loggedOut) {
+  console.log('LOGGED OUT — the page address says so: post_logout=1.');
+  console.log('  WhatsApp ENDED this session. That is not a selector problem and not something to retry');
+  console.log('  blindly: on a number that has been restricted before, a session terminated shortly after');
+  console.log('  linking is the same pattern that lost the previous three.');
+  console.log('\n  Check your phone: WhatsApp > Settings > Linked devices. If the device is not listed,');
+  console.log('  WhatsApp removed it rather than you.');
+  console.log('\n  Before linking again, be sure you want to: set WHATSAPP_ENABLED=false to stop the');
+  console.log('  scheduled runs trying. The visit briefing reaches Google Chat either way.\n');
+} else if (state.qrCanvas || state.mentionsLinkDevice) {
   console.log('NOT LOGGED IN — WhatsApp Web is still showing the QR / link-device screen.');
   console.log('  Run:  node scripts\\whatsapp-login.mjs');
   console.log('  Scan the code, WAIT until your real chats appear in the window, and only then');
