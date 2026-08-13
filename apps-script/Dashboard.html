@@ -239,7 +239,28 @@ var VISITORS=['Juan'];
 var BOOKING_OWNERS=['Thea','Cherry','Genesis'];
 var BOOKING_VISITORS=['Juan','Cesar'];
 var STAGES=['Visit Scheduled','Visit Completed — Needs Review','Offer Preparation','Offer Sent','Active Negotiation','Verbal Agreement','Contract Sent','Contract Signed','Long-Term Nurture','Lost / Closed Out'];
-var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads'];
+/*
+ * Starting values only — boot() replaces this with DROPDOWNS['Lead Source'] from Config.gs, which is the
+ * one true list. It is written out in full anyway so the two cannot silently disagree: this copy was
+ * missing 'MLS' long after the workbook had it, so anyone whose boot payload failed to arrive got a
+ * booking form that could not file an on-market lead at all.
+ */
+var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','PPL - Property Leads','PPL - Motivated Leads','MLS'];
+/*
+ * What the team SEES for a lead source, where that differs from what the sheet STORES.
+ *
+ * The client, pointing at the booking form: "add in the dashboard of the mls/ redfin right? in adding
+ * property tabs". Redfin leads are already handled — REI labels them "MLS/ Redfin" and mapLeadSource folds
+ * both into 'MLS' — but a colleague reading a list that says only "MLS" has no way to know that, so a Redfin
+ * lead gets filed under Direct Mail or left blank.
+ *
+ * The label is widened; the stored value is NOT. Adding a second value would split one channel across two
+ * rows of every report, break the rows already filed as 'MLS', and create a value REI itself can never
+ * produce. The <option> carries value="MLS" and reads "MLS / Redfin", so the sheet is unchanged and the
+ * form is finally self-explanatory.
+ */
+var LEAD_LABELS={'MLS':'MLS / Redfin'};
+function leadLabel(s){return LEAD_LABELS[s]||s;}
 var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
 var NEXT_ACTIONS=['Conduct scheduled visit & log outcome','Decide: make offer or pass','Follow up on sent offer','Re-attempt contact (no reply)','Decide counter response','Prepare & send contract','Confirm signature','Hand off signed contract for transaction coordination','Nurture check-in call','Send requested info to seller'];
 
@@ -781,7 +802,7 @@ function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style
 function openAdd(){var host=document.createElement('div');host.className='modal-bg';
   host.innerHTML='<div class="modal"><h3>Book / reschedule visit</h3><p class="cap">Name and phone are enough. The address and the rest come from REI within a few minutes — you can close this tab.</p>'+
    '<div class="row2"><div class="field"><label>Seller Name *</label><input data-k="seller"></div><div class="field"><label>Phone *</label><input data-k="phone" placeholder="(650) 620-4017"></div></div>'+
-   '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
+   '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option value="'+esc(s)+'">'+esc(leadLabel(s))+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
    '<div class="row2"><div class="field"><label>Visit Date</label><input data-k="visitDate" type="date" value="'+todayISO()+'"></div><div class="field"><label>Visit Time</label><input data-k="visitTime" type="time"></div></div>'+
    '<div class="row2"><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Visitor</label><select data-k="visitor"><option value="">(none)</option>'+BOOKING_VISITORS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+BOOKING_OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+

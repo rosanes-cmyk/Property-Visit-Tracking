@@ -93,5 +93,36 @@ check('"mlsomething" is not MLS', mapLeadSource('mlsomething'), '');
 check('"clippings" is not PPC', mapLeadSource('newspaper clippings'), '');
 check('"stv" is not TV', mapLeadSource('stvincent'), '');
 
+/*
+ * ---- The booking form has to OFFER it, too ----
+ *
+ * The client, pointing at the Book / reschedule visit dialog: "add in the dashboard of the mls/ redfin
+ * right? in adding property tabs". mapLeadSource had covered the automated path for weeks; the form a
+ * colleague actually types into had not moved. Two things were wrong there and each is checked below.
+ */
+const html = fs.readFileSync('apps-script/Dashboard.html', 'utf8');
+
+/*
+ * 1. The starting list. boot() overwrites LEADS with the server's copy, so this was easy to leave behind —
+ *    and it had been, for every value added since the file was written. It only shows when the boot payload
+ *    does not arrive, which is exactly when nobody is in a position to work around it.
+ */
+const FALLBACK = ((html.match(/var LEADS=\[([^\]]+)\]/) || [])[1] || '')
+  .match(/'([^']+)'/g).map((s) => s.slice(1, -1));
+check('the form\'s starting list matches the workbook exactly',
+  FALLBACK.join('|'), ALLOWED.join('|'));
+
+/*
+ * 2. The label. Redfin leads have always been legal — they are stored as 'MLS' — but a colleague reading a
+ *    list that says only "MLS" cannot know that, so the lead lands under Direct Mail or nowhere. The option
+ *    reads "MLS / Redfin" and still SUBMITS 'MLS': widening the stored value would split one channel across
+ *    every report and orphan the rows already filed.
+ */
+check('MLS is labelled for Redfin as well', /var LEAD_LABELS=\{'MLS':'MLS \/ Redfin'\}/.test(html), true);
+check('the option submits the stored value, not the label',
+  /<option value="'\+esc\(s\)\+'">'\+esc\(leadLabel\(s\)\)\+'<\/option>/.test(html), true);
+/* A label that is not a legal dropdown value must never be what gets written. */
+check('the widened label is not itself a dropdown value', ALLOWED.includes('MLS / Redfin'), false);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
