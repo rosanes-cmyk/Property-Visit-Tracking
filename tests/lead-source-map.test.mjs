@@ -124,5 +124,21 @@ check('the option submits the stored value, not the label',
 /* A label that is not a legal dropdown value must never be what gets written. */
 check('the widened label is not itself a dropdown value', ALLOWED.includes('MLS / Redfin'), false);
 
+/*
+ * 3. And the gap itself. Syncing the two copies fixes MLS and not the fault: the same race applies to
+ *    STAGES, VSTATUS, BOOKING_OWNERS and BOOKING_VISITORS, so the next value added to any of them brings
+ *    the ghost back. The form must not open until real data has landed once.
+ *
+ *    Checked on the actual markup and the actual guard, not on the comments explaining them — three earlier
+ *    tests in this project passed against text that appeared only in a comment.
+ */
+check('the booking button starts disabled', /<button class="fab" id="add" disabled>/.test(html), true);
+check('only real data enables it', /function listsReady\(\)\{if\(LISTS_READY\)return;LISTS_READY=true;/.test(html), true);
+check('onData is what calls it', /\n\s*listsReady\(\);/.test(html), true);
+check('openAdd refuses before then',
+  /function openAdd\(\)\{[\s\S]{0,400}?if\(!LISTS_READY\)\{toast\([^)]*\);return;\}/.test(html), true);
+/* The pending-row poll re-enters onData every 20s; it must not blink the button out mid-typing. */
+check('re-entry does not undo it', /if\(LISTS_READY\)return;/.test(html), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

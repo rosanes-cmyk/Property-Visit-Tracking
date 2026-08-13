@@ -134,6 +134,8 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
 .card .top:hover{background:var(--surface-2)}
 .dq{font-size:11px;font-weight:600;border-radius:6px;padding:2px 9px} .dq.OK{background:var(--good-bg);color:var(--good)} .dq.Incomplete{background:var(--warn-bg);color:var(--warn)} .dq.Exception{background:var(--crit-bg);color:var(--crit)}
 .fab{position:fixed;right:22px;bottom:22px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border:none;border-radius:999px;padding:15px 22px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:var(--sh-lift),var(--glow);z-index:15}
+/* Dimmed while the sheet's lists are still on their way — see LISTS_READY. */
+.fab[disabled]{background:var(--card2);color:var(--muted);box-shadow:none;cursor:default}
 .modal-bg{position:fixed;inset:0;background:rgba(8,16,26,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:16px;z-index:30}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%;max-width:480px;max-height:90vh;overflow:auto;box-shadow:var(--sh-lift)}
 .modal h3{margin:0 0 4px;font-size:17px} .modal .cap{color:var(--muted);font-size:12.5px;margin:0 0 16px}
@@ -220,7 +222,7 @@ col.c-id{width:8%} col.c-seller{width:15%} col.c-address{width:24%} col.c-phone{
   <input id="search" placeholder="Search seller or address…" style="flex:1;min-width:180px">
 </div></div>
 <div class="wrap" id="wrap"></div>
-<button class="fab" id="add">＋ Book / reschedule visit</button>
+<button class="fab" id="add" disabled>＋ Loading…</button>
 <div id="toast" style="display:none"></div>
 
 <script>
@@ -799,7 +801,10 @@ function modal(title,fields,onSave,cap,defaults){var host=document.createElement
   host.querySelectorAll('select[data-na]').forEach(function(sel){var c=host.querySelector('[data-k="'+sel.getAttribute('data-k')+'__custom"]');sel.onchange=function(){if(sel.value==='__custom__'){c.style.display='block';c.focus();}else{c.style.display='none';}};});
   host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');var val=el?el.value:'';if(f[2]==='nextaction'&&val==='__custom__'){var c=host.querySelector('[data-k="'+f[0]+'__custom"]');val=c?c.value:'';}v[f[0]]=val;if(f[3]&&!String(val).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
-function openAdd(){var host=document.createElement('div');host.className='modal-bg';
+function openAdd(){
+  /* Belt and braces: the button is disabled until listsReady(), and this refuses anyway. */
+  if(!LISTS_READY){toast('Still loading the lists from the sheet — one moment');return;}
+  var host=document.createElement('div');host.className='modal-bg';
   host.innerHTML='<div class="modal"><h3>Book / reschedule visit</h3><p class="cap">Name and phone are enough. The address and the rest come from REI within a few minutes — you can close this tab.</p>'+
    '<div class="row2"><div class="field"><label>Seller Name *</label><input data-k="seller"></div><div class="field"><label>Phone *</label><input data-k="phone" placeholder="(650) 620-4017"></div></div>'+
    '<div class="row2"><div class="field"><label>Lead Source</label><select data-k="lead">'+LEADS.map(function(s){return '<option value="'+esc(s)+'">'+esc(leadLabel(s))+'</option>';}).join('')+'</select></div><div class="field"><label>REI BlackBook Link</label><input data-k="rei"></div></div>'+
@@ -834,7 +839,29 @@ function populateOwners(){var os=document.getElementById('owner');os.innerHTML='
 function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;
   if(d.bookingOwners&&d.bookingOwners.length)BOOKING_OWNERS=d.bookingOwners;
   if(d.bookingVisitors&&d.bookingVisitors.length)BOOKING_VISITORS=d.bookingVisitors;
-  if(d.leadSources&&d.leadSources.length)LEADS=d.leadSources;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;populateOwners();draw();}
+  if(d.leadSources&&d.leadSources.length)LEADS=d.leadSources;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;
+  listsReady();
+  populateOwners();draw();}
+/*
+ * The booking form does not open until the sheet's own lists have arrived.
+ *
+ * The client: "the mls getting like this in the tab ann then gogne again what happening?" — MLS was in the
+ * dropdown, then it was not. Both were true. Every list on this page is declared twice: a copy written into
+ * the file, and the real one that onData brings back from Config.gs a second or two later. Open the form in
+ * that gap and you get the file's copy. Which one a colleague saw came down to how fast they clicked after
+ * opening the tab, and it looked like the option was disappearing on its own.
+ *
+ * Syncing the two copies fixes today's symptom and not the fault: the same gap applies to STAGES, VSTATUS,
+ * BOOKING_OWNERS and BOOKING_VISITORS, so the next value added to any of them brings the ghost straight
+ * back. So the button is inert until real data has landed, once, and openAdd refuses even if something else
+ * enables it. A booking made against a stale list is worse than a booking made two seconds later: an
+ * out-of-range value fails the WHOLE row write, and the colleague sees "Saved" for a row that never landed.
+ *
+ * Deliberately NOT reset on later refreshes — the 20-second poll while a row is pending must not blink the
+ * button out from under somebody halfway through typing.
+ */
+var LISTS_READY=false;
+function listsReady(){if(LISTS_READY)return;LISTS_READY=true;var b=document.getElementById('add');if(b){b.disabled=false;b.textContent='＋ Book / reschedule visit';}}
 var TRASH=[];
 function renderTrash(){
   var h='<div class="sec"><h2>Trash — deleted records</h2><span class="n">'+TRASH.length+'</span><span class="rule"></span></div>';
@@ -847,7 +874,13 @@ function renderTrash(){
   wrap.querySelectorAll('[data-restore]').forEach(function(b){b.onclick=function(){toast('Restoring…');runAction('restoreRecord',null,{trashRow:+b.getAttribute('data-restore')});};});
 }
 function suggestNext(stage){return {'Visit Scheduled':'Conduct scheduled visit & log outcome','Visit Completed — Needs Review':'Decide: make offer or pass','Offer Sent':'Follow up on sent offer','Active Negotiation':'Decide counter response','Verbal Agreement':'Prepare & send contract','Contract Sent':'Confirm signature','Long-Term Nurture':'Nurture check-in call'}[stage]||'';}
-function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)+'</div>';}
+/*
+ * If the sheet never answered, the booking button is still inert — say so here rather than leave somebody
+ * clicking a dead button. Booking is blocked on purpose: the dropdowns would be the file's stale copies, and
+ * a value outside the sheet's validation fails the whole row write, so the save would be lost anyway.
+ */
+function onErr(e){document.getElementById('wrap').innerHTML='<div class="empty">Could not load data: '+esc(e&&e.message||e)
+  +(LISTS_READY?'':'<div class="dnote" style="margin-top:10px">Booking stays switched off until the sheet answers — reload this tab to try again.</div>')+'</div>';}
 /*
  * Poll ONLY while a row is waiting on the PC, and stop as soon as none are.
  *
