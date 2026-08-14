@@ -4320,6 +4320,30 @@ var DIGEST_RETRY_MINUTES = 10;
 var DIGEST_MAX_WAITS = 3;
 var DIGEST_WAIT_KEY = 'DIGEST_WAITING_FOR_SWEEP';
 var DIGEST_RETRY_HANDLER = 'retryAttentionDigest';
+var DIGEST_HELD_KEY = 'DIGEST_HELD_LAST';
+
+/**
+ * What a held-queue notice would be SAYING, as a string, so the same thing is not said twice.
+ *
+ * The client, on the second identical card in one day: "it happend again". It had. The digest runs three
+ * times a day, and while REI stays unswept every one of those runs exhausts its waits and posts the same
+ * outage — same wording, same "since 4:04 PM on Thu 13 Aug", nothing new in it.
+ *
+ * That repetition is the thing this card cannot afford. Its whole value is that it is rare and true; three
+ * copies of an unchanged fact reads as a malfunctioning alarm, and a team that learns to scroll past the
+ * outage card will scroll past the next one too — including the one that matters.
+ *
+ * Identity is the sweep it is reporting, plus the day. So:
+ *   - the same outage, later the same day  -> logged, not posted
+ *   - the same outage still there tomorrow -> posted again, because a second day is news
+ *   - a sweep landed and it went stale again -> posted, because that is a different outage
+ */
+function heldNoticeKey_() {
+  var at = reiSweptAt_();
+  var day;
+  try { day = fmt_(today_()); } catch (e) { day = ''; }
+  return (at ? String(at.getTime()) : 'never') + '@' + day;
+}
 
 /** The scheduled 9am / 11am / 4pm posting. Waits for a fresh sweep before it says anything. */
 function sendAttentionDigestToChat() {
@@ -4409,6 +4433,20 @@ function digestWithFreshRei_() {
      * when, and on which machine — and no lead data at all. Nobody can act on stale information they were
      * never shown, and nobody can mistake the silence for an empty queue.
      */
+    /*
+     * Say it once. The digest runs three times a day and each run reaches this line while REI stays unswept,
+     * so without this the team gets three identical outage cards reporting the same unchanged timestamp.
+     * The queue is still held either way — this decides whether to SAY so again, not whether to publish.
+     */
+    var key = heldNoticeKey_();
+    var said = PropertiesService.getScriptProperties().getProperty(DIGEST_HELD_KEY);
+    if (said === key) {
+      logAuto_('CHAT', '', 'Work queue held back again — same outage already reported today'
+        + (age === null ? '' : ' (last sweep ' + age + ' min ago)') + '. Not repeating the card.');
+      return { posted: false, count: 0, held: true, repeat: true };
+    }
+    PropertiesService.getScriptProperties().setProperty(DIGEST_HELD_KEY, key);
+
     logAuto_('CHAT', '', 'Work queue HELD BACK — waited '
       + (DIGEST_MAX_WAITS * DIGEST_RETRY_MINUTES) + ' min and REI was never swept'
       + (age === null ? ' (no sweep has ever stamped the log).' : ' (last sweep ' + age + ' min ago).')

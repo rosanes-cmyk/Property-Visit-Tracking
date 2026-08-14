@@ -800,7 +800,15 @@ console.log('\n=== Check the buckets FIRST, then send ===');
  * ChatNotify.gs and driven with a stubbed Apps Script, because "does it actually stand down?" is a question
  * about behaviour and a regex cannot answer it.
  */
-function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hook', triggerThrows = false }) {
+function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hook', triggerThrows = false,
+  /*
+   * The two the held-notice de-duplication turns on: WHICH sweep is being reported, and WHICH day it is.
+   * Both are injected so a test can hold one still and move the other — that is the whole rule.
+   *
+   * `props` lets a test carry state from one run to the next, which is how "the second card of the day" is
+   * expressed: the same script properties, a second call.
+   */
+  sweptAtMs = null, day = '2026-08-14', props = null }) {
   /*
    * Ends at postQueueHeldNotice_ on purpose, so the STUB of it is what runs.
    *
@@ -813,8 +821,9 @@ function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hoo
     + CHAT.slice(CHAT.indexOf('var DIGEST_RETRY_MINUTES = 10;'), CHAT.indexOf('function postQueueHeldNotice_'));
   const state = {
     posted: 0, held: [], logs: [], triggersMade: [], triggersDeleted: 0,
-    props: waitCount ? { DIGEST_WAITING_FOR_SWEEP: JSON.stringify({ n: waitCount, at: Date.now() }) } : {},
+    props: props || (waitCount ? { DIGEST_WAITING_FOR_SWEEP: JSON.stringify({ n: waitCount, at: Date.now() }) } : {}),
   };
+  if (props && waitCount) props.DIGEST_WAITING_FOR_SWEEP = JSON.stringify({ n: waitCount, at: Date.now() });
   const existing = [{ getHandlerFunction: () => 'retryAttentionDigest' },
     { getHandlerFunction: () => 'sendAttentionDigestToChat' }];
   const api = {
@@ -828,6 +837,10 @@ function loadSequencer({ age, waitCount = 0, webhook = 'https://chat.example/hoo
     postQueueHeldNotice_: (age) => { state.held.push(age); return { posted: true, count: 0, held: true }; },
     logAuto_: (_a, _b, msg) => state.logs.push(String(msg)),
     reiSweepAgeMinutes_: () => age,
+    /* heldNoticeKey_ asks for the sweep and the date; both are the identity of the notice it is about to post. */
+    reiSweptAt_: () => (sweptAtMs === null ? null : new Date(sweptAtMs)),
+    today_: () => new Date(`${day}T12:00:00Z`),
+    fmt_: (d) => d.toISOString().slice(0, 10),
     ScriptApp: {
       getProjectTriggers: () => existing,
       deleteTrigger: () => { state.triggersDeleted++; },
@@ -1355,6 +1368,54 @@ check("the workbook's fmt_ is yyyy-MM-dd",
   /function fmt_\(d\)[^\n]*'yyyy-MM-dd'/.test(read('apps-script/Code.combined.gs')), true);
 check('...and the preview matches it', /\$\{x\.getFullYear\(\)\}-\$\{String\(x\.getMonth\(\) \+ 1\)/.test(PREVIEW_SRC), true);
 check('...and no longer prints a month name', /month: 'short'/.test(PREVIEW_SRC), false);
+
+console.log('\n=== the same outage is not announced twice ===');
+/*
+ * The client, on a second identical card the same day: "it happend again".
+ *
+ * It had, and correctly by the old rule: the digest runs at 9, 11 and 4, and while REI stays unswept every
+ * one of those exhausts its waits and posts the outage. Three cards, same wording, same unchanged timestamp.
+ *
+ * The queue is still held every time — that is not in question here. What changed is whether it SAYS so
+ * again, because a warning card repeated with nothing new in it is how a team learns to scroll past warnings.
+ */
+const SWEPT = Date.UTC(2026, 7, 13, 23, 4);   // 4:04 PM Thu 13 Aug, the stamp on the live card
+{
+  const shared = {};
+  const first = loadSequencer({ age: 1200, waitCount: 3, sweptAtMs: SWEPT, day: '2026-08-14', props: shared });
+  first.run();
+  check('the first hold posts the card', first.state.held.length, 1);
+
+  const second = loadSequencer({ age: 1320, waitCount: 3, sweptAtMs: SWEPT, day: '2026-08-14', props: shared });
+  const r2 = second.run();
+  check('the second hold that day does NOT', second.state.held.length, 0);
+  check('...and says why in the log', /already reported today/.test(second.state.logs.join(' ')), true);
+  /* Still held. Silence about the outage must never be confused with publishing the queue. */
+  check('...and still publishes nothing', second.state.posted, 0);
+  check('...and reports itself as held', r2.held, true);
+
+  /* A second day of the same outage IS news — otherwise a week-long outage is announced once and forgotten. */
+  const nextDay = loadSequencer({ age: 2600, waitCount: 3, sweptAtMs: SWEPT, day: '2026-08-15', props: shared });
+  nextDay.run();
+  check('tomorrow it is said again', nextDay.state.held.length, 1);
+}
+{
+  /* A sweep landed and it went stale again — a different outage, so it gets its own card the same day. */
+  const shared = {};
+  loadSequencer({ age: 1200, waitCount: 3, sweptAtMs: SWEPT, day: '2026-08-14', props: shared }).run();
+  const later = loadSequencer({ age: 200, waitCount: 3, sweptAtMs: SWEPT + 6e5, day: '2026-08-14', props: shared });
+  later.run();
+  check('a DIFFERENT outage is announced', later.state.held.length, 1);
+}
+{
+  /* No sweep has ever stamped the log: still one card, not one per run. */
+  const shared = {};
+  const a = loadSequencer({ age: null, waitCount: 3, sweptAtMs: null, day: '2026-08-14', props: shared });
+  a.run();
+  const b = loadSequencer({ age: null, waitCount: 3, sweptAtMs: null, day: '2026-08-14', props: shared });
+  b.run();
+  check('"never swept" is announced once too', a.state.held.length + b.state.held.length, 1);
+}
 
 console.log('\n=== the stamp is found however far back it is ===');
 /*
