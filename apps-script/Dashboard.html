@@ -263,7 +263,12 @@ var LEADS=['Direct Mail','Direct Mail - Postcard','PPC','TV','Facebook','SEO','P
  */
 var LEAD_LABELS={'MLS':'MLS / Redfin'};
 function leadLabel(s){return LEAD_LABELS[s]||s;}
-var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed'];
+/*
+ * FIVE, not four. The workbook has always accepted 'Skipped — Offer Made' — six rows came over from the old
+ * sheet carrying it — but this copy stopped at four and nothing ever corrected it, because Visit Status was
+ * not in the payload. It was unreachable from the dashboard, with nothing on screen to hint it existed.
+ */
+var VSTATUS=['Scheduled','Completed','Canceled','Reschedule Needed','Skipped — Offer Made'];
 var NEXT_ACTIONS=['Conduct scheduled visit & log outcome','Decide: make offer or pass','Follow up on sent offer','Re-attempt contact (no reply)','Decide counter response','Prepare & send contract','Confirm signature','Hand off signed contract for transaction coordination','Nurture check-in call','Send requested info to seller'];
 
 var RECS=[];
@@ -839,7 +844,10 @@ function populateOwners(){var os=document.getElementById('owner');os.innerHTML='
 function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;
   if(d.bookingOwners&&d.bookingOwners.length)BOOKING_OWNERS=d.bookingOwners;
   if(d.bookingVisitors&&d.bookingVisitors.length)BOOKING_VISITORS=d.bookingVisitors;
-  if(d.leadSources&&d.leadSources.length)LEADS=d.leadSources;if(d.userEmail)document.getElementById('who').textContent=d.userEmail;
+  if(d.leadSources&&d.leadSources.length)LEADS=d.leadSources;
+  if(d.visitStatuses&&d.visitStatuses.length)VSTATUS=d.visitStatuses;
+  if(d.stages&&d.stages.length)STAGES=d.stages;
+  if(d.userEmail)document.getElementById('who').textContent=d.userEmail;
   listsReady();
   populateOwners();draw();}
 /*

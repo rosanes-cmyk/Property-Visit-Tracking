@@ -1591,7 +1591,21 @@ function webGetData() {
   return { generatedAt: fmt_(today_()), owners: owners, visitors: visitors,
     bookingOwners: bookingList_(BOOKING_OWNERS, owners),
     bookingVisitors: bookingList_(BOOKING_VISITORS, visitors),
-    leadSources: DROPDOWNS['Lead Source'], sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
+    leadSources: DROPDOWNS['Lead Source'],
+    /*
+     * Visit Status and Current Stage are sent for the same reason Lead Source is, and were not.
+     *
+     * The booking form kept its own copies of these two, so the sheet could never correct them — and it had
+     * drifted: the workbook accepts five visit statuses and the form offered four. 'Skipped — Offer Made' was
+     * simply unreachable from the dashboard, permanently, with nothing to reveal it. That is worse than the
+     * MLS gap, which at least came right once the page loaded.
+     *
+     * Every list the form can write is now sent from DROPDOWNS, which is the same list data validation is
+     * built from — so the form offers exactly what the sheet accepts, and an added value reaches both at once.
+     */
+    visitStatuses: DROPDOWNS['Visit Status'],
+    stages: DROPDOWNS['Current Stage'],
+    sections: sections, records: rows, trash: trashList_(), userEmail: email, totalLive: rows.length };
 }
 
 /* ---------------- server: safe write actions ---------------- */
