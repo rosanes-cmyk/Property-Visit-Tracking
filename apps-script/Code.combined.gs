@@ -13,62 +13,87 @@
  */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('🏠 Twin Visit Logger')
-    .addItem('1) Build structure (setup)', 'setup')
-    .addItem('2) Load pilot + test data', 'loadPilotData')
-    .addItem('3) Run tests', 'runAllTests')
-    .addSeparator()
-    .addItem('4) Install automation triggers', 'installTriggers')
-    .addItem('Send daily report now (preview)', 'sendDailyReport')
-    .addSeparator()
-    .addItem('💬 Set Google Chat webhook', 'setChatWebhook')
-    .addItem('🔗 Set dashboard link (for Chat cards)', 'setDashboardUrl')
-    .addItem('💬 Send visit digest to Chat now', 'sendVisitDigestNow')
+  /*
+   * Six things at the top, everything else behind a submenu.
+   *
+   * The client, hunting for the item that posts the work queue: "i cant see that". It was there — item five
+   * of forty-five, in one flat list far taller than the screen, so reaching it meant scrolling a menu most
+   * people do not realise scrolls. Two screenshots came back from different parts of the same list.
+   *
+   * So the split is by how often a thing is used, not by what it belongs to. The top level is the handful of
+   * actions someone runs during a normal day; the schedules, the one-time setup and the destructive
+   * operations sit in submenus where they are found on purpose rather than met by accident.
+   *
+   * Every function name below is unchanged — the triggers call these by name, so nothing needs reinstalling.
+   * Two LABELS changed: the work-queue and visit-digest items now say what the cards they post are called,
+   * because "needs attention digest" appears nowhere on the card it produces.
+   */
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('🏠 Twin Visit Logger')
+    .addItem('💬 Post the work queue now', 'sendAttentionDigestNow')
+    .addItem('💬 Post the morning visit digest now', 'sendVisitDigestNow')
     .addItem('💬 Check for new bookings now', 'notifyNewBookingsNow')
-    .addItem('💬 Send "needs attention" digest now', 'sendAttentionDigestNow')
-    .addItem('💬 Turn ON morning visit digest (9am)', 'installChatDigestTrigger')
-    .addItem('💬 Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
-    .addItem('💬 Turn ON work-queue digest (9am + 11am + 4pm)', 'installChatAttentionTrigger')
-    .addItem('💬 Turn OFF morning visit digest', 'removeChatDigestTrigger')
-    .addItem('💬 Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
-    .addItem('💬 Turn OFF attention digest', 'removeChatAttentionTrigger')
-    .addSeparator()
     .addItem('📝 Check notes for visit outcomes now', 'auditVisitNotesNow')
-    .addItem('📝 Turn ON hourly notes audit', 'installNotesAuditTrigger')
-    .addItem('📝 Turn OFF notes audit', 'removeNotesAuditTrigger')
-    .addSeparator()
-    /*
-     * The PC app's own settings. Publishing writes what it needs — tracker tab, calendar, Chat webhook —
-     * into a hidden tab it reads with the Google login it already has, so installing on a new machine
-     * involves no typed spreadsheet IDs and no pasted webhook, and the installer carries no credential.
-     */
-    .addItem('💻 Publish settings for the PC app', 'publishAgentSettings')
-    .addItem('💻 Which PC is running the automation?', 'showActiveMachine')
-    .addItem('💻 Release the PC (let another take over)', 'releaseActiveMachine')
-    .addSeparator()
-    .addItem('📥 Set up Intake Inbox (create tab)', 'setupIntakeInbox')
-    .addItem('📥 Check Intake Inbox now', 'checkIntakeInboxNow')
-    .addItem('📥 Turn ON auto-check (every 10 min)', 'installInboxTrigger')
-    .addItem('📥 Turn OFF auto-check', 'removeInboxTrigger')
-    .addSeparator()
-    .addItem('📧 Set up Gmail auto-reader (REI tasks)', 'setupGmailIntake')
     .addItem('📧 Check REI emails now', 'checkReiEmailsNow')
-    .addItem('📧 Turn ON Gmail auto-reader (every minute)', 'installGmailTrigger')
-    .addItem('📧 Turn OFF Gmail auto-reader', 'removeGmailTrigger')
+    .addItem('💻 Which PC is running the automation?', 'showActiveMachine')
     .addSeparator()
-    .addItem('📦 Preview import from the old workbook (changes nothing)', 'previewImportFromOldWorkbook')
-    .addItem('📦 Import from the old workbook', 'importFromOldWorkbook')
-    .addItem('📦 Import legacy rows (from a pasted CSV tab)', 'importLegacyRows')
-    .addItem('🔎 Find duplicate records', 'findDuplicateRecords')
-    .addSeparator()
-    .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
-    .addItem('🔧 Fix mismatched stages (cards stuck in wrong section)', 'repairStages')
-    .addItem('Remove test data (Source = TEST)', 'removeTestData')
-    .addItem('Remove test artifacts (go-live cleanup)', 'removeTestArtifacts')
-    .addItem('Clear all data rows (+ their calendar events)', 'clearAllData')
-    .addItem('🗓 Remove orphaned calendar events', 'purgeOrphanCalendarEvents')
-    .addItem('⛔ Remove ALL triggers (kill switch)', 'removeAllTriggers')
+    .addSubMenu(ui.createMenu('💬 Chat — schedules and setup')
+      .addItem('Turn ON work-queue digest (9am + 11am + 4pm)', 'installChatAttentionTrigger')
+      .addItem('Turn ON morning visit digest (9am)', 'installChatDigestTrigger')
+      .addItem('Turn ON new-booking alerts (every 5 min)', 'installChatNewBookingTrigger')
+      .addSeparator()
+      .addItem('Turn OFF work-queue digest', 'removeChatAttentionTrigger')
+      .addItem('Turn OFF morning visit digest', 'removeChatDigestTrigger')
+      .addItem('Turn OFF new-booking alerts', 'removeChatNewBookingTrigger')
+      .addSeparator()
+      .addItem('Set Google Chat webhook', 'setChatWebhook')
+      .addItem('🔗 Set dashboard link (for Chat cards)', 'setDashboardUrl'))
+    .addSubMenu(ui.createMenu('📝 Notes audit')
+      .addItem('Check notes for visit outcomes now', 'auditVisitNotesNow')
+      .addItem('Turn ON hourly notes audit', 'installNotesAuditTrigger')
+      .addItem('Turn OFF notes audit', 'removeNotesAuditTrigger'))
+    .addSubMenu(ui.createMenu('💻 The PC app')
+      .addItem('Which PC is running the automation?', 'showActiveMachine')
+      .addItem('Publish settings for the PC app', 'publishAgentSettings')
+      .addItem('Release the PC (let another take over)', 'releaseActiveMachine'))
+    .addSubMenu(ui.createMenu('📥 Intake Inbox')
+      .addItem('Check Intake Inbox now', 'checkIntakeInboxNow')
+      .addItem('Turn ON auto-check (every 10 min)', 'installInboxTrigger')
+      .addItem('Turn OFF auto-check', 'removeInboxTrigger')
+      .addSeparator()
+      .addItem('Set up Intake Inbox (create tab)', 'setupIntakeInbox'))
+    .addSubMenu(ui.createMenu('📧 Gmail auto-reader (REI tasks)')
+      .addItem('Check REI emails now', 'checkReiEmailsNow')
+      .addItem('Turn ON Gmail auto-reader (every minute)', 'installGmailTrigger')
+      .addItem('Turn OFF Gmail auto-reader', 'removeGmailTrigger')
+      .addSeparator()
+      .addItem('Set up Gmail auto-reader (REI tasks)', 'setupGmailIntake'))
+    .addSubMenu(ui.createMenu('📦 Import and duplicates')
+      .addItem('Preview import from the old workbook (changes nothing)', 'previewImportFromOldWorkbook')
+      .addItem('Import from the old workbook', 'importFromOldWorkbook')
+      .addItem('Import legacy rows (from a pasted CSV tab)', 'importLegacyRows')
+      .addSeparator()
+      .addItem('🔎 Find duplicate records', 'findDuplicateRecords'))
+    .addSubMenu(ui.createMenu('🛠 Setup and repair')
+      .addItem('1) Build structure (setup)', 'setup')
+      .addItem('2) Load pilot + test data', 'loadPilotData')
+      .addItem('3) Run tests', 'runAllTests')
+      .addItem('4) Install automation triggers', 'installTriggers')
+      .addSeparator()
+      .addItem('Send daily report now (preview)', 'sendDailyReport')
+      .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
+      .addItem('🔧 Fix mismatched stages (cards stuck in wrong section)', 'repairStages')
+      .addItem('🗓 Remove orphaned calendar events', 'purgeOrphanCalendarEvents'))
+    /*
+     * On their own at the bottom, and last. Every one of these deletes something that cannot be typed back:
+     * rows, calendar events, or every trigger in the project. They were previously in the same flat run as
+     * "Check REI emails now", one slip of the mouse apart.
+     */
+    .addSubMenu(ui.createMenu('⚠️ Deletes data — be careful')
+      .addItem('Remove test data (Source = TEST)', 'removeTestData')
+      .addItem('Remove test artifacts (go-live cleanup)', 'removeTestArtifacts')
+      .addItem('Clear all data rows (+ their calendar events)', 'clearAllData')
+      .addItem('⛔ Remove ALL triggers (kill switch)', 'removeAllTriggers'))
     .addToUi();
 }
 
