@@ -268,13 +268,22 @@ console.log('\n=== the workbook side ===');
   const GS = fs.readFileSync(new URL('../apps-script/AgentSettings.gs', import.meta.url), 'utf8');
   const COMBINED = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
   check('the tab name matches on both sides', GS.includes(`'${AGENT_SETTINGS_SHEET}'`), true);
-  check('publishing is a menu item', /addItem\('💻 Publish settings for the PC app'/.test(COMBINED), true);
+  /*
+   * Reachable from the menu — checked on the HANDLER, not the wording.
+   *
+   * These pinned the exact labels, emoji and all, and broke when the menu was regrouped into submenus even
+   * though both items were still there and still worked. A test that fails on a rename it does not care
+   * about trains you to edit tests without reading them, which is how a real break gets waved through.
+   * What matters is that the workbook offers a way to run these functions; tests/menu.test.mjs separately
+   * holds every menu action to a function that actually exists.
+   */
+  check('publishing is reachable from the menu', /'publishAgentSettings'\)/.test(COMBINED), true);
   /*
    * Releasing from the SHEET is the case the whole feature is for: the active PC is broken and cannot
    * release its own claim, so there has to be a way in that does not involve that machine.
    */
   check('the PC can be released from the workbook when it is broken',
-    /addItem\('💻 Release the PC/.test(COMBINED), true);
+    /'releaseActiveMachine'\)/.test(COMBINED), true);
   check('...and you can see which PC without unhiding the tab',
     /addItem\('💻 Which PC is running the automation\?'/.test(COMBINED), true);
   /*
