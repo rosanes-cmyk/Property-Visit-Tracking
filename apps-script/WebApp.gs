@@ -913,7 +913,22 @@ function notifyVisitTagged_(R, tag, visitDate, marked) {
   try {
     if (typeof chatWebhookUrl_ !== 'function' || !chatWebhookUrl_()) return;
     var when = visitDate ? fmt_(new Date(visitDate)) : 'date not recorded';
-    var time = String(R.get('Visit Time') || '').trim();
+    /*
+     * timeCell_, not String().
+     *
+     * The client, on a live card: "there i a bug with this". It read
+     *
+     *   Was booked for 2026-08-15 at Sat Dec 30 1899 12:00:00 GMT-0800 (Pacific Standard Time)
+     *
+     * A time-only cell comes back from Sheets as a Date on 30 December 1899 — the epoch it counts times
+     * from — so String() on it prints the epoch instead of the clock. Every other card in the project
+     * already went through timeCell_, which handles the Date, the raw 0.5-of-a-day serial and typed text
+     * alike; this one line was reading the cell raw. It is the moment a visit is called off, so the one
+     * fact the reader needs is WHEN it was, and that was the part rendered as gibberish.
+     */
+    var time = (typeof timeCell_ === 'function'
+      ? timeCell_(R.get('Visit Time'))
+      : String(R.get('Visit Time') || '')).trim();
     var owner = String(R.get('Assigned Owner') || '').trim() || 'UNASSIGNED';
     var lines = [
       '<b>' + (R.get('Seller Name') || '(no name)') + '</b> · ' + R.get('Property Address'),

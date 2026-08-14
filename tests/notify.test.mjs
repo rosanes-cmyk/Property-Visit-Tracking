@@ -283,5 +283,51 @@ check('...and it is the seeded handover', seedAt > 0 && keepAt > seedAt, true);
 check('...still inside that branch, before the loop moves on',
   keepAt < WATCH.indexOf('continue;', seedAt), true);
 
+console.log('\n=== a cancelled visit says WHEN it was ===');
+/*
+ * The client, on a live reschedule card: "there i a bug with this". It read
+ *
+ *   Was booked for 2026-08-15 at Sat Dec 30 1899 12:00:00 GMT-0800 (Pacific Standard Time)
+ *
+ * Sheets counts a time-only cell from 30 December 1899, so the cell comes back as a Date on that day and
+ * String() prints the epoch instead of the clock. Every other card already went through timeCell_; this one
+ * line read the cell raw. It matters more here than anywhere: the card exists to say a booked visit is off,
+ * so WHEN it was is the fact the reader acts on, and that was the part rendered as gibberish.
+ *
+ * Run for real — the shipped timeCell_ driven by the exact line notifyVisitTagged_ now uses.
+ */
+{
+  const gs = fs.readFileSync(new URL('../apps-script/ChatNotify.gs', import.meta.url), 'utf8');
+  const web = fs.readFileSync(new URL('../apps-script/WebApp.gs', import.meta.url), 'utf8');
+  const combined = fs.readFileSync(new URL('../apps-script/Code.combined.gs', import.meta.url), 'utf8');
+
+  const helpers = gs.slice(gs.indexOf('function clock_('), gs.indexOf('function timeCell_(')) +
+    gs.slice(gs.indexOf('function timeCell_('), gs.indexOf('\n}', gs.indexOf('function timeCell_(')) + 2);
+  /* The line under test, lifted from the shipped file rather than retyped. */
+  const line = web.slice(web.indexOf("var time = (typeof timeCell_ === 'function'"),
+    web.indexOf(").trim();", web.indexOf("var time = (typeof timeCell_")) + 9);
+  check('the line was found in WebApp.gs', line.length > 0, true);
+
+  const render = new Function('R', `${helpers}\n${line}\nreturn time;`);
+  const cell = (v) => ({ get: (k) => (k === 'Visit Time' ? v : '') });
+
+  /* Exactly what Sheets hands back for a time-only cell — the value that produced the live card. */
+  check('a noon time cell', render(cell(new Date(1899, 11, 30, 12, 0))), '12:00 PM');
+  check('an afternoon visit', render(cell(new Date(1899, 11, 30, 14, 0))), '2:00 PM');
+  /* And the serial form, which the Sheets API sends instead when the read goes through the JSON API. */
+  check('a 0.5-of-a-day serial', render(cell(0.5)), '12:00 PM');
+  check('typed text still works', render(cell('10:30 AM')), '10:30 AM');
+  check('an empty cell stays empty', render(cell('')), '');
+  /* The failure itself: the epoch must never reach a card again. */
+  check('the 1899 epoch never appears',
+    /1899/.test(render(cell(new Date(1899, 11, 30, 12, 0)))), false);
+
+  /* Code.combined.gs is what gets pasted — a fix only in WebApp.gs ships nothing. */
+  check('the pasted copy has the same fix',
+    combined.includes("var time = (typeof timeCell_ === 'function'"), true);
+  check('...and neither file reads the cell raw any more',
+    /var time = String\(R\.get\('Visit Time'\)/.test(web + combined), false);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
