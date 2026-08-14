@@ -774,8 +774,16 @@ check('no sweep at all is admitted, not hidden', /REI freshness unknown/.test(CO
  */
 check('a failure to read the stamp never stops the card',
   /catch \(e\) \{\s*\n\s*return '';\s*\/\/ never let a stamp stop the queue/.test(COMBINED_H), true);
-/* The tail only: this log grows all day and a card must not read thousands of rows to print six words. */
-check('only the tail of the log is read', /Math\.max\(2, last - 120\)/.test(COMBINED_H), true);
+/*
+ * Bounded, but no longer a single fixed tail.
+ *
+ * This used to assert the exact window — `Math.max(2, last - 120)` — which pinned the bug in place rather
+ * than the requirement. 120 rows is less than one busy day of this log, so the stamp could fall out of it and
+ * the card would report REI had never been checked on a day it had. The requirement was only ever "do not
+ * read the whole log"; that is what is asserted now, and the behaviour is exercised for real further down.
+ */
+check('the scan is still bounded', /var MAX_SCAN = 2000;/.test(COMBINED_H), true);
+check('...and no fixed 120-row tail remains', /last - 120/.test(COMBINED_H), false);
 
 console.log('\n=== Check the buckets FIRST, then send ===');
 /*
@@ -1347,6 +1355,69 @@ check("the workbook's fmt_ is yyyy-MM-dd",
   /function fmt_\(d\)[^\n]*'yyyy-MM-dd'/.test(read('apps-script/Code.combined.gs')), true);
 check('...and the preview matches it', /\$\{x\.getFullYear\(\)\}-\$\{String\(x\.getMonth\(\) \+ 1\)/.test(PREVIEW_SRC), true);
 check('...and no longer prints a month name', /month: 'short'/.test(PREVIEW_SRC), false);
+
+console.log('\n=== the stamp is found however far back it is ===');
+/*
+ * The client, looking at a held-queue card: "are you sure this was running?"
+ *
+ * Checking it exposed the reverse risk. reiSweptAt_ read the last 120 rows of the Automation Log and stopped,
+ * because "the sweep's line is always among the most recent". The log disproves that — 6 Aug took 138 rows in
+ * one day, and one re-check run writes a line PER UPDATED LEAD before its single SWEEP line. Push that line
+ * past the window and the function returns null, so the card announces REI has never been checked on a day it
+ * was. A false hold is the one failure this guarantee cannot afford: it teaches the team to ignore the
+ * warning, and then a real hold goes unread too.
+ *
+ * Run for real against a stubbed sheet, because the question is what the function RETURNS.
+ */
+function runSweptAt(rows) {
+  const src = CHAT.slice(CHAT.indexOf('function reiSweptAt_'), CHAT.indexOf('/** Minutes since the last sweep'));
+  const reads = [];
+  const sheet = {
+    getLastRow: () => rows.length + 1,          // +1 for the header row the function skips
+    getRange: (from, _c, n) => {
+      reads.push(n);
+      return { getValues: () => rows.slice(from - 2, from - 2 + n) };
+    }
+  };
+  const SpreadsheetApp = { getActive: () => ({ getSheetByName: () => sheet }) };
+  // eslint-disable-next-line no-new-func
+  const at = new Function('SpreadsheetApp', `${src}\nreturn reiSweptAt_();`)(SpreadsheetApp);
+  return { at, reads, total: reads.reduce((a, b) => a + b, 0) };
+}
+/** `n` INFO rows, with one SWEEP row `back` rows from the end. */
+function logWithSweep(n, back) {
+  const rows = [];
+  for (let i = 0; i < n; i++) rows.push([`2026-08-13T0${i % 9}:00:00.000Z`, 'INFO']);
+  rows[n - 1 - back] = ['2026-08-13T23:04:00.000Z', 'SWEEP'];
+  return rows;
+}
+const near = runSweptAt(logWithSweep(300, 10));
+check('a recent stamp is found', near.at instanceof Date && !isNaN(near.at), true);
+check('...in a single read', near.reads.length, 1);
+/* 200 rows back — past the old 120-row window, and the shape of a genuinely busy day. */
+const far = runSweptAt(logWithSweep(600, 200));
+check('a stamp 200 rows back is STILL found', far.at instanceof Date && !isNaN(far.at), true);
+check('...and it is the right one', far.at.toISOString(), '2026-08-13T23:04:00.000Z');
+/* Further than one block, so the backwards loop itself is what finds it rather than a wider first read. */
+const deep = runSweptAt(logWithSweep(1200, 700));
+check('a stamp 700 rows back is found too', deep.at instanceof Date && !isNaN(deep.at), true);
+check('...by reading more than once', deep.reads.length > 1, true);
+/* The bound still holds: a log with no sweep at all must not read forever. */
+const none = runSweptAt(Array.from({ length: 9000 }, () => ['2026-08-13T00:00:00.000Z', 'INFO']));
+check('no stamp reads as no stamp', none.at, null);
+check('...without scanning the whole log', none.total <= 2250, true);
+/* Newest wins when there are several — the card must report the LAST sweep, not the first one found. */
+const many = runSweptAt([
+  ['2026-08-12T10:00:00.000Z', 'SWEEP'],
+  ...Array.from({ length: 400 }, () => ['2026-08-13T10:00:00.000Z', 'INFO']),
+  ['2026-08-13T16:04:00.000Z', 'SWEEP'],
+  ...Array.from({ length: 50 }, () => ['2026-08-13T17:00:00.000Z', 'INFO'])
+]);
+check('the most recent sweep is the one reported', many.at.toISOString(), '2026-08-13T16:04:00.000Z');
+/* Code.combined.gs is what gets pasted — the fix has to be in both or it ships nothing. */
+check('the pasted copy has the same scan', /var MAX_SCAN = 2000;/.test(CHAT_C), true);
+check('...and the old fixed tail is gone from both',
+  /last - 120/.test(CHAT) || /last - 120/.test(CHAT_C), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

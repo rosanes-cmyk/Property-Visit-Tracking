@@ -479,15 +479,33 @@ function reiSweptAt_() {
     var last = sh.getLastRow();
     if (last < 2) return null;
     /*
-     * The tail only. This log grows all day, and a card must not read thousands of rows to print six words
-     * — the sweep's line is always among the most recent when it has run at all.
+     * Backwards in blocks, not one fixed tail.
+     *
+     * This read 120 rows and stopped, on the reasoning that the sweep's line is always among the most recent.
+     * The log itself disproves it: 6 Aug took 138 rows in one day, and a single re-check run writes a line
+     * PER UPDATED LEAD before its one SWEEP line. So a busy stretch after the last sweep pushes that line out
+     * of a 120-row window, reiSweptAt_ returns null, and the card announces REI has never been checked on a
+     * day it was checked — the exact false alarm this whole guarantee exists to avoid. Worse than a missed
+     * card: it teaches the team that the held-queue warning is noise.
+     *
+     * Still bounded — a card must not read the whole log to print six words — but the bound is now 2,000 rows
+     * of history rather than 120, reached in blocks that stop the moment a stamp is found. The usual case
+     * still costs a single read.
      */
-    var from = Math.max(2, last - 120);
-    var vals = sh.getRange(from, 1, last - from + 1, 2).getValues();
-    for (var i = vals.length - 1; i >= 0; i--) {
-      if (String(vals[i][1]).trim().toUpperCase() !== 'SWEEP') continue;
-      var d = new Date(vals[i][0]);
-      return isNaN(d.getTime()) ? null : d;
+    var BLOCK = 250;
+    var MAX_SCAN = 2000;
+    var scanned = 0;
+    var upto = last;
+    while (upto >= 2 && scanned < MAX_SCAN) {
+      var from = Math.max(2, upto - BLOCK + 1);
+      var vals = sh.getRange(from, 1, upto - from + 1, 2).getValues();
+      for (var i = vals.length - 1; i >= 0; i--) {
+        if (String(vals[i][1]).trim().toUpperCase() !== 'SWEEP') continue;
+        var d = new Date(vals[i][0]);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      scanned += vals.length;
+      upto = from - 1;
     }
     return null;
   } catch (e) {
