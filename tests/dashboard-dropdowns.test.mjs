@@ -90,5 +90,37 @@ for (const [dropdown, , key] of LISTS) {
     new RegExp(`if\\(d\\.${key}&&d\\.${key}\\.length\\)`).test(html), true);
 }
 
+/*
+ * ---- And the sheet's OWN writers have to obey the same lists ----
+ *
+ * The booking form is not the only thing that fills these columns. The Gmail intake creates a row for every
+ * "booked appointment" task REI emails, and it wrote 'REI Task (email)' into Lead Source — not one of the
+ * nine. Lead Source is validated with setAllowInvalid(false), so setValue THROWS on it and takes the whole
+ * row down, exactly as it once did on G379. processReiTaskEmails_ catches that into errors++ and moves on,
+ * so an emailed booking could fail with nothing on the board to show a lead had been missed.
+ *
+ * Blank is the fix rather than a tenth dropdown value: 'REI Task (email)' is how the booking ARRIVED, not
+ * where the lead came from, and putting a delivery channel in the lead-source column would show up in every
+ * report built on it. mapLeadSource already sets that rule for a source it cannot place.
+ */
+console.log('\n=== the Gmail intake writes legal values ===');
+const LEAD_OK = listAfter(cfg, "'Lead Source':");
+const VS_OK = listAfter(cfg, "'Visit Status':");
+const STAGE_OK = listAfter(cfg, "'Current Stage':");
+
+for (const [label, src] of [['GmailIntake.gs', fs.readFileSync('apps-script/GmailIntake.gs', 'utf8')],
+  ['the pasted copy', combined]]) {
+  const declared = (src.match(/LEAD_SOURCE:\s*'([^']*)'/) || [])[1];
+  check(`${label}: LEAD_SOURCE is blank or legal`,
+    declared === '' || LEAD_OK.includes(declared), true);
+  /* Named outright, because this exact string is what broke it. */
+  check(`${label}: it is not 'REI Task (email)'`, declared === 'REI Task (email)', false);
+  /* The other two the intake writes as literals — legal today, and they must stay that way. */
+  const vs = (src.match(/'Visit Status':\s*'([^']*)',\s*\/\/ a booking is always/) || [])[1];
+  const stage = (src.match(/'Current Stage':\s*'([^']*)',\s*\/\/ \.\.\.so it shows/) || [])[1];
+  check(`${label}: the visit status it writes is legal`, VS_OK.includes(vs), true);
+  check(`${label}: the stage it writes is legal`, STAGE_OK.includes(stage), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

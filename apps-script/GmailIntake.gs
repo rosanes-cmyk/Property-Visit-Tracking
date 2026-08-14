@@ -27,7 +27,25 @@ var GMAIL_CFG = {
   KEYWORD: 'booked appointment',         // only task titles containing this are treated as visits
   LABEL: 'PV-Logged',                    // applied to processed threads (created on first run)
   LOOKBACK: '7d',                        // how far back to scan
-  LEAD_SOURCE: 'REI Task (email)'
+  /*
+   * BLANK, not 'REI Task (email)'.
+   *
+   * That string was written straight into Lead Source, and it is not one of the nine values the column
+   * accepts. Lead Source is validated with setAllowInvalid(false) — strict — so setValue THROWS on it and
+   * takes the whole row with it, exactly as it once did on G379:
+   *
+   *   "The data you entered in cell G379 violates the data validation rules set on this sheet."
+   *
+   * The catch below turns that into errors++ and the loop moves on, so a booking emailed by REI could fail
+   * silently and nothing on the board would show a lead had been missed.
+   *
+   * It was also the wrong FIELD. 'REI Task (email)' is how the booking reached us, not where the lead came
+   * from; adding it to the dropdown would put a delivery channel in every lead-source report. Blank follows
+   * the rule mapLeadSource already sets for a source it cannot place — leave it empty and let the raw text
+   * stand in the record — and blank is what the sheet's own Missing Required Fields formula surfaces. The
+   * email's task title is kept verbatim in Task Body either way, so nothing is lost.
+   */
+  LEAD_SOURCE: ''
 };
 
 /** Find (or create) a Gmail label by name. */
