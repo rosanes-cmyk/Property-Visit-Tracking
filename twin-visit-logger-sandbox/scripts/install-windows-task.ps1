@@ -143,6 +143,16 @@ function Set-VisitTaskSettings {
     Write-Warning ("Could not set battery/catch-up options on '{0}': {1}" -f $Name, $_.Exception.Message)
     Write-Warning "  The task will still run, but only while plugged in, and a run missed while the"
     Write-Warning "  machine slept will be skipped rather than caught up."
+    <#
+      "Access is denied" here means the task already exists and was created from an elevated prompt —
+      changing it needs the same elevation that made it. Exactly the case New-VisitTask already explains for
+      /Create, and the live machine answered HRESULT 0x80070005 to Set-ScheduledTask for the same reason.
+      Naming the fix beats naming the error code: the person reading this is not going to look 0x80070005 up.
+    #>
+    if ($_.Exception.Message -match 'Access is denied|0x80070005') {
+      Write-Warning "  Re-run this installer from an Administrator PowerShell to apply them:"
+      Write-Warning "    Start menu -> type: powershell -> right-click -> Run as administrator"
+    }
   }
 }
 

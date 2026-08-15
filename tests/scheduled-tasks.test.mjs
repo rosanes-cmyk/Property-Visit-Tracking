@@ -460,6 +460,14 @@ for (const [what, prop, value] of [
 check('the existing settings are kept', /Set-ScheduledTask -TaskName \$Name -Settings \$task\.Settings/.test(INSTALL), true);
 check('...and a machine that refuses is warned about, not failed',
   /catch \{[\s\S]{0,200}Write-Warning/.test(INSTALL.slice(INSTALL.indexOf('function Set-VisitTaskSettings'))), true);
+/*
+ * "Access is denied" (HRESULT 0x80070005) is what the live machine answered, because the tasks were created
+ * from an elevated prompt and changing them needs the same elevation. New-VisitTask already explains that
+ * for /Create; the settings call hit the identical wall and printed only the error code. Nobody reading a
+ * red wall of CimException is going to look 0x80070005 up, so it names the fix.
+ */
+check('an elevation refusal names the fix', /Run as administrator/.test(INSTALL.slice(INSTALL.indexOf('function Set-VisitTaskSettings'))), true);
+check('...matched on the message people actually see', /Access is denied\|0x80070005/.test(INSTALL), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
