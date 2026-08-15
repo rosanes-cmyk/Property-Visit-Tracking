@@ -416,5 +416,50 @@ check('the server fills Next Action instead',
 check('...and dates it to the visit, not to today',
   /params\['Next Action Due Date'\] = params\['Visit Date'\] \|\|/.test(WEBAPP_GS), true);
 
+console.log('\n=== the tasks survive a laptop being unplugged ===');
+/*
+ * The fault that took the automation down for two days, found in `schtasks /query /v` on the live machine:
+ *
+ *     Last Run Time:    8/14/2026 4:07:01 PM      <- ran, and succeeded
+ *     Last Result:      0
+ *     Status:           Ready
+ *     Scheduled Task State: Enabled
+ *     Next Run Time:    8/14/2026 5:07:00 PM      <- never happened, and never rescheduled
+ *     Power Management: Stop On Battery Mode, No Start On Batteries
+ *
+ * `schtasks /Create` was given no power or recovery flags, so every task inherited Windows' defaults: do not
+ * start on battery, kill a running task when the charger comes out, and skip — never catch up — a run missed
+ * while the machine slept. On a laptop that gets unplugged at the end of the day the hourly schedule simply
+ * stops, and nothing anywhere reports it. Ready, Enabled, Last Result 0, and no sweep for two days.
+ *
+ * That is why two days of looking at the workbook, the triggers and the Chat card found nothing wrong: every
+ * one of those was working, and faithfully reporting that no sweep had happened.
+ */
+check('the settings helper exists', /function Set-VisitTaskSettings/.test(INSTALL), true);
+for (const [what, prop, value] of [
+  ['it may start on battery', 'DisallowStartIfOnBatteries', 'false'],
+  ['it is not killed when unplugged', 'StopIfGoingOnBatteries', 'false'],
+  ['a run missed while asleep is caught up', 'StartWhenAvailable', 'true']
+]) {
+  check(what, new RegExp(`Settings\\.${prop}\\s*=\\s*\\$${value}`).test(INSTALL), true);
+}
+/*
+ * Applied to EVERY task, not just the hourly ones. The daily 08:45/10:45/15:45 sweeps are created through a
+ * different code path, and they are the ones the Chat card's freshness check depends on.
+ */
+{
+  const creates = (INSTALL.match(/schtasks\.exe \/Create/g) || []).length;
+  const applies = (INSTALL.match(/Set-VisitTaskSettings -Name/g) || []).length;
+  check('every creation path applies them', applies >= creates, true);
+  check('...including the daily sweeps', /Set-VisitTaskSettings -Name \$name/.test(INSTALL), true);
+}
+/*
+ * Mutate the settings the task already has rather than building a fresh set — New-ScheduledTaskSettingsSet
+ * would silently drop the 72-hour execution limit and everything else schtasks configured.
+ */
+check('the existing settings are kept', /Set-ScheduledTask -TaskName \$Name -Settings \$task\.Settings/.test(INSTALL), true);
+check('...and a machine that refuses is warned about, not failed',
+  /catch \{[\s\S]{0,200}Write-Warning/.test(INSTALL.slice(INSTALL.indexOf('function Set-VisitTaskSettings'))), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

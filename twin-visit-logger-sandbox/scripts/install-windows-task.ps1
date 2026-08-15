@@ -98,7 +98,52 @@ Administrator prompt. Re-run this installer the same way:
 The tasks still run as this Windows user either way - elevation only decides who may REPLACE them.
 "@
   }
+  Set-VisitTaskSettings -Name $Name
   Write-Host ("  {0,-30} every {1,3} min   {2}" -f $Name, $Every, $What)
+}
+
+<#
+.SYNOPSIS
+  Undo the three schtasks defaults that quietly stop an hourly task on a real laptop.
+
+.DESCRIPTION
+  This is the fault that took the automation down for two days. `schtasks /Create` was given no power or
+  recovery flags, so the task inherited Windows' defaults, and `schtasks /query /v` showed exactly what they
+  cost:
+
+      Last Run Time:   8/14/2026 4:07:01 PM      <- ran, and succeeded
+      Next Run Time:   8/14/2026 5:07:00 PM      <- never happened, and never rescheduled
+      Power Management: Stop On Battery Mode, No Start On Batteries
+
+  Three defaults, each individually reasonable:
+
+    DisallowStartIfOnBatteries  the task will not START on battery
+    StopIfGoingOnBatteries      a running task is KILLED the moment the charger comes out
+    StartWhenAvailable = false  a run missed while the machine slept is skipped, not caught up
+
+  Together, on a laptop that gets unplugged or closed at the end of a day, the hourly schedule simply stops
+  and does not resume. Nothing errors. Last Result stays 0. The task still reads "Ready" and "Enabled" —
+  which is why two days of looking at the sheet, the triggers and the Chat card found nothing: every one of
+  those was working correctly and faithfully reporting that no sweep had happened.
+
+  Set on the EXISTING settings object rather than a fresh New-ScheduledTaskSettingsSet, which would discard
+  the 72-hour execution limit and everything else schtasks configured.
+
+  Never fatal. A machine where this cannot be applied still has working tasks — worse ones, plugged in.
+#>
+function Set-VisitTaskSettings {
+  param([string]$Name)
+  try {
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
+    $task.Settings.DisallowStartIfOnBatteries = $false
+    $task.Settings.StopIfGoingOnBatteries     = $false
+    $task.Settings.StartWhenAvailable         = $true
+    Set-ScheduledTask -TaskName $Name -Settings $task.Settings -ErrorAction Stop | Out-Null
+  } catch {
+    Write-Warning ("Could not set battery/catch-up options on '{0}': {1}" -f $Name, $_.Exception.Message)
+    Write-Warning "  The task will still run, but only while plugged in, and a run missed while the"
+    Write-Warning "  machine slept will be skipped rather than caught up."
+  }
 }
 
 Write-Host ""
@@ -169,6 +214,7 @@ if (-not $SkipBuckets) {
   $parkedCmd = 'wscript.exe "' + $launcher + '" "sweep-parked.cmd"'
   & schtasks.exe /Create /SC DAILY /ST $parkedAt /TN $parkedName /TR $parkedCmd /F | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$parkedName' failed with exit code $LASTEXITCODE." }
+  Set-VisitTaskSettings -Name $parkedName
   Write-Host ("  {0,-38} daily at {1}   closed/nurture leads that look alive again" -f $parkedName, $parkedAt)
 
   $briefAt = "07:30"
@@ -176,6 +222,7 @@ if (-not $SkipBuckets) {
   $briefCmd = 'wscript.exe "' + $launcher + '" "morning-briefings.cmd"'
   & schtasks.exe /Create /SC DAILY /ST $briefAt /TN $briefName /TR $briefCmd /F | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$briefName' failed with exit code $LASTEXITCODE." }
+  Set-VisitTaskSettings -Name $briefName
   Write-Host ("  {0,-38} daily at {1}   today's visit briefings to Chat" -f $briefName, $briefAt)
 
   foreach ($at in @("08:45", "10:45", "15:45")) {
@@ -183,6 +230,7 @@ if (-not $SkipBuckets) {
     $cmd = 'wscript.exe "' + $launcher + '" "recheck-buckets.cmd"'
     & schtasks.exe /Create /SC DAILY /ST $at /TN $name /TR $cmd /F | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$name' failed with exit code $LASTEXITCODE." }
+    Set-VisitTaskSettings -Name $name
     Write-Host ("  {0,-38} daily at {1}   sweep before the Chat card" -f $name, $at)
   }
 } else {
