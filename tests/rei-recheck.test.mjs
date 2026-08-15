@@ -1704,5 +1704,35 @@ console.log('\n=== the sweep stamp the Chat card now depends on ===');
     R.split('const APPLY = args.includes')[0]), false);
 }
 
+
+console.log('\n=== a signed-out REI says so, instead of pasting a call log ===');
+/*
+ * What reached Google Chat when a real booking failed:
+ *
+ *   A booking could not be logged: page.waitForSelector: Timeout 20000ms exceeded.
+ *   Call log: - waiting for locator('input[type="search"], input[placeholder*="Search by Name" i], ...
+ *
+ * Nobody reading that can do anything with it. The likely cause — REI had signed the profile out, so the
+ * contacts page rendered a login form with no search box — was written plainly in the address bar, and the
+ * address bar was never read. Same mistake whatsapp-doctor made, and the reason it now checks the URL first.
+ */
+{
+  const SCRAPER = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
+  const find = SCRAPER.slice(SCRAPER.indexOf('async function findContactUrlByPhone'),
+    SCRAPER.indexOf('async function captureDebug'));
+  check('the wait is wrapped so the failure can be explained', /try \{[\s\S]{0,200}waitForSelector\(searchSel/.test(find), true);
+  check('the URL is read before concluding', /const url = page\.url\(\);/.test(find), true);
+  check('a login page is named as such', /REI is showing a login page/.test(find), true);
+  check('...and says the one command that fixes it', /login-rei\.cmd/.test(find), true);
+  /* The other branch must not claim a login it has not seen — REI may simply have changed the page. */
+  check('an unexplained failure does not guess', /REI has changed that page and the selector needs updating/.test(find), true);
+  /*
+   * 20 seconds was its own small bug: every other wait on this page gets config.reiPageTimeoutMs, so a slow
+   * but perfectly healthy REI could fail here alone and be reported to the team as an error.
+   */
+  check('it waits as long as the rest of the page does', /waitForSelector\(searchSel, \{ timeout: config\.reiPageTimeoutMs \}\)/.test(find), true);
+  check('...and the bare 20s wait is gone', /timeout: 20000/.test(find), false);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

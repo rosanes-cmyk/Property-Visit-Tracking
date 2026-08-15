@@ -117,7 +117,36 @@ async function findContactUrlByPhone(page, phone) {
   await page.goto('https://my.reiblackbook.com/contacts', { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
   await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
   const searchSel = 'input[type="search"], input[placeholder*="Search By Name" i], input[placeholder*="Search" i]';
-  await page.waitForSelector(searchSel, { timeout: 20000 });
+  /*
+   * Say WHY the search box never appeared, instead of pasting Playwright's call log at the team.
+   *
+   * What reached Google Chat when this failed on a real booking:
+   *
+   *   A booking could not be logged: page.waitForSelector: Timeout 20000ms exceeded.
+   *   Call log: - waiting for locator('input[type="search"], input[placeholder*="Search by Name" i], ...
+   *
+   * Nobody reading that can act on it. The overwhelmingly likely cause is that REI has signed this profile
+   * out — the contacts page then renders a login form, which has no search box, and the wait times out on a
+   * page that is working exactly as designed. The URL says so, and the URL was never looked at. That is the
+   * same mistake whatsapp-doctor made: concluding from the absence of one element while ignoring the address
+   * bar, which was saying plainly what had happened.
+   *
+   * The 20 seconds was its own small bug: everything else on this page is given config.reiPageTimeoutMs
+   * (45s by default), so a slow-but-fine REI could fail here alone and be reported as an error.
+   */
+  try {
+    await page.waitForSelector(searchSel, { timeout: config.reiPageTimeoutMs });
+  } catch (error) {
+    const url = page.url();
+    if (/log[-_]?in|sign[-_]?in|\/auth|session|password/i.test(url)) {
+      throw new Error(`REI is showing a login page (${url}), so there was no contact list to search. `
+        + 'Run scripts\\login-rei.cmd on this PC, sign in, and the booking will be picked up on the next run.');
+    }
+    throw new Error(`REI's contacts page never showed its search box (waited `
+      + `${Math.round(config.reiPageTimeoutMs / 1000)}s, still at ${url}). `
+      + 'Usually this is a signed-out session — run scripts\\login-rei.cmd and check. '
+      + 'If you are signed in and it still fails, REI has changed that page and the selector needs updating.');
+  }
   const box = page.locator(searchSel).first();
   for (const term of attempts) {
     await box.click().catch(() => {});
