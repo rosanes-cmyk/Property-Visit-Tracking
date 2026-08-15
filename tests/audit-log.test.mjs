@@ -80,7 +80,12 @@ console.log('\n--- and it cannot damage anything ---');
 // Matched as a CALL, not as prose: the comment above the code names values.append to explain the choice.
 check('it does NOT call values.append', /sheets\.spreadsheets\.values\.append\(/.test(LOG), false);
 check('...and says in the code why not', /writes to the first column of the TABLE IT DETECTS/.test(LOG), true);
-check('it updates an explicit row range', /range: `\$\{LOG_SHEET\}!A\$\{start\}:D\$\{start \+ rows\.length - 1\}`/.test(LOG), true);
+/*
+ * The end row is now computed once and reused, because ensureRoom needs it too — so this checks the shape
+ * of the range rather than one spelling of the arithmetic. The range it actually writes is asserted for
+ * real further down, against a stubbed API.
+ */
+check('it updates an explicit row range', /range: `\$\{LOG_SHEET\}!A\$\{start\}:D\$\{end\}`/.test(LOG), true);
 /*
  * A log write must never fail the correction it describes. The row is already in the sheet by the time this
  * runs, and losing the note is far better than losing the fix.
@@ -168,6 +173,92 @@ check('a failed wait no longer crashes the script', /\]\)\.catch\(\(error\) => \
  */
 check('...and says the session may already be saved', /the session IS saved/.test(LOGIN), true);
 check('...with how to check rather than a guess', /Run the re-check and see/.test(LOGIN), true);
+
+console.log('\n=== the log grows instead of filling up ===');
+/*
+ * The line that cost two days, from the live machine's bucket-task.log:
+ *
+ *   (audit log not written: Range ('Automation Log'!A916:D917) exceeds grid limits.
+ *    Max rows: 915, max columns: 26)
+ *
+ * The sweep ran. It read every lead, agreed with the sheet, and finished. Then its SWEEP stamp — the thing
+ * the work-queue card reads to decide whether the tracker has been verified — could not be written, because
+ * the tab had no rows left. So the card correctly reported that REI had not been checked since the last row
+ * that fit, and stayed correct for two days while the sweeps kept running.
+ *
+ * Everything anyone thought to look at was working: the scheduled task, the triggers, the workbook, the card.
+ * The failure was one swallowed line in a log file.
+ *
+ * Driven against a stubbed Sheets API, because "does it grow the tab" is a question about behaviour.
+ */
+{
+  const { appendAuditLog } = await import('../twin-visit-logger-sandbox/src/google/audit-log.mjs');
+
+  /** A Sheets stub with a fixed-size grid that rejects writes past the end, exactly as Google does. */
+  function fakeSheets({ rowCount, used }) {
+    const calls = { grown: [], written: [] };
+    return {
+      calls,
+      api: {
+        spreadsheets: {
+          get: async () => ({
+            data: { sheets: [{ properties: { title: 'Automation Log', sheetId: 7,
+              gridProperties: { rowCount } } }] }
+          }),
+          batchUpdate: async ({ requestBody }) => {
+            const req = requestBody.requests[0].appendDimension;
+            calls.grown.push(req.length);
+            rowCount += req.length;
+            return {};
+          },
+          values: {
+            get: async () => ({ data: { values: Array.from({ length: used }, () => ['x']) } }),
+            update: async ({ range }) => {
+              const last = Number(/:[A-Z](\d+)$/.exec(range)[1]);
+              if (last > rowCount) {
+                throw new Error(`Range ('Automation Log'!${range.split('!')[1]}) exceeds grid limits. `
+                  + `Max rows: ${rowCount}, max columns: 26`);
+              }
+              calls.written.push(range);
+              return {};
+            }
+          }
+        }
+      }
+    };
+  }
+
+  /* The exact live shape: 915 rows in a 915-row grid, one more line to write. */
+  const full = fakeSheets({ rowCount: 915, used: 915 });
+  const n = await appendAuditLog(full.api, 'sheet-id',
+    [{ level: 'SWEEP', message: 'Bucket sweep finished — 9 lead(s) checked, 0 updated.' }]);
+  check('a full tab no longer loses the write', n, 1);
+  check('...it grew the tab first', full.calls.grown.length, 1);
+  check('...by a block, not one row', full.calls.grown[0] >= 1000, true);
+  check('...and the row landed at 916', full.calls.written, ['Automation Log!A916:D916']);
+
+  /* Room to spare: no batchUpdate at all. Growing on every append would be write amplification for nothing. */
+  const roomy = fakeSheets({ rowCount: 5000, used: 400 });
+  await appendAuditLog(roomy.api, 'sheet-id', [{ level: 'INFO', message: 'hello' }]);
+  check('a tab with room is not grown', roomy.calls.grown.length, 0);
+  check('...and still writes in the right place', roomy.calls.written, ['Automation Log!A401:D401']);
+
+  /* A write that fails for some other reason must still never break the run that logged it. */
+  const broken = { spreadsheets: {
+    get: async () => { throw new Error('network'); },
+    values: { get: async () => ({ data: { values: [['x']] } }) }
+  } };
+  check('an unfixable failure is still swallowed', await appendAuditLog(broken, 'sheet-id',
+    [{ level: 'INFO', message: 'x' }]), 0);
+
+  /* But a lost SWEEP stamp says what it costs — that silence is what made this take two days. */
+  const said = [];
+  const log = console.log;
+  console.log = (m) => said.push(String(m));
+  await appendAuditLog(broken, 'sheet-id', [{ level: 'SWEEP', message: 'Bucket sweep finished' }]);
+  console.log = log;
+  check('a lost SWEEP stamp says the queue will be held', /HELD BACK/.test(said.join(' ')), true);
+}
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -40,17 +40,70 @@ export async function appendAuditLog(sheets, spreadsheetId, rows) {
      * and updating a known row costs one extra call and cannot land anywhere unexpected.
      */
     const start = lastRow + 1;
+    const end = start + rows.length - 1;
+    /*
+     * Grow the tab before writing past the end of it.
+     *
+     * A log tab is a fixed grid, and this one filled up:
+     *
+     *   audit log not written: Range ('Automation Log'!A916:D917) exceeds grid limits.
+     *   Max rows: 915, max columns: 26
+     *
+     * That line cost two days. The SWEEP stamp the work-queue card reads for freshness is written through
+     * here, so once the grid was full the sweeps kept running and succeeding and could no longer say so.
+     * The card correctly reported REI had not been checked since the last row that fit — and everything
+     * anyone thought to look at (the tasks, the triggers, the workbook, the card) was working perfectly.
+     *
+     * A log that stops logging when it gets long is not a log. It grows now, in blocks, so this cannot
+     * recur as the workbook ages.
+     */
+    await ensureRoom(sheets, spreadsheetId, end);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${LOG_SHEET}!A${start}:D${start + rows.length - 1}`,
+      range: `${LOG_SHEET}!A${start}:D${end}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: rows.map((r) => [r.at || new Date().toISOString(), r.level || 'INFO', r.id || '', r.message || '']) }
     });
     return rows.length;
   } catch (error) {
     console.log(`    (audit log not written: ${error.message})`);
+    /*
+     * Swallowing this is right for an ordinary audit line and WRONG for the sweep stamp, which is a
+     * promise to the work-queue card rather than a note about something already done. Losing it silently
+     * is exactly how a working automation looked dead for two days, so say what the consequence is here,
+     * in the words somebody reading the log will need.
+     */
+    if (rows.some((r) => String(r.level || '').toUpperCase() === 'SWEEP')) {
+      console.log('    !! The SWEEP stamp did not reach the sheet, so the work queue will be HELD BACK');
+      console.log('       as though REI had not been checked — even though it just was.');
+    }
     return 0;
   }
+}
+
+/**
+ * Make sure the log tab has at least `needRow` rows, adding some in a block if not.
+ *
+ * Blocks of 1,000 rather than exactly what this write needs: growing a grid is a batchUpdate, and doing one
+ * per append would put a write amplification on the busiest logging path in the project for no gain.
+ */
+async function ensureRoom(sheets, spreadsheetId, needRow) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets(properties(title,sheetId,gridProperties(rowCount)))'
+  });
+  const tab = (meta.data.sheets || []).find((s) => s.properties?.title === LOG_SHEET);
+  if (!tab) return;                                    // createTab will have made it; nothing to grow
+  const have = tab.properties.gridProperties?.rowCount || 0;
+  if (have >= needRow) return;
+  const add = Math.max(1000, needRow - have);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{ appendDimension: { sheetId: tab.properties.sheetId, dimension: 'ROWS', length: add } }]
+    }
+  });
+  console.log(`    (Automation Log was full at ${have} rows — added ${add})`);
 }
 
 /** Rows currently in the log tab, or null when the tab does not exist. */
