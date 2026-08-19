@@ -478,7 +478,20 @@ function cardHTML(r){
       (waited?'<span class="num">'+esc(waited)+'</span>':'')+'</div>'+
       '<div class="dnote" style="margin:6px 2px 0">'+
       (stale
-        ? 'The office PC does this, and it has not. Check it is switched on and signed in to Windows.'
+        /*
+         * Name the cause that is actually most likely, not the one that is easiest to describe.
+         *
+         * This card sat at "Still not finished 1489m" — twenty-five hours — while telling the reader to check
+         * the PC was switched on and signed in to Windows. It was. The real reason was that REI had signed the
+         * browser profile out, so the lookup had nothing to search, and the log said so plainly on the PC.
+         *
+         * A hint that sends somebody to the wrong place costs more than no hint: they check Windows, find
+         * nothing wrong, and conclude the card is broken. Order the two by likelihood and name the shortcut
+         * that fixes the common one, so the fix is a double-click rather than a diagnosis.
+         */
+        ? 'The office PC does this, and it has not. Most often REI has signed itself out — on that PC, '
+          + 'run "1 - Sign in to REI", then "3 - Finish pending bookings". If that is not it, check the PC '
+          + 'is switched on and signed in to Windows.'
         : 'You can close this tab — the office PC is doing it. The card will fill itself in.')+
       '</div></div>';
   }

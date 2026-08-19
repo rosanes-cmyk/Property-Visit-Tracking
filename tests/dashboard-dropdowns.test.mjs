@@ -122,5 +122,30 @@ for (const [label, src] of [['GmailIntake.gs', fs.readFileSync('apps-script/Gmai
   check(`${label}: the stage it writes is legal`, STAGE_OK.includes(stage), true);
 }
 
+
+console.log('\n=== a stuck booking card points at the real cause ===');
+/*
+ * The card in front of the client read "Still not finished 1489m" — twenty-five hours — and advised checking
+ * the PC was switched on and signed in to Windows. It was. REI had signed the browser profile out, so the
+ * lookup had nothing to search, and the PC's own log said exactly that.
+ *
+ * A hint that sends somebody to the wrong place costs more than no hint at all: they check Windows, find
+ * nothing wrong, and conclude the card is broken.
+ */
+{
+  const stale = html.slice(html.indexOf('var stale=pendingStale(r);'), html.indexOf('You can close this tab'));
+  check('the likely cause is named first', /REI has signed itself out/.test(stale), true);
+  /* And named as a shortcut to double-click, not a path to type — that was the other half of today's friction. */
+  check('...with the shortcut that fixes it', /1 - Sign in to REI/.test(stale), true);
+  check('...and the one that finishes the booking', /3 - Finish pending bookings/.test(stale), true);
+  /* The Windows check is still there, demoted rather than dropped: it is occasionally the answer. */
+  check('the Windows check is kept as the fallback', /If that is not it, check the PC/.test(stale), true);
+  /* Those shortcut names have to be the ones make-shortcuts.ps1 really creates. */
+  const PS = fs.readFileSync('twin-visit-logger-sandbox/scripts/make-shortcuts.ps1', 'utf8');
+  for (const name of ['1 - Sign in to REI', '3 - Finish pending bookings']) {
+    check(`"${name}" is a shortcut that exists`, PS.includes(`"${name}"`), true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
