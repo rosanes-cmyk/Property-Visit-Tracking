@@ -87,13 +87,37 @@ async function extractListItemPairs(page) {
   });
 }
 
+/**
+ * The value for a label, whether REI glues it to the label or puts it in the next element.
+ *
+ * The glued form is the one this was written for — "Property Address3125 Alexis Pl, Castro Valley, CA" in a
+ * single leaf — and it works on most contacts. Bryan Dodge's did not: his address was plainly on screen in
+ * the client's screenshot while the scrape reported "REI has no Property Address on that contact", every two
+ * minutes for a day. I guessed twice at why (a missing field in REI, then the ?activeTab=chat in the link)
+ * and was wrong both times.
+ *
+ * What is left, and what this handles, is the OTHER rendering: label and value as two separate leaves, which
+ * is what a longer value wrapping onto two lines produces. In that shape `startsWith` matches the label leaf,
+ * `slice` returns nothing, and the loop moves on having seen the answer and discarded it.
+ *
+ * The lookahead is deliberately narrow, because a wrong value here is far worse than none — it would send
+ * somebody to the wrong house. It fires ONLY when the leaf is exactly the label with nothing after it, and it
+ * refuses a next leaf that looks like another field's label (a capitalised phrase with no digits and no
+ * comma), so "Mailing Address" followed by "Amount Offer" cannot be read as an address.
+ */
 function valueForLabel(pairs, labels = []) {
+  const looksLikeALabel = (t) => /^[A-Z][A-Za-z ()\/]{2,28}$/.test(t) && !/\d/.test(t) && !t.includes(',');
   for (const label of labels) {
     const lower = String(label).toLowerCase();
-    for (const text of pairs) {
-      if (text.toLowerCase().startsWith(lower)) {
-        const value = normalize(text.slice(label.length));
-        if (value && value !== '-') return value;
+    for (let i = 0; i < pairs.length; i++) {
+      const text = pairs[i];
+      if (!text.toLowerCase().startsWith(lower)) continue;
+      const glued = normalize(text.slice(label.length));
+      if (glued && glued !== '-') return glued;
+      /* Label alone: the value is the next leaf, if that leaf is a value rather than the next label. */
+      if (normalize(text).toLowerCase() === lower) {
+        const next = normalize(pairs[i + 1] || '');
+        if (next && next !== '-' && !looksLikeALabel(next)) return next;
       }
     }
   }

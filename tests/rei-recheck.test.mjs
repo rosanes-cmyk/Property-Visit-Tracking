@@ -1782,5 +1782,61 @@ console.log('\n=== a pasted REI link opens the About panel, not the chat tab ===
   check('the stored link uses it too', /\? contactPageUrl\(page\.url\(\)\) : targetUrl/.test(SRC), true);
 }
 
+
+console.log('\n=== a label with its value in the NEXT element still yields the value ===');
+/*
+ * Bryan Dodge's REI page, from the client's screenshot:
+ *
+ *   Property Address
+ *   3125 Alexis Pl, Castro Valley, CA, 94546, UNITED STATES
+ *
+ * On screen, plainly. In the log, every two minutes for a day: "REI has no Property Address on that contact".
+ *
+ * valueForLabel was written for REI's glued rendering — "Property Address3125 Alexis Pl, ..." in one leaf —
+ * which is what most contacts produce and what every other lead scraped correctly. When the value wraps onto
+ * its own element instead, `startsWith` matched the label leaf, `slice` returned nothing, and the loop moved
+ * on having seen the answer and thrown it away.
+ *
+ * I guessed twice before this: first that REI was missing the field, then that ?activeTab=chat was hiding the
+ * About panel. Both wrong, and both cost the client time. The lookahead is what is left.
+ */
+{
+  const SRC = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
+  const from = SRC.indexOf('function valueForLabel(pairs, labels = []) {');
+  const to = SRC.indexOf('\n}', from) + 2;
+  const valueForLabel = new Function(`
+    const normalize = (v) => String(v || '').replace(/\\s+/g, ' ').trim();
+    ${SRC.slice(from, to)}
+    return valueForLabel;`)();
+
+  /* The glued form must keep working — it is what every other contact produces. */
+  check('a glued label/value still reads',
+    valueForLabel(['Property Address2824 Garden Creek Cir, Pleasanton, CA, 94588'], ['Property Address']),
+    '2824 Garden Creek Cir, Pleasanton, CA, 94588');
+  /* Bryan Dodge's shape. */
+  check('a label alone takes the next leaf',
+    valueForLabel(['Property Address', '3125 Alexis Pl, Castro Valley, CA, 94546, UNITED STATES'],
+      ['Property Address']),
+    '3125 Alexis Pl, Castro Valley, CA, 94546, UNITED STATES');
+
+  /*
+   * The guards. A wrong value here sends somebody to the wrong house, so the lookahead must refuse anything
+   * that is plainly the NEXT field's label rather than this field's value.
+   */
+  check('an empty field followed by another label reads as empty',
+    valueForLabel(['Mailing Address', 'Amount Offer', '-'], ['Mailing Address']), '');
+  check("REI's own dash for empty is still empty",
+    valueForLabel(['Property Address', '-'], ['Property Address']), '');
+  check('a label at the very end of the list does not read past it',
+    valueForLabel(['Next Step'], ['Next Step']), '');
+  /* A value that happens to be a single capitalised word is still a value when it carries a digit or comma. */
+  check('a short numeric value is accepted',
+    valueForLabel(['Amount Offer', '$930,000'], ['Amount Offer']), '$930,000');
+  /* And the label list is still tried in order, so a preferred label wins over a fallback. */
+  check('the first label that resolves wins',
+    valueForLabel(['Property Address', '3125 Alexis Pl, CA', 'Address', 'somewhere else'],
+      ['Property Address', 'Address']), '3125 Alexis Pl, CA');
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
