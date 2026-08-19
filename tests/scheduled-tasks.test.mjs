@@ -469,5 +469,36 @@ check('...and a machine that refuses is warned about, not failed',
 check('an elevation refusal names the fix', /Run as administrator/.test(INSTALL.slice(INSTALL.indexOf('function Set-VisitTaskSettings'))), true);
 check('...matched on the message people actually see', /Access is denied\|0x80070005/.test(INSTALL), true);
 
+
+console.log('\n=== two clicks cannot make two rows ===');
+/*
+ * The client's screenshot: two identical "Bryan Dodge" cards in BEING ADDED — same number, same date, one
+ * six seconds after the other.
+ *
+ * findRowForBooking_ was there and correct. The problem was that it is a READ, and the write that follows is
+ * a separate call: two overlapping executions each look, each find nothing, each write. The de-duplication
+ * asked the right question and its answer went stale before it was used.
+ */
+{
+  const WEBAPP = fs.readFileSync('apps-script/WebApp.gs', 'utf8');
+  const COMBINED_ADD = fs.readFileSync('apps-script/Code.combined.gs', 'utf8');
+  for (const [label, src] of [['WebApp.gs', WEBAPP], ['the pasted copy', COMBINED_ADD]]) {
+    const add = src.slice(src.indexOf('function webAddRecord_(params) {'),
+      src.indexOf('function webAddRecordLocked_'));
+    check(`${label}: the booking takes a script lock`, /LockService\.getScriptLock\(\)/.test(add), true);
+    check(`${label}: ...and waits rather than assuming it got it`, /tryLock\(30000\)/.test(add), true);
+    /* A hang is not an answer, and neither is a silent duplicate. */
+    check(`${label}: a busy lock refuses with something actionable`,
+      /Somebody else is saving a booking right now/.test(add), true);
+    check(`${label}: ...and says nothing was saved`, /nothing was saved, so nothing is duplicated/.test(add), true);
+    /* Released in a finally, or the first failed booking blocks every later one for the lock's lifetime. */
+    check(`${label}: the lock is released in a finally`, /finally \{\s*\n\s*lock\.releaseLock\(\);/.test(add), true);
+    /* The look-then-write pair must be INSIDE the lock — both halves, or the lock protects nothing. */
+    const locked = src.slice(src.indexOf('function webAddRecordLocked_'));
+    check(`${label}: the lookup is inside the locked half`,
+      locked.indexOf('findRowForBooking_(params)') >= 0, true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -399,6 +399,33 @@ function webRescheduleRow_(row, params) {
 
 function webAddRecord_(params) {
   /*
+   * One booking at a time, across the whole script.
+   *
+   * findRowForBooking_ below is a READ, and the write that follows it is a separate call. Two people — or
+   * one person whose second click lands before the first has finished — run both halves interleaved: each
+   * looks, each finds nothing, each writes. The board then shows the client's own screenshot: two
+   * identical Bryan Dodge cards, same number, same date, six seconds apart. The de-duplication was there
+   * and correct; it was simply asking a question whose answer went stale before it was used.
+   *
+   * A script lock is the whole fix. Thirty seconds is generous for a look-then-write on one row and short
+   * enough that a colleague who really is waiting behind somebody gets an answer rather than a hang; if it
+   * cannot be had, the booking is refused with something a person can act on, because a refusal they can
+   * retry beats a duplicate they have to find and merge.
+   */
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return { ok: false, error: 'Somebody else is saving a booking right now. Try again in a few seconds — '
+      + 'nothing was saved, so nothing is duplicated.' };
+  }
+  try {
+    return webAddRecordLocked_(params);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function webAddRecordLocked_(params) {
+  /*
    * Look before writing. An existing lead is RESCHEDULED, never duplicated.
    *
    * Without this, a colleague rebooking Sara produced a second Sara: two cards on the board, and every
