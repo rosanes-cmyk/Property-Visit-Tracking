@@ -158,5 +158,49 @@ check('the payload is copied recursively', /recursesubdirs createallsubdirs/.tes
 check('the AppId is fixed, so updates replace rather than stack',
   /AppId=\{\{[0-9A-F-]{36}\}/i.test(ISS), true);
 
+
+console.log('\n=== the shortcuts an unzipped install never got ===');
+/*
+ * The client, handed a full path to paste for the third time: "but thewhy do i need to type that?"
+ *
+ * They should not have to, and installer\TwinVisitLogger.iss already creates exactly these shortcuts. But
+ * the installer was never built — this PC was set up by unzipping into C:\TwinVisitLogger\... — so there was
+ * no Start-menu entry and no icons, and every instruction became a 120-character path pasted into a black
+ * window. One of those pastes duplicated itself into "hostnamehostname".
+ */
+{
+  const PS = fs.readFileSync('twin-visit-logger-sandbox/scripts/make-shortcuts.ps1', 'utf8');
+  const CMD = fs.readFileSync('twin-visit-logger-sandbox/scripts/make-shortcuts.cmd', 'utf8');
+
+  /* Double-clickable, or it does not solve the problem it exists for. */
+  check('there is a .cmd to double-click', CMD.includes('make-shortcuts.ps1'), true);
+  check('...that does not need an execution policy typed', /-ExecutionPolicy Bypass/.test(CMD), true);
+  check('...and stays open so the output can be read', /^pause$/m.test(CMD), true);
+
+  /* Every shortcut must point at a runner that is really in the package. */
+  const targets = [...PS.matchAll(/"(scripts\\[a-z-]+\.cmd)"/g)].map((m) => m[1].replace('\\', '/'));
+  check('it makes several shortcuts', targets.length >= 5, true);
+  const missing = targets.filter((t) => !fs.existsSync(`twin-visit-logger-sandbox/${t}`));
+  check('every target exists', missing.join(', '), '');
+
+  /* The three that answer the three things that actually go wrong, in the order they are needed. */
+  for (const [n, runner] of [['1', 'login-rei.cmd'], ['2', 'recheck-buckets.cmd'], ['3', 'fill-pending.cmd']]) {
+    check(`"${n} - ..." points at ${runner}`, new RegExp(`"${n} - [^"]+"\\s*=\\s*"scripts\\\\${runner}"`).test(PS), true);
+  }
+
+  /*
+   * A shortcut to a file that is not there is worse than no shortcut: it looks like the feature exists and
+   * fails only when somebody is relying on it.
+   */
+  check('a missing runner is skipped, not linked to', /if \(-not \(Test-Path \$target\)\)/.test(PS), true);
+  check('...and says which one', /Skipped '\{0\}'/.test(PS), true);
+
+  /* The installer's own list must offer the same things, or the two disagree and the wrong one is in front of somebody. */
+  const ISS = fs.readFileSync('twin-visit-logger-sandbox/installer/TwinVisitLogger.iss', 'utf8');
+  for (const runner of ['login-rei.cmd', 'dashboard.cmd', 'update-app.cmd']) {
+    check(`the installer also offers ${runner}`, ISS.includes(runner), true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
