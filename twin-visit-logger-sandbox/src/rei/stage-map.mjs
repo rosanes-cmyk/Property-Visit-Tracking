@@ -378,6 +378,44 @@ export const TAG_PROPERTY_EVALUATED = 'Property Evaluated';
  * So the tag must be joined by a note dated ON OR AFTER the visit. The pair is what the client described:
  * "tag property and double check as well the notes." Either on its own returns false.
  */
+/**
+ * Does REI's own Lead Stage already prove the visit happened?
+ *
+ * The client, on a lead the sweep reported as unverifiable: "not accurate again and then wht is not working".
+ * The REI page behind that complaint said `Lead Stage: 4 Offer Sent`, with a note from Cherry recording a
+ * verbal offer of $1.1M and a gift delivered to the property. The sweep's line for the same lead was "REI
+ * could not tell us whether the visit happened" — because it asked only the Tasks panel, and the panel was
+ * empty.
+ *
+ * It had a plain answer in front of it and did not read it. An offer follows a visit; nobody offers $1.1M for
+ * a house nobody walked. Any stage this tracker orders AFTER `Visit Scheduled` is proof the visit is behind
+ * the lead, and claiming ignorance while REI says `Offer Sent` is not caution, it is a wrong answer — it
+ * keeps a closed question on the work queue and sends somebody to chase a colleague who has already done it.
+ *
+ * Reads the MAPPED stage, so the eleven REI values and their order stay in one place:
+ *   3 Appointment Booked -> 'Visit Scheduled'      index 0  -> proves nothing, the visit is still ahead
+ *   4 Offer Sent         -> 'Offer Sent'           index 3  -> proves it
+ *   5 / 8 / 10           -> 'Contract Signed'      index 7  -> proves it
+ *   0 / 1 / 2 / 9        -> ''                              -> proves nothing, correctly
+ *
+ * `2 Follow Up` returning nothing is the important non-answer: REI uses it both before a visit and after an
+ * offer, which is why it is unmapped, and Jose Anguiano sat on it with no appointment at all.
+ *
+ * 6 and 7 need the extra clause. mapReiStage does NOT map them — stageContractCancelled owns them, because
+ * moving a lead to 'Active Negotiation' is a BACKWARD move with its own guards — so they arrive here as ''
+ * and would read as "proves nothing". They prove it more firmly than anything else on the list: a contract
+ * was signed and then cancelled, and neither happens without a visit. I wrote the first version of this
+ * without that clause and the doc comment above it confidently claimed 6 mapped to index 4; running it
+ * against the eleven real values is what caught it.
+ */
+export function visitEvidencedByStage(reiStage) {
+  if (REI_CANCELLED_CONTRACT.test(text(reiStage))) return true;
+  const mapped = mapReiStage(reiStage);
+  if (!mapped) return false;
+  const at = STAGE_ORDER.indexOf(mapped);
+  return at > STAGE_ORDER.indexOf('Visit Scheduled');
+}
+
 export function visitEvidencedByRei({ reiTags, lastContactAt, visitAt } = {}) {
   if (!hasReiTag(reiTags, TAG_PROPERTY_EVALUATED)) return false;
   if (!(lastContactAt instanceof Date) || Number.isNaN(lastContactAt.getTime())) return false;

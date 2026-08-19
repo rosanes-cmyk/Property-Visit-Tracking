@@ -19,7 +19,7 @@
  * in the standard library — so the decisions stay testable without the sandbox's node_modules.
  */
 import { stageAdvance, stageCloseOut, stageContractCancelled, dispositionFromRei, nextActionReplaceable,
-  parseReiMoney, DISPOSITION_LOST } from './stage-map.mjs';
+  parseReiMoney, DISPOSITION_LOST, visitEvidencedByStage } from './stage-map.mjs';
 import { mapOwner, mapVisitor } from '../google/owner-map.mjs';
 import { latestReiNote, latestReiNoteDate, contactResultReplaceable } from './notes.mjs';
 import { giftFromNotes, giftReceiptDate } from './gift.mjs';
@@ -1183,6 +1183,23 @@ export function describeChanges(row, changes, reiFields = null, scraped = null) 
    * belong in the "could not be verified" report. Splitting the state must not quietly drop half the leads
    * out of that list.
    */
+  /*
+   * Before claiming ignorance, read the stage.
+   *
+   * The client, on this exact line: "not accurate again and then wht is not working". The REI page said
+   * `Lead Stage: 4 Offer Sent`, with a note recording a verbal offer of $1.1M and a gift delivered to the
+   * property — and the sweep reported "REI could not tell us whether the visit happened", because it had
+   * asked only the Tasks panel and the panel was empty.
+   *
+   * The answer was on the page. An offer follows a visit. Reporting a closed question as open is not caution:
+   * it keeps the lead on the work queue and sends somebody to chase a colleague who has already done the job,
+   * which is the specific thing that made a colleague angry earlier in this project.
+   */
+  if (scraped && visitEvidencedByStage(scraped.contactStage)) {
+    return head + `${confirmed}${notChecked}. REI's Lead Stage is "${String(scraped.contactStage).trim()}", `
+      + 'which is past the visit — so the visit HAPPENED. Mark it Completed on the board; the Tasks panel '
+      + 'has nothing to add.';
+  }
   if (scraped && (scraped.visitTaskState === 'unknown' || scraped.visitTaskState === 'none')) {
     const tail = !looked
       ? " This is a SCRAPER problem, not a data problem: REI's Tasks panel could not be opened, so its " +

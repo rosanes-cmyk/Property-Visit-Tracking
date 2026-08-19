@@ -23,7 +23,7 @@ import { STAGE_ORDER, mapReiStage, stageAdvance, stageBehindTracker, stageCloseO
   stageContractCancelled, dispositionFromRei,
   reiSaysLost, nextActionReplaceable, parseReiMoney,
   AUTOMATION_NEXT_ACTIONS,
-  hasReiTag, visitEvidencedByRei, TAG_PROPERTY_EVALUATED }
+  hasReiTag, visitEvidencedByRei, visitEvidencedByStage, TAG_PROPERTY_EVALUATED }
   from '../twin-visit-logger-sandbox/src/rei/stage-map.mjs';
 import { diffFromRei, reiFieldsFromScrape, FILL_IF_BLANK, REI_WINS, followUpBlocker, blockerFromRei }
   from '../twin-visit-logger-sandbox/src/rei/recheck.mjs';
@@ -523,6 +523,46 @@ console.log('\n--- and the scraper actually reads the tags ---');
   check('the tags are kept as one string, not split',
     /Kept as ONE STRING rather than split/.test(SCRAPER), true);
 }
+
+
+console.log("\n=== REI's own stage can settle whether the visit happened ===");
+/*
+ * The client, on a lead the sweep called unverifiable: "not accurate again and then wht is not working".
+ *
+ * The REI page behind that said `Lead Stage: 4 Offer Sent`, with a note recording a verbal offer of $1.1M and
+ * a gift delivered to the property. The sweep's line for the same lead was "REI could not tell us whether the
+ * visit happened" — because it asked only the Tasks panel, and the panel was empty.
+ *
+ * The answer was on the page. An offer follows a visit; nobody offers $1.1M for a house nobody walked.
+ * Reporting a closed question as open is not caution — it keeps the lead on the work queue and sends somebody
+ * to chase a colleague who has already done the job.
+ */
+check('4 Offer Sent proves the visit happened', visitEvidencedByStage('4 Offer Sent'), true);
+check('5 Under Contract too', visitEvidencedByStage('5 Under Contract'), true);
+check('8 Clear to Close too', visitEvidencedByStage('8 Clear to Close'), true);
+check('10 Acquired too', visitEvidencedByStage('10 Acquired'), true);
+/*
+ * 6 and 7 are the ones I got wrong first time. mapReiStage does not map them — stageContractCancelled owns
+ * them, because moving to Active Negotiation is a BACKWARD move with its own guards — so they arrived as ''
+ * and read as "proves nothing", while my doc comment confidently claimed 6 mapped to index 4. Running it
+ * against all eleven real values is what caught it. A contract signed and then cancelled is the FIRMEST
+ * evidence on the list: neither happens without a visit.
+ */
+check('6 Cancelled Contract proves it', visitEvidencedByStage('6 Cancelled Contract'), true);
+check('7 Reinstated proves it', visitEvidencedByStage('7 Reinstated'), true);
+
+/* And the half that must stay false, which is what stops this becoming a confident wrong answer. */
+check('3 Appointment Booked proves NOTHING', visitEvidencedByStage('3 Appointment Booked'), false);
+/* Jose Anguiano's stage. REI uses Follow Up before a visit AND after an offer, so it settles nothing. */
+check('2 Follow Up proves nothing', visitEvidencedByStage('2 Follow Up'), false);
+check('1 New Lead proves nothing', visitEvidencedByStage('1 New Lead'), false);
+/* A lost lead may never have been visited at all — closing it out is a different question. */
+check('9 Lost / Dead Lead proves nothing', visitEvidencedByStage('9 Lost / Dead Lead'), false);
+check('0 Invalid Leads proves nothing', visitEvidencedByStage('0 Invalid Leads'), false);
+/* A page that did not render gives us nothing, and must never read as evidence. */
+check('a blank stage proves nothing', visitEvidencedByStage(''), false);
+check('null proves nothing', visitEvidencedByStage(null), false);
+check('undefined proves nothing', visitEvidencedByStage(undefined), false);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
