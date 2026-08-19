@@ -530,5 +530,43 @@ console.log('\n=== a locked log must not stop the run ===');
   check('a successful run says where to look', /What it did is at the end of/.test(PENDING), true);
 }
 
+
+console.log('\n=== a parked row says WHY it is parked ===');
+/*
+ * The log the client finally read, after a day of looking everywhere else:
+ *
+ *   -- Bryan Dodge
+ *      looking up REI by link: https://my.reiblackbook.com/contacts/16379118
+ *      Read 8 note(s) from the Notes tab
+ *      REI has no Property Address on that contact - leaving the row parked
+ *
+ * The automation was right, and had been right every two minutes for twenty-five hours. REI simply had no
+ * address on that contact, and the rule against guessing one is the rule that stops a visitor being sent to
+ * a house nobody named.
+ *
+ * What was wrong is where that sentence went: into a log file on the office PC. The board meanwhile said
+ * "Still not finished 1489m - The office PC does this, and it has not. Check it is switched on and signed in
+ * to Windows." The PC was on and had done it seven hundred times. A diagnosis that only exists on the machine
+ * nobody is looking at is not a diagnosis.
+ */
+{
+  const FILL = fs.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs', 'utf8');
+  check('the reason is written onto the row', /await noteParkReason\(sheets, headers, row,/.test(FILL), true);
+  check('...naming the field a person can act on', /REI has no Property Address on this contact/.test(FILL), true);
+  check('...and saying nothing needs restarting', /nothing needs restarting/.test(FILL), true);
+  check('it writes to the column the board reads',
+    /headers\.indexOf\('Exception Reason'\)/.test(FILL), true);
+  /*
+   * The [since ...] stamp drives the board's elapsed timer. Rewriting it would restart the clock on a row
+   * that has been waiting a day — hiding exactly the rows that most need attention.
+   */
+  check('the [since ...] stamp is preserved, not reset',
+    /const stamp = \(\/\\\[since \[\^\\\]\]\*\\\]\/\.exec\(prior\)/.test(FILL), true);
+  check('...and an unchanged reason costs no write', /if \(prior === wanted\) return;/.test(FILL), true);
+  /* A message about a row must never be able to fail the run that is describing it. */
+  check('writing the reason can never break the run',
+    /could not write the reason onto the row/.test(FILL), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

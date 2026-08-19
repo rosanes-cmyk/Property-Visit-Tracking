@@ -107,6 +107,40 @@ function lookupKeyFor(row) {
   return { link: '', phone: rest };
 }
 
+/**
+ * Put the reason a row is still parked ONTO the row, where the person waiting will see it.
+ *
+ * The board's card reads Exception Reason. Until now the only thing ever written there was the generic
+ * "Waiting for the PC to read REI and fill in the address and details", which is true of every parked row
+ * and useless on the one that is stuck for a specific reason — and the card's own guess ("check the PC is
+ * switched on") sent somebody to look at the one thing that was working.
+ *
+ * The `[since ...]` stamp is preserved rather than rewritten: the dashboard measures the elapsed time from
+ * it, so replacing it would reset the clock on a row that has been waiting a day, and a timer that restarts
+ * whenever the reason is updated would hide exactly the rows that need attention most.
+ *
+ * Never throws. This is a message about a row; it must not be able to fail the run that is describing it.
+ */
+async function noteParkReason(sheets, headers, row, reason) {
+  try {
+    const col = headers.indexOf('Exception Reason');
+    if (col < 0) return;
+    const prior = text(row['Exception Reason']);
+    const stamp = (/\[since [^\]]*\]/.exec(prior) || [''])[0];
+    const wanted = stamp ? `${reason} ${stamp}` : reason;
+    if (prior === wanted) return;                        // already says this; do not spend a write
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `${config.trackerSheet}!${columnLetter(col + 1)}${row.__rowNumber}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[wanted]] }
+    });
+    console.log('    wrote the reason onto the row, so the board says it too');
+  } catch (error) {
+    console.log(`    (could not write the reason onto the row: ${error.message})`);
+  }
+}
+
 async function main() {
   console.log('Twin Visit Logger · finish the rows added on the board');
   console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY RUN — nothing will be written'}\n`);
@@ -265,8 +299,22 @@ async function main() {
          * REI answered but holds no address. Reported rather than guessed — the whole point of the rule
          * "do not guess missing addresses" is that somebody would otherwise be sent to a house nobody
          * named. The row keeps its placeholder so the next run tries again after REI is filled in.
+         *
+         * AND THE REASON GOES ON THE ROW, which is the part that was missing and it cost a whole day.
+         *
+         * This branch ran every two minutes for twenty-five hours on two real bookings. The console said
+         * exactly what was wrong each time — into a log file nobody had reason to open — while the board
+         * showed "Still not finished 1489m · The office PC does this, and it has not. Check it is switched
+         * on and signed in to Windows." The PC was on, and it had done it, over seven hundred times. The
+         * client checked the PC, the tasks, the sign-in and the sheet, and the answer was a blank field in
+         * REI the whole time.
+         *
+         * A diagnosis that only exists on the machine nobody is looking at is not a diagnosis.
          */
         console.log('    REI has no Property Address on that contact — leaving the row parked');
+        await noteParkReason(sheets, headers, row,
+          'REI has no Property Address on this contact. Add it in REI and this row finishes itself '
+          + 'within a couple of minutes — nothing needs restarting.');
         stuck += 1;
         continue;
       }
