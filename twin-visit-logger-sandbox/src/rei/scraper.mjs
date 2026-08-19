@@ -174,6 +174,30 @@ async function captureDebug(page, prefix, extra = {}) {
   await fs.writeFile(`${base}.json`, JSON.stringify({ url: page.url(), ...extra }, null, 2), 'utf8').catch(() => {});
 }
 
+/**
+ * The plain contact page, with any tab or query string stripped off.
+ *
+ * A pasted REI link often carries the tab the person happened to be on:
+ *
+ *   https://my.reiblackbook.com/contacts/16379118?activeTab=chat
+ *
+ * Opened as-is, REI renders the CHAT tab, and the About panel — the one holding Property Address, Lead
+ * Stage, Amount Offer and the appointment fields — is not on the page at all. The scrape then honestly
+ * reports "REI has no Property Address on that contact" about a contact whose address is right there under
+ * the About tab. Bryan Dodge's read `3125 Alexis Pl, Castro Valley, CA, 94546` the whole time, and the row
+ * stayed parked for twenty-five hours.
+ *
+ * It was invisible because every other lead worked: those links have no activeTab, so they open on About and
+ * scrape correctly. One pasted link with one query parameter is the whole difference.
+ *
+ * Only ever narrows to `/contacts/<id>`, and returns the input untouched when it does not match that shape —
+ * a link this does not recognise must be followed as given rather than rewritten into something else.
+ */
+export function contactPageUrl(link) {
+  const m = /(https?:\/\/[^/]*reiblackbook\.com\/contacts\/\d+)/i.exec(String(link || ''));
+  return m ? m[1] : String(link || '');
+}
+
 export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
   const selectorConfig = await loadSelectorConfig();
   const L = selectorConfig.listItemLabels || {};
@@ -181,7 +205,11 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
   try {
     // Decide which contact page to open: a direct REI contact URL if we have one, otherwise
     // locate it by searching REI for the phone number carried in the task title.
-    let targetUrl = /reiblackbook\.com\/contacts\/\d+/i.test(String(reiLink || '')) ? reiLink : '';
+    /*
+     * contactPageUrl, so a link carrying ?activeTab=chat opens the About panel rather than the chat log.
+     * See the note on that function — this one parameter parked two real bookings for twenty-five hours.
+     */
+    let targetUrl = /reiblackbook\.com\/contacts\/\d+/i.test(String(reiLink || '')) ? contactPageUrl(reiLink) : '';
     if (!targetUrl && emailFallback.phone) {
       targetUrl = await findContactUrlByPhone(page, emailFallback.phone);
     }
@@ -196,7 +224,9 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     await page.waitForTimeout(2500);
     await assertAuthenticated(page, selectorConfig.login || {});
 
-    const effectiveLink = /reiblackbook\.com\/contacts\/\d+/i.test(page.url()) ? page.url() : targetUrl;
+    /* Stored without the tab too, so the next run and anybody clicking it from the board get the About panel. */
+    const effectiveLink = /reiblackbook\.com\/contacts\/\d+/i.test(page.url())
+      ? contactPageUrl(page.url()) : targetUrl;
 
     /*
      * Reveal the rest of any clamped note BEFORE reading the page.

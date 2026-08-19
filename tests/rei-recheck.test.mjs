@@ -1734,5 +1734,53 @@ console.log('\n=== a signed-out REI says so, instead of pasting a call log ===')
   check('...and the bare 20s wait is gone', /timeout: 20000/.test(find), false);
 }
 
+
+console.log('\n=== a pasted REI link opens the About panel, not the chat tab ===');
+/*
+ * The client's screenshot of Bryan Dodge's REI contact, next to a log line saying the opposite:
+ *
+ *   Property Address:  3125 Alexis Pl, Castro Valley, CA, 94546, UNITED STATES
+ *   log:               REI has no Property Address on that contact - leaving the row parked
+ *
+ * The link stored on that row was `.../contacts/16379118?activeTab=chat`. Opened as given, REI renders the
+ * CHAT tab and the About panel — which holds Property Address, Lead Stage, Amount Offer and the appointment
+ * fields — is not on the page at all. So the scrape reported "no address" about a contact whose address was
+ * right there, every two minutes for twenty-five hours.
+ *
+ * It hid because every other lead worked: their links carry no activeTab, so they open on About and scrape
+ * correctly. One pasted link with one query parameter was the whole difference.
+ */
+{
+  const SRC = fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/rei/scraper.mjs', import.meta.url), 'utf8');
+  const from = SRC.indexOf('export function contactPageUrl');
+  const to = SRC.indexOf('}', SRC.indexOf('return m ? m[1]', from)) + 1;
+  check('the normaliser exists', from > 0, true);
+  const contactPageUrl = new Function(`${SRC.slice(from, to).replace('export function', 'function')}
+    return contactPageUrl;`)();
+
+  check('?activeTab=chat is stripped',
+    contactPageUrl('https://my.reiblackbook.com/contacts/16379118?activeTab=chat'),
+    'https://my.reiblackbook.com/contacts/16379118');
+  check('any other tab too',
+    contactPageUrl('https://my.reiblackbook.com/contacts/20573740?activeTab=notes&x=1'),
+    'https://my.reiblackbook.com/contacts/20573740');
+  check('a clean link is untouched',
+    contactPageUrl('https://my.reiblackbook.com/contacts/16379118'),
+    'https://my.reiblackbook.com/contacts/16379118');
+  /*
+   * A link it does not recognise must be followed AS GIVEN. Rewriting an unfamiliar URL into a guess is how
+   * the record-id bug happened once already, where every tracking link collapsed to the id "click" and
+   * unrelated contacts overwrote each other's calendar event.
+   */
+  check('an unrecognised link is returned unchanged',
+    contactPageUrl('https://example.com/ls/click?upn=abc'), 'https://example.com/ls/click?upn=abc');
+  check('a blank stays blank', contactPageUrl(''), '');
+  check('null does not throw', contactPageUrl(null), '');
+
+  /* And it has to be USED — on the way in, and on the link stored back onto the row. */
+  check('the navigation uses it', /\? contactPageUrl\(reiLink\) : ''/.test(SRC), true);
+  check('the stored link uses it too', /\? contactPageUrl\(page\.url\(\)\) : targetUrl/.test(SRC), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
