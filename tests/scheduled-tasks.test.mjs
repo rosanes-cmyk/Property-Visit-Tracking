@@ -500,5 +500,35 @@ console.log('\n=== two clicks cannot make two rows ===');
   }
 }
 
+
+console.log('\n=== a locked log must not stop the run ===');
+/*
+ * The client, running the pending lookup by hand while the 2-minute scheduled copy was mid-run:
+ *
+ *   The process cannot access the file because it is being used by another process.
+ *   The process cannot access the file because it is being used by another process.
+ *   The process cannot access the file because it is being used by another process.
+ *
+ * Three lines for three redirections — and the third was the node command, so the run never happened. A
+ * person trying to unstick two bookings got three copies of a Windows error, no output, and no way to tell
+ * that nothing at all had run. A scheduled run overlapping its predecessor fails the same way and logs
+ * nothing, so the one place anybody would look for the reason stays empty.
+ */
+{
+  const PENDING = fs.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending.cmd', 'utf8');
+  check('the log path is a variable, not repeated literally',
+    /set "LOG=logs\\fill-pending\.log"/.test(PENDING), true);
+  check('a locked log falls back instead of failing', /\|\| \(/.test(PENDING), true);
+  check('...to a per-run file', /set "LOG=logs\\fill-pending-%RANDOM%\.log"/.test(PENDING), true);
+  check('...and says where it went', /writing to a separate one instead/.test(PENDING), true);
+  /* The node line must use the variable, or the fallback protects the echoes and not the run itself. */
+  check('the run itself uses the chosen log',
+    /fill-pending-rei\.mjs --yes --scheduled >> "%LOG%" 2>&1/.test(PENDING), true);
+  /* And it must not fail silently either way: a person who typed this needs to know if it did nothing. */
+  check('a failing run says so', /if errorlevel 1 \(/.test(PENDING), true);
+  check('...and points at the log', /The reason is at the end of/.test(PENDING), true);
+  check('a successful run says where to look', /What it did is at the end of/.test(PENDING), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
