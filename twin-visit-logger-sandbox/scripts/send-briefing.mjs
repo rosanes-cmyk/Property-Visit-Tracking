@@ -105,6 +105,49 @@ const rows = grid.slice(1)
 
 const zone = config.calendarTimezone;
 const dayKey = (d) => d.setZone(zone).toFormat('yyyy-MM-dd');
+
+/**
+ * The calendar day a Visit Date cell means, as yyyy-MM-dd, or '' when it cannot be read.
+ *
+ * `--today` used to assume the cell was already `yyyy-MM-dd` and fall back to `raw.slice(0, 10)` — which
+ * compares the first ten characters of something like "8/27/2026" against "2026-08-27" and never matches.
+ *
+ * The client ran `--today` on a day whose work queue card said, three lines up:
+ *
+ *   Ngam Lam · 2155 32nd Avenue, San Francisco · Owner: Juan · visit TODAY at 1:30 PM
+ *
+ * and got "Nothing matched a visit on 2026-08-27". Asking for him BY NAME worked and posted a full briefing,
+ * so the event and the row were both fine — only the date comparison was broken.
+ *
+ * That matters far more than one typed command: the 07:30 Morning Briefings job runs this same path. On any
+ * day the sheet renders Visit Date in US format, every briefing for every visit is silently skipped, and the
+ * visitor sets off without the property, the numbers or the seller's phone. Nothing errors, and the log line
+ * reads like a quiet day.
+ *
+ * Sheets hands back the cell's DISPLAY value, so the format is whatever the column happens to be formatted
+ * as — and this workbook has been re-imported, migrated and hand-edited, so it is not consistent. Hence a
+ * list rather than one format.
+ *
+ * M/d is tried before d/M because the workbook's timezone is America/Los_Angeles. Both are listed, and the
+ * order only decides ambiguous dates: when the first number is above 12 the US reading is invalid anyway, so
+ * d/M catches "13/08/2026" without ever hijacking a date the US reading could have parsed.
+ */
+const DATE_FORMATS = [
+  'yyyy-MM-dd', 'yyyy-MM-dd HH:mm:ss', 'yyyy-MM-dd H:mm',
+  'M/d/yyyy', 'M/d/yyyy H:mm:ss', 'M/d/yyyy h:mm a', 'M/d/yy',
+  'd/M/yyyy', 'd/M/yy',
+  'MMMM d, yyyy', 'MMM d, yyyy'
+];
+function dayKeyFromCell(raw) {
+  const t = text(raw);
+  if (!t) return '';
+  for (const format of DATE_FORMATS) {
+    const d = DateTime.fromFormat(t, format, { zone });
+    if (d.isValid) return dayKey(d);
+  }
+  const iso = DateTime.fromISO(t, { zone });
+  return iso.isValid ? dayKey(iso) : '';
+}
 const wanted = TODAY ? dayKey(DateTime.now())
   : TOMORROW ? dayKey(DateTime.now().plus({ days: 1 }))
     : '';
@@ -116,12 +159,21 @@ const wanted = TODAY ? dayKey(DateTime.now())
  */
 let matches;
 if (wanted) {
-  matches = rows.filter((r) => {
-    const raw = text(r['Visit Date']);
-    if (!raw) return false;
-    const d = DateTime.fromFormat(raw, 'yyyy-MM-dd', { zone });
-    return (d.isValid ? dayKey(d) : raw.slice(0, 10)) === wanted;
-  });
+  matches = rows.filter((r) => dayKeyFromCell(r['Visit Date']) === wanted);
+  /*
+   * Say when a date could not be read at all, rather than counting it as "no visit that day". An unreadable
+   * cell and an empty one are different findings, and the second one hid the first for as long as this bug
+   * existed.
+   */
+  const unreadable = rows.filter((r) => text(r['Visit Date']) && !dayKeyFromCell(r['Visit Date']));
+  if (unreadable.length) {
+    console.log(`\nNOTE: ${unreadable.length} row(s) have a Visit Date this cannot read, so they were not`);
+    console.log('      considered. They are listed here rather than silently skipped:');
+    for (const r of unreadable.slice(0, 10)) {
+      console.log(`        row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} — `
+        + `"${text(r['Visit Date'])}"`);
+    }
+  }
 } else {
   matches = rows.filter((r) => text(r['Seller Name']).toLowerCase().includes(NEEDLE));
   if (!matches.length) matches = rows.filter((r) => text(r['Property Address']).toLowerCase().includes(NEEDLE));

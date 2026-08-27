@@ -458,5 +458,62 @@ console.log('\n=== asking for a briefing after the fact ===');
     SEND.indexOf('if (posted) {') < SEND.indexOf('already[sentKey] ='), true);
 }
 
+
+console.log('\n=== the day match reads whatever format the sheet renders ===');
+/*
+ * The client ran --today on a day whose work-queue card said, three lines above it:
+ *
+ *   Ngam Lam - 2155 32nd Avenue, San Francisco - Owner: Juan - visit TODAY at 1:30 PM
+ *
+ * and got "Nothing matched a visit on 2026-08-27". Asking for him BY NAME worked and posted the full
+ * briefing, so the row and the calendar event were both fine — only the date comparison was broken.
+ *
+ * It assumed the Visit Date cell was already yyyy-MM-dd and fell back to raw.slice(0, 10), which compares
+ * the first ten characters of "8/27/2026" against "2026-08-27" and can never match. Sheets returns the
+ * cell's DISPLAY value, so the format is whatever the column happens to be formatted as, and this workbook
+ * has been imported, migrated and hand-edited.
+ *
+ * The reason this matters far more than one typed command: the 07:30 Morning Briefings job runs this same
+ * path. On any day the column renders in US format, every briefing for every visit is silently skipped and
+ * the visitor sets off without the property, the numbers or the seller's phone. Nothing errors.
+ *
+ * NOTE ON WHAT IS CHECKED: luxon is not resolvable outside the sandbox's node_modules, so the parser cannot
+ * be executed here. What is pinned is the format list, its order, and the wiring — and the removal of the
+ * slice that caused it. Same limit the other sandbox-side tests in this repo run under.
+ */
+{
+  const BRIEF = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/send-briefing.mjs', import.meta.url), 'utf8');
+
+  /*
+   * The fallback that caused it must be gone — anchored on the COMPARISON, not on "slice(0, 10)".
+   *
+   * The looser pattern failed on this very file: it matched the sentence in the comment above explaining the
+   * bug, and a `unreadable.slice(0, 10)` that just limits how many rows get printed. Three earlier tests in
+   * this project were written that way and passed against prose. Match the code.
+   */
+  check('the broken date comparison is gone',
+    /d\.isValid \? dayKey\(d\) : raw\.slice/.test(BRIEF), false);
+  check('the filter goes through the parser',
+    /matches = rows\.filter\(\(r\) => dayKeyFromCell\(r\['Visit Date'\]\) === wanted\)/.test(BRIEF), true);
+
+  const formats = (/const DATE_FORMATS = \[([\s\S]*?)\];/.exec(BRIEF) || [])[1] || '';
+  const list = (formats.match(/'([^']+)'/g) || []).map((f) => f.slice(1, -1));
+  check('the format list was found', list.length > 0, true);
+  /* The three that actually occur in this workbook. */
+  for (const f of ['yyyy-MM-dd', 'M/d/yyyy', 'yyyy-MM-dd HH:mm:ss']) {
+    check(`${f} is handled`, list.includes(f), true);
+  }
+  /* 13/08/2026 appeared in the booking form's own date field, so d/M has to be readable too. */
+  check('d/M/yyyy is handled', list.includes('d/M/yyyy'), true);
+  /*
+   * ORDER matters and is the whole disambiguation: M/d before d/M, so an ambiguous date reads US-style in a
+   * US-timezone workbook, and d/M only catches what M/d cannot parse at all.
+   */
+  check('M/d is tried before d/M', list.indexOf('M/d/yyyy') < list.indexOf('d/M/yyyy'), true);
+  /* An unreadable date is a different finding from an empty one, and must not read as "no visit". */
+  check('unreadable dates are reported, not silently skipped',
+    /have a Velocity Date this cannot read/.test(BRIEF) || /have a Visit Date this cannot read/.test(BRIEF), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
