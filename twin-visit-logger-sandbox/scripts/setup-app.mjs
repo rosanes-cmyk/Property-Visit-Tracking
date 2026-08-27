@@ -69,6 +69,25 @@ function note(msg) { notes.push(msg); console.log(`    note ${msg}`); }
 function spreadsheetIdFrom(input) {
   const raw = String(input || '').trim();
   if (!raw) return '';
+  /*
+   * The example file's own placeholder is not an ID, and it used to pass as one.
+   *
+   * `.env.example` ships `SPREADSHEET_ID=PASTE_SANDBOX_SPREADSHEET_ID`. That is 27 characters of letters and
+   * underscores, so the "already an ID" test below accepted it, and setup on a real PC printed:
+   *
+   *   OK      already configured — PASTE_SANDBOX_SPREADSHEET_ID
+   *   ---> Cannot open that workbook: Requested entity was not found.
+   *
+   * A green OK followed by a failure two steps later, blaming the wrong thing — the message even suggested
+   * the account might not have access to the sheet, sending somebody to check Drive sharing when the real
+   * problem was that nobody had ever pasted an ID.
+   *
+   * A placeholder here is SCREAMING_SNAKE_CASE; a Google file ID is mixed case. So: no lowercase letters and
+   * at least one underscore means somebody copied the example and did not fill it in. Narrow on purpose —
+   * Google IDs really do contain underscores and hyphens, so the lowercase test is what separates them.
+   */
+  const looksLikeAPlaceholder = raw.includes('_') && raw === raw.toUpperCase();
+  if (looksLikeAPlaceholder) return '';
   const inUrl = /\/spreadsheets\/d\/([a-zA-Z0-9-_]{20,})/.exec(raw);
   if (inUrl) return inUrl[1];
   if (/^[a-zA-Z0-9-_]{20,}$/.test(raw)) return raw;      // already an ID

@@ -215,5 +215,44 @@ console.log('\n--- a source checkout is told apart from the packaged app ---');
 check('a missing node_modules is explained rather than crashing',
   /This folder has no node_modules/.test(CMD), true);
 
+
+console.log('\n=== the example file\'s placeholder is not an ID ===');
+/*
+ * Setup on a real PC, at the client's keyboard:
+ *
+ *   OK      already configured - PASTE_SANDBOX_SPREADSHEET_ID
+ *   ---> Cannot open that workbook: Requested entity was not found.
+ *
+ *       The account you just signed in as may not have access to it.
+ *
+ * .env.example ships SPREADSHEET_ID=PASTE_SANDBOX_SPREADSHEET_ID. That is 27 characters of letters and
+ * underscores, so the "already an ID" test accepted it as configured. Setup then printed a green OK, failed
+ * two steps later, and blamed Drive sharing — sending somebody to check who the sheet is shared with when
+ * nobody had ever pasted an ID at all.
+ *
+ * A placeholder is SCREAMING_SNAKE_CASE; a Google file ID is mixed case. Google IDs do contain underscores
+ * and hyphens, so the absence of lowercase is what separates the two.
+ */
+{
+  const from = SETUP.indexOf('function spreadsheetIdFrom');
+  const to = SETUP.indexOf('\n}', from) + 2;
+  const spreadsheetIdFrom = new Function(`${SETUP.slice(from, to)}
+    return spreadsheetIdFrom;`)();
+
+  check("the example's own placeholder is refused",
+    spreadsheetIdFrom('PASTE_SANDBOX_SPREADSHEET_ID'), '');
+  check('...and other obvious ones', spreadsheetIdFrom('YOUR_SPREADSHEET_ID_HERE'), '');
+  /* The real thing must still pass, both as an ID and pasted as a URL. */
+  const REAL = '1gxjc3vO1l3Q-dffzhgnDDh86mqFv5zmBqZaWyAPVKT4';
+  check('a real ID passes', spreadsheetIdFrom(REAL), REAL);
+  check('a pasted sheet URL still works',
+    spreadsheetIdFrom(`https://docs.google.com/spreadsheets/d/${REAL}/edit#gid=0`), REAL);
+  /* An ID carrying an underscore is legal and must not be mistaken for a placeholder. */
+  check('an ID with an underscore is not a placeholder',
+    spreadsheetIdFrom('1VQPJ6oCZLN_hm-rvEZmQul27HKKaX0rCFSZry0Kt4bo'),
+    '1VQPJ6oCZLN_hm-rvEZmQul27HKKaX0rCFSZry0Kt4bo');
+  check('blank is still blank', spreadsheetIdFrom(''), '');
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
