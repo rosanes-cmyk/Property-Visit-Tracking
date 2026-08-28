@@ -28,7 +28,28 @@ const text = (v) => String(v == null ? '' : v).trim();
  * deliver the offer Tuesday" both contain it. Demanding an ORDER and a GIFT-ish word together is what keeps
  * this from firing on ordinary deal correspondence.
  */
-const ORDER_MARKER = /\border\s*#\s*\d+|\border\s*(?:number|no\.?)\s*:?\s*\d|\border\s+summary\b|\bplace an order\b/i;
+/*
+ * "Order ID" belongs here, and its absence lost a real gift.
+ *
+ * Sheng Luo's note, written by Theavil Marie and pasted by the client:
+ *
+ *   GIFT DELIVERED - Moving Supplies Confirmed Aug 12, 2026 2:03PM
+ *   * Order ID: 20871989699423792
+ *   * Items: 5x large moving boxes w/ handles, packing tape ... - $41.13, AmEx
+ *
+ * A gift that was ordered, delivered, photo-confirmed and paid for on AmEx. giftFromNotes returned {} — an
+ * empty object, no status, no date, nothing — because this pattern accepts `order #`, `order number`,
+ * `order no.` and `order summary`, and the note says `Order ID`. The GIFT_MARKER matched three times over;
+ * one missing word in the other half threw the whole thing away.
+ *
+ * That is the failure mode this pair of markers is most exposed to: requiring TWO signals makes false
+ * positives rare and false NEGATIVES silent. Nothing anywhere reported a gift being skipped — the lead
+ * simply never appeared in the Gift Follow-Up section, which looks identical to having no gift.
+ *
+ * `id` is added to the same numbered-order alternative rather than loosening the marker generally: an order
+ * ID is exactly as strong a signal as an order number, and every vendor writes one or the other.
+ */
+const ORDER_MARKER = /\border\s*#\s*\d+|\border\s*(?:number|no\.?|id)\s*:?\s*\d|\border\s+summary\b|\bplace an order\b/i;
 const GIFT_MARKER = /\bgift\b|\bbasket\b|\bdeliver on\b|\bflowers?\b|\bhamper\b/i;
 
 /*
@@ -40,13 +61,22 @@ const GIFT_MARKER = /\bgift\b|\bbasket\b|\bdeliver on\b|\bflowers?\b|\bhamper\b/
  * date and the work queue reported it as "marked Sent but no Gift Sent Date recorded" for a gift that had
  * already shipped. The client's answer was short: "for marlene that is already finished and done."
  *
- * Up to 24 non-period characters are allowed between the word and the date, which covers ": Today, " and
- * " on " while a price like "Delivery Fee:$13.99" cannot reach across its own decimal point to steal one.
+ * Up to 60 non-period characters are allowed between the word and the date. It was 24, which covered
+ * ": Today, " and " on " but not a note that puts the ADDRESS in between:
+ *
+ *   * Home Depot order delivered to 2824 Garden Creek Cir, Pleasanton - Aug 12, 2026
+ *
+ * That is 38 characters, so Sheng Luo's gift was written to the sheet as Sent with NO Gift Sent Date —
+ * exactly the incomplete half the client objected to over Marlene ("marked Sent but no Gift Sent Date
+ * recorded" for a gift that had already shipped).
+ *
+ * Widening is safe because the class excludes periods AND newlines: the match still cannot leave the line,
+ * and "Delivery Fee:$13.99" still cannot reach across its own decimal point to steal a later date.
  */
 const MONTH_NAME = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*';
-const DELIVER_SLASH = /\bdeliver(?:y|ed|ery)?\b[^.\n]{0,24}?(\d{1,2}\/\d{1,2}\/\d{4})/i;
+const DELIVER_SLASH = /\bdeliver(?:y|ed|ery)?\b[^.\n]{0,60}?(\d{1,2}\/\d{1,2}\/\d{4})/i;
 const DELIVER_NAMED = new RegExp(
-  `\\bdeliver(?:y|ed|ery)?\\b[^.\\n]{0,24}?\\b${MONTH_NAME}\\s+(\\d{1,2}),?\\s+(\\d{4})`, 'i');
+  `\\bdeliver(?:y|ed|ery)?\\b[^.\\n]{0,60}?\\b${MONTH_NAME}\\s+(\\d{1,2}),?\\s+(\\d{4})`, 'i');
 
 /*
  * The item name, taken by looking BACKWARDS from the first price.
@@ -96,7 +126,8 @@ const ITEM_TOTAL = /\bitem\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 /* Amazon's wording for the same thing. Last, so a REI order total still wins where both appear. */
 const TOTAL_COST = /\btotal\s*cost\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 /* "Order #104240205" and "Order number: 113-5603799-0573039" are both order numbers. */
-const ORDER_NUMBER = /\border\s*(?:#|number|no\.?)\s*:?\s*(\d[\d-]{3,})/i;
+/* `id` here too, or the reason line loses the one reference that lets somebody find the order again. */
+const ORDER_NUMBER = /\border\s*(?:#|number|no\.?|id)\s*:?\s*(\d[\d-]{3,})/i;
 
 /*
  * The date the order was PLACED, from the note's own header — "Aug 5, 2026 | 4:36PM".
@@ -124,8 +155,38 @@ function deliveredOn(raw) {
   return named ? fromNamedMonth(named[1], named[2], named[3]) : '';
 }
 
-/** 'MM/DD/YYYY' for the date the order was placed, or '' when the note carries no such stamp. */
+/**
+ * 'MM/DD/YYYY' for the date the order was placed, or '' when the note carries no such stamp.
+ *
+ * Searched from the first GIFT-ish word onward, not from the top of the blob. Every note on a contact is
+ * joined together newest first, so on Sheng Luo the first month-name date in the text belonged to a CALL
+ * SUMMARY from the 13th — and the gift, ordered and delivered on the 12th, was written to the sheet as
+ * "ordered 08/13/2026" with a Gift Approval Date to match. A day out, on a record whose whole purpose is to
+ * say what was done and when.
+ *
+ * Not a complete solution — a later unrelated note could still sit between the gift word and its date — but
+ * strictly better than the first date anywhere on the contact, and it fixes the shape these notes actually
+ * take, where the gift word and its date are in the same paragraph.
+ */
 function orderedOn(raw) {
+  /*
+   * From the gift word first, then the whole text as a fallback — because the two note shapes put the date
+   * on opposite sides of it, and scoping alone broke the other one.
+   *
+   * Theavil Marie's own notes lead with the gift ("GIFT DELIVERED - ... Aug 12, 2026"), so the date to want
+   * is AFTER the marker. REI's vendor notes lead with the note header ("Aug 5, 2026 | 4:36PM ... Order
+   * Summary ... Gift Basket"), so it is BEFORE. Scoping to the marker fixed Sheng Luo and gave Rob Walker no
+   * approval date at all, which the tests caught before this shipped.
+   *
+   * The scoped read wins when it finds anything, because that is the case where an unrelated later note can
+   * otherwise steal the date — Sheng's gift was recorded as ordered on the 13th, the day of a call summary,
+   * when it was ordered and delivered on the 12th.
+   */
+  const at = raw.search(GIFT_MARKER);
+  if (at >= 0) {
+    const scoped = raw.slice(at).match(NOTE_HEADER_DATE);
+    if (scoped) return fromNamedMonth(scoped[1], scoped[2], scoped[3]);
+  }
   const m = raw.match(NOTE_HEADER_DATE);
   return m ? fromNamedMonth(m[1], m[2], m[3]) : '';
 }

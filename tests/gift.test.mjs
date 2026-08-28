@@ -403,5 +403,71 @@ check('...and applied only to an empty cell',
 check('...saying why, in the change itself',
   /note: 'REI records the gift as received'/.test(RECHECK_SRC), true);
 
+
+console.log("\n=== Sheng Luo's gift: a real one that was being dropped entirely ===");
+/*
+ * The client, asked to check the gift column, pasted Theavil Marie's actual notes from REI. Run against the
+ * shipped parser they produced {} — an empty object. No status, no date, nothing. A gift that was ordered,
+ * delivered, photo-confirmed at the front door and paid for on AmEx simply did not exist as far as the
+ * board was concerned.
+ *
+ * THREE separate faults, each one enough on its own:
+ *
+ *   1. ORDER_MARKER accepted `order #`, `order number`, `order no.` and `order summary`. The note says
+ *      `Order ID: 20871989699423792`. One missing word threw the whole gift away — and because the design
+ *      requires TWO markers, the failure is silent: no gift looks exactly like no gift.
+ *
+ *   2. The delivery-date window allowed 24 characters between "delivered" and the date. This note puts the
+ *      ADDRESS in between — "delivered to 2824 Garden Creek Cir, Pleasanton - Aug 12, 2026", 38 characters
+ *      — so the gift would have been written as Sent with NO Gift Sent Date. That is precisely the
+ *      incomplete half the client objected to over Marlene.
+ *
+ *   3. orderedOn took the first month-name date in the whole blob. Notes join newest first, so it found the
+ *      CALL SUMMARY from the 13th and recorded the gift as ordered — and approved — on 08/13 when both
+ *      happened on the 12th.
+ */
+{
+  const SHENG = [
+    `CALL SUMMARY – August 13, 2026
+++ Contact Result: No connect (CHERRY, ~25s) — 'Shang? hello?' dropped.
+++ Property Details: 2824 Garden Creek Circle, Pleasanton 94588
+++ Lead Temperature: HOT — verbal offer; retry to close gap.`,
+    `GIFT DELIVERED — Moving Supplies Confirmed Aug 12, 2026 2:03PM
+
+* Home Depot order delivered to 2824 Garden Creek Cir, Pleasanton — Aug 12, 2026
+* Photo confirmation received: items left at front door (boxes, tape, bubble cushion visible)
+* Order ID: 20871989699423792
+* Items: 5x large moving boxes w/ handles, packing tape w/ dispenser, 12in x 90ft bubble cushion — $41.13, AmEx
+* Card message from Juan: "Sheng, the house was nearly empty when I came by."`,
+    `GIFT SENT — Moving Supplies (Home Depot) Aug 12, 2026
+
+* Gift sent to Sheng Luo — 2824 Garden Creek Cir, Pleasanton
+* Total: $41.13 — paid on AmEx`
+  ];
+
+  const g = giftFromNotes(SHENG);
+  check('the gift is found at all', g.status, 'Sent');
+  check('...with the day it was delivered', g.sentDate, '08/12/2026');
+  check('...approved the same day, not the day of a later call', g.approvalDate, '08/12/2026');
+  check('...and the order reference kept, so somebody can find it again',
+    /order #20871989699423792/.test(g.reason || ''), true);
+  /* Cherry by the client's own rule: a gift order existing in REI IS the approval, and she is the approver. */
+  check('Cherry owns the approval', g.approvalOwner, 'Cherry');
+  /* The receipt date is read separately and was already right — it must stay right. */
+  check('the receipt date still reads', giftReceiptDate(SHENG), '08/12/2026');
+
+  /*
+   * The two markers must STILL both be required. Loosening one of them to catch this note must not turn an
+   * offer or escrow reference into a gift — the reason the pair exists at all.
+   */
+  check('an order number without a gift word is not a gift',
+    JSON.stringify(giftFromNotes(['Contract sent. Order ID: 4455667788 for the escrow file.'])), '{}');
+  check('a gift word without an order is not a gift',
+    JSON.stringify(giftFromNotes(['No gift for this one — seller declined.'])), '{}');
+  /* And "Order ID" specifically, since that is the word just added. */
+  check('"Order ID" now counts as an order',
+    giftFromNotes(['Gift basket sent. Order ID: 12345678. Delivered on 08/12/2026']).status, 'Sent');
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
