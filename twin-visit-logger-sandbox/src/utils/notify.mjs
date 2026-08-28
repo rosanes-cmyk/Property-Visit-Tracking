@@ -34,10 +34,29 @@
 export function scrubContactDetails(text) {
   return String(text || '')
     .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[email]')
-    .replace(/\+?\(?\d[\d\s().+-]{5,}\d/g, (candidate) => {
-      const digits = candidate.replace(/\D/g, '').length;
-      return digits >= 9 ? '[phone]' : candidate;
-    });
+    /*
+     * An ORDER reference is not a phone number, and redacting it destroys the only thing that lets somebody
+     * find the order again.
+     *
+     * The client's Chat space, on the gift this fix was written for:
+     *
+     *   a GIFT is recorded in REI. Gift ordered in REI - $41.13 - order #[phone] - ordered 08/12/2026
+     *
+     * Home Depot's order id is 20871989699423792 — seventeen digits, comfortably past the nine-digit
+     * threshold, so the rule that keeps sellers' numbers out of the space ate the reference instead. The
+     * amount and both dates survived; the one field somebody would act on did not.
+     *
+     * Matched by its LABEL rather than by length. "17 digits is too long to be a phone number" is nearly
+     * true and not quite — E.164 allows fifteen, and a number written with a country code and no separators
+     * gets close enough that I would not want a seller's mobile riding on the difference. `order #` in front
+     * of it is unambiguous.
+     */
+    .replace(/((?:\border\s*(?:#|no\.?|number|id)\s*:?\s*)?)(\+?\(?\d[\d\s().+-]{5,}\d)/gi,
+      (whole, label, candidate) => {
+        if (label) return whole;                       // an order reference — keep it intact
+        const digits = candidate.replace(/\D/g, '').length;
+        return digits >= 9 ? '[phone]' : whole;
+      });
 }
 
 /**

@@ -329,5 +329,37 @@ console.log('\n=== a cancelled visit says WHEN it was ===');
     /var time = String\(R\.get\('Visit Time'\)/.test(web + combined), false);
 }
 
+
+console.log('\n=== an order reference is not a phone number ===');
+/*
+ * The client's Chat space, on the very gift the parser had just been fixed to find:
+ *
+ *   a GIFT is recorded in REI. Gift ordered in REI - $41.13 - order #[phone] - ordered 08/12/2026
+ *
+ * Home Depot's order id is 20871989699423792 — seventeen digits, well past the nine-digit threshold — so
+ * the rule that keeps sellers' numbers out of the space ate the reference. The amount survived, both dates
+ * survived, and the one field somebody would act on to find the order did not.
+ *
+ * Matched by its LABEL, not by length. "Seventeen digits is too long for a phone number" is nearly true and
+ * not quite — E.164 allows fifteen — and I would not want a seller's mobile riding on that margin.
+ */
+check('an order number survives',
+  scrubContactDetails('Gift ordered in REI — $41.13 · order #20871989699423792 · ordered 08/12/2026'),
+  'Gift ordered in REI — $41.13 · order #20871989699423792 · ordered 08/12/2026');
+check('"Order ID:" too', scrubContactDetails('Order ID: 20871989699423792 delivered'),
+  'Order ID: 20871989699423792 delivered');
+check('and "order no."', scrubContactDetails('order no. 104240205'), 'order no. 104240205');
+
+/* The whole point of the scrubber must still hold — this is seller contact data reaching a team space. */
+check('a bracketed phone is still redacted', scrubContactDetails('Call (707) 481-7040 today'),
+  'Call [phone] today');
+check('a labelled phone is still redacted', scrubContactDetails('Phone: (650) 325-3388'), 'Phone: [phone]');
+check('an international phone is still redacted', scrubContactDetails('Reach him on +1 650 620 4017'),
+  'Reach him on [phone]');
+check('an email is still redacted', scrubContactDetails('seller ngam@example.com'), 'seller [email]');
+/* And the date that was being eaten before this function counted digits stays readable. */
+check('a visit date is still not a phone number', scrubContactDetails('visit 2026-08-04 at 3:00 PM'),
+  'visit 2026-08-04 at 3:00 PM');
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
