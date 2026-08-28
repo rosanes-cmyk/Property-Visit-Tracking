@@ -469,5 +469,48 @@ console.log("\n=== Sheng Luo's gift: a real one that was being dropped entirely 
     giftFromNotes(['Gift basket sent. Order ID: 12345678. Delivered on 08/12/2026']).status, 'Sent');
 }
 
+
+console.log('\n=== the amount is read without swallowing a deal figure ===');
+/*
+ * The client pasted Sheng Luo's FULL note history — the gift notes sitting alongside Cherry's comp note
+ * carrying "$1,300,000", "$1,471,000", "$1,520,000", and a walkthrough note discussing a "$50K-$100K" rehab.
+ *
+ * The three labelled patterns want "Order total" / "Item total" / "Total cost". Theavil Marie writes a bare
+ * "Total: $41.13", so the gift recorded no amount at all. The obvious fix — a bare /total:\s*\$/ — is the
+ * wrong one on this contact: one loose price pattern and the gift record claims the wholesale offer as its
+ * cost.
+ *
+ * CENTS are the discriminator. A receipt is $41.13; a deal figure is a round million and never carries two
+ * decimal places. Both guards apply, not either: cents AND inside the gift portion of the text.
+ */
+{
+  const FULL = [
+    `CALL SUMMARY – August 13, 2026\n++ Lead Temperature: HOT — verbal offer; retry to close gap.`,
+    `GIFT DELIVERED — Moving Supplies Confirmed Aug 12, 2026 2:03PM
+* Home Depot order delivered to 2824 Garden Creek Cir, Pleasanton — Aug 12, 2026
+* Order ID: 20871989699423792
+* Items: 5x large moving boxes w/ handles, packing tape w/ dispenser — $41.13, AmEx`,
+    `GIFT SENT — Moving Supplies (Home Depot) Aug 12, 2026
+* Gift sent to Sheng Luo — 2824 Garden Creek Cir, Pleasanton
+* Total: $41.13 — paid on AmEx`,
+    `🏠 2824 GARDEN CREEK CIR — comp note (by Cherry, auto)
+• Their target: $1,300,000 (negotiable)
+• Wholesale offer (net about $100k): $1,471,000
+• Max-to-flip ceiling (net about $50k): $1,520,000 — basis ARV $1.8M, rehab $60k
+• Closest twin 3705 Rose Rock Cir sold $1,400,000 (9/2025).`
+  ];
+
+  const g = giftFromNotes(FULL);
+  check('the gift is still found with every note present', g.status, 'Sent');
+  check('the receipt amount is recorded', /\$41\.13/.test(g.reason || ''), true);
+  /* The whole point: none of the deal figures may appear anywhere in the gift record. */
+  const record = JSON.stringify(g);
+  for (const figure of ['1,300,000', '1,471,000', '1,520,000', '1,400,000']) {
+    check(`${figure} stays out of the gift record`, record.includes(figure), false);
+  }
+  check('the delivery date survives the extra notes', g.sentDate, '08/12/2026');
+  check('...and the order date is still the 12th, not the 13th', g.approvalDate, '08/12/2026');
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

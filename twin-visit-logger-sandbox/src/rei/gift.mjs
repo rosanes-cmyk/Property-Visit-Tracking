@@ -121,6 +121,18 @@ function itemName(raw) {
  */
 const NAMED_GIFT = /(?:^|\n|:|'s)\s*([A-Za-z][A-Za-z0-9&\- ]{2,40}?\s+gift)\s*:/i;
 
+/*
+ * A receipt price: a dollar amount carrying cents. Deal figures in these notes are round — $1,300,000,
+ * $1,471,000 — so requiring two decimal places is what keeps an offer out of a gift's cost field.
+ */
+const RECEIPT_PRICE = /\$\s*([\d,]+\.\d{2})\b/;
+
+/** The text from the first gift-ish word onward, which is where a gift's own numbers live. */
+function giftScope(raw) {
+  const at = String(raw).search(GIFT_MARKER);
+  return at >= 0 ? String(raw).slice(at) : '';
+}
+
 const ORDER_TOTAL = /\border\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 const ITEM_TOTAL = /\bitem\s*total\s*:?\s*\$\s*([\d,]+\.\d{2})/i;
 /* Amazon's wording for the same thing. Last, so a REI order total still wins where both appear. */
@@ -235,7 +247,23 @@ export function giftFromNotes(notes) {
   const bits = [];
   const item = itemName(raw) || (raw.match(NAMED_GIFT) || [])[1] || '';
   if (item) bits.push(item.trim());
-  const total = raw.match(ORDER_TOTAL) || raw.match(ITEM_TOTAL) || raw.match(TOTAL_COST);
+  /*
+   * The amount, with a last resort that reads cents.
+   *
+   * The three labelled patterns want "Order total" / "Item total" / "Total cost". Theavil Marie writes a
+   * bare "Total: $41.13", so Sheng Luo's gift recorded no amount at all — a reason line saying what was
+   * ordered and when, but not what it cost.
+   *
+   * A bare /total:\s*\$/ was the obvious fix and is the wrong one: these notes sit alongside comp and offer
+   * notes carrying "$1,300,000", "$1,471,000", "$1,520,000". One loose price pattern and a gift record
+   * claims the wholesale offer as its cost.
+   *
+   * CENTS are what separate them. A receipt is $41.13; a deal figure is a round million and never carries
+   * two decimal places. So the fallback requires `.dd`, and only looks inside the gift portion of the text —
+   * both guards, not either, because a rehab estimate could conceivably be written with cents.
+   */
+  const total = raw.match(ORDER_TOTAL) || raw.match(ITEM_TOTAL) || raw.match(TOTAL_COST)
+    || giftScope(raw).match(RECEIPT_PRICE);
   if (total) bits.push(`$${total[1]}`);
   const number = raw.match(ORDER_NUMBER);
   if (number) bits.push(`order #${number[1]}`);
