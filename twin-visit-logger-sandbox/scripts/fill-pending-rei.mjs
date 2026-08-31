@@ -78,6 +78,63 @@ function text(value) {
   return String(value == null ? '' : value).trim();
 }
 
+/*
+ * The date and time a colleague typed on the board, as an ISO instant — or '' when they cannot be read.
+ *
+ * Used only when REI holds no appointment of its own, which is the ordinary case for a booking typed in
+ * before REI knows about it.
+ *
+ * Both cells arrive as DISPLAY strings, so the format depends on how that column happens to be formatted
+ * in the workbook: '08/30/2026' and '2026-08-30' are both real, and the time cell can be '2:00 PM' or
+ * '14:00'. The same lesson as the morning briefing, which silently posted nothing for weeks because it
+ * accepted exactly one date format — so the list is broad and anything unreadable is REPORTED, never
+ * skipped in silence.
+ *
+ * No time typed means 9:00 AM, matching maybeCreateVisitEvent_ in the workbook so the two producers cannot
+ * disagree about the same booking. The caller says so on screen, because a visit silently placed at 9am is
+ * the fault that was just fixed on the other side.
+ */
+const TYPED_DATE_FORMATS = ['M/d/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'M/d/yy', 'd/M/yyyy', 'LLLL d, yyyy', 'LLL d, yyyy'];
+const TYPED_TIME_FORMATS = ['h:mm a', 'h:mma', 'H:mm', 'h a', 'h:mm:ss a', 'HH:mm:ss'];
+
+function typedStart(typedDate, typedTime, zone = config.calendarTimezone) {
+  const dateStr = text(typedDate);
+  if (!dateStr) return '';
+
+  let day = DateTime.fromISO(dateStr, { zone });
+  if (!day.isValid) {
+    for (const fmt of TYPED_DATE_FORMATS) {
+      day = DateTime.fromFormat(dateStr, fmt, { zone });
+      if (day.isValid) break;
+    }
+  }
+  if (!day.isValid) return '';
+
+  let hour = 9;
+  let minute = 0;
+  const timeStr = text(typedTime);
+  if (timeStr) {
+    let clock = null;
+    for (const fmt of TYPED_TIME_FORMATS) {
+      const parsed = DateTime.fromFormat(timeStr, fmt, { zone });
+      if (parsed.isValid) { clock = parsed; break; }
+    }
+    /*
+     * A time-only cell can come back from Sheets as a full date on the 1899-12-30 epoch. Only the clock
+     * from it is ever used — the date always comes from the Visit Date cell.
+     */
+    if (!clock) {
+      const asIso = DateTime.fromISO(timeStr, { zone });
+      if (asIso.isValid) clock = asIso;
+    }
+    if (!clock) return '';           // a time was typed and could not be read: say so rather than guess 9am
+    hour = clock.hour;
+    minute = clock.minute;
+  }
+
+  return day.set({ hour, minute, second: 0, millisecond: 0 }).toISO();
+}
+
 /** 1 -> A, 27 -> AA. Exception Reason sits past column Z, so a single letter will not do. */
 function columnLetter(index) {
   let n = index;
@@ -341,6 +398,39 @@ async function main() {
         console.log(`    keeping the date typed on the board: ${typedDate}${typedTime ? ` ${typedTime}` : ''}`);
       }
 
+      /*
+       * And actually keep it.
+       *
+       * This line printed "keeping the date typed on the board: 08/30/2026 2:00 PM" and then did not keep
+       * it: appointmentStartIso came only from REI, and the one place that touched it afterwards read
+       *
+       *   if (typedDate) visit.appointmentStartIso = visit.appointmentStartIso || '';
+       *
+       * which assigns the value to itself. So when REI held no appointment — the normal case for a booking
+       * a colleague typed in BEFORE REI knows about it, which is the entire reason this script exists — the
+       * date was dropped and syncCalendarEvent threw "appointmentStartIso is invalid". The row went back on
+       * the board to be retried, and failed the same way on every run.
+       *
+       * The client watched two visits sit in BEING ADDED for six hours, one of them the next day's, with
+       * the log telling them the date was being kept.
+       *
+       * REI still wins when REI has a date: it is the source of truth for the fields it holds, and a
+       * reschedule made in REI must not be overwritten by what somebody typed days earlier. This is only a
+       * fallback for when REI has nothing.
+       */
+      if (!visit.appointmentStartIso && typedDate) {
+        const typed = typedStart(typedDate, typedTime);
+        if (typed) {
+          visit.appointmentStartIso = typed;
+          console.log(`    REI has no appointment date — using the typed one: ` +
+            `${DateTime.fromISO(typed).setZone(config.calendarTimezone).toFormat('ccc d LLL yyyy, h:mm a')}` +
+            `${typedTime ? '' : '  (no time was typed, so 9:00 AM — fix it on the board if that is wrong)'}`);
+        } else {
+          console.log(`    could not read the typed date "${typedDate}${typedTime ? ` ${typedTime}` : ''}" —` +
+            ` no calendar event. Retype it on the board as 9/2/2026 and 2:00 PM.`);
+        }
+      }
+
       console.log(`    REI says: ${address}`);
       if (!APPLY) {
         console.log('    DRY RUN — would fill this row in and put the visit on the calendar');
@@ -367,7 +457,8 @@ async function main() {
          * The date the colleague typed is the reason this row exists, so it is carried across. REI may
          * not know about the new booking yet; that is the whole point of somebody typing it.
          */
-        if (typedDate) visit.appointmentStartIso = visit.appointmentStartIso || '';
+        // The typed date is already carried onto visit.appointmentStartIso above, before any of the
+        // matching runs. The line that used to sit here assigned the field to itself and did nothing.
       }
 
       const calendarEventId = await syncCalendarEvent(auth, visit, match.calendarEventId || '');
