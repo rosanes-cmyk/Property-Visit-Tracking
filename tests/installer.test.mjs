@@ -178,13 +178,23 @@ console.log('\n=== the shortcuts an unzipped install never got ===');
   check('...and stays open so the output can be read', /^pause$/m.test(CMD), true);
 
   /* Every shortcut must point at a runner that is really in the package. */
-  const targets = [...PS.matchAll(/"(scripts\\[a-z-]+\.cmd)"/g)].map((m) => m[1].replace('\\', '/'));
+  // [A-Za-z-], not [a-z-]: FinishBookings.cmd is deliberately capitalised and hyphen-free, and a
+  // lowercase-only pattern silently dropped it from the "every target exists" check below.
+  const targets = [...PS.matchAll(/"(scripts\\[A-Za-z-]+\.cmd)"/g)].map((m) => m[1].replace('\\', '/'));
   check('it makes several shortcuts', targets.length >= 5, true);
   const missing = targets.filter((t) => !fs.existsSync(`twin-visit-logger-sandbox/${t}`));
   check('every target exists', missing.join(', '), '');
 
   /* The three that answer the three things that actually go wrong, in the order they are needed. */
-  for (const [n, runner] of [['1', 'login-rei.cmd'], ['2', 'recheck-buckets.cmd'], ['3', 'fill-pending.cmd']]) {
+  /*
+   * Shortcut 3 points at FinishBookings.cmd, NOT fill-pending.cmd.
+   *
+   * fill-pending.cmd is the scheduler's copy: --scheduled, a 90-second wait, exit 0 when it gives up, and
+   * all output redirected to a log. A person who double-clicked it got a blank window that closed itself
+   * and reported success having done nothing, while two bookings stayed stuck on the board for six hours.
+   * The shortcut a person clicks must be the one that waits, prints, and stays open.
+   */
+  for (const [n, runner] of [['1', 'login-rei.cmd'], ['2', 'recheck-buckets.cmd'], ['3', 'FinishBookings.cmd']]) {
     check(`"${n} - ..." points at ${runner}`, new RegExp(`"${n} - [^"]+"\\s*=\\s*"scripts\\\\${runner}"`).test(PS), true);
   }
 
