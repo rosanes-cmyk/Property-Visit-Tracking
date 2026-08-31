@@ -29,7 +29,10 @@ New-Item -ItemType Directory -Force -Path $folder | Out-Null
 $links = [ordered]@{
   "1 - Sign in to REI"          = "scripts\login-rei.cmd"
   "2 - Sweep REI now"           = "scripts\recheck-buckets.cmd"
-  "3 - Finish pending bookings" = "scripts\fill-pending.cmd"
+  # FinishBookings.cmd, NOT fill-pending.cmd. The latter is the scheduler's copy: it waits 90 seconds,
+  # exits 0 when it gives up, and hides its output in a log — so a person double-clicking it saw a blank
+  # window close itself and report success while two bookings stayed stuck for six hours.
+  "3 - Finish pending bookings" = "scripts\FinishBookings.cmd"
   "Dashboard - is it working"   = "scripts\dashboard.cmd"
   "Health check"                = "scripts\status.cmd"
   "Check for an update"         = "scripts\update-app.cmd"
