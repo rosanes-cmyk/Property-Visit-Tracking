@@ -153,8 +153,24 @@ check('the lock is released in finally, even on a crash',
  * already broken — which is often while a scheduled run is mid-flight.
  */
 const LOGIN = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/rei-login.mjs', import.meta.url), 'utf8');
-check('logging in takes the lock too', /const releaseLogin = await acquireLock\(\);/.test(LOGIN), true);
-check('...and refuses rather than corrupting the profile', /A scheduled REI run is active/.test(LOGIN), true);
+check('logging in takes the lock too', /await acquireLockWaiting\('run', \{/.test(LOGIN), true);
+/*
+ * This assertion used to be "...and refuses rather than corrupting the profile", pinned on
+ * acquireLock() returning null and the script exiting 1.
+ *
+ * The refusal was the wrong half to protect. On the office PC the scheduled jobs run often enough that a
+ * person double-clicking login loses the race almost every time — the client hit it three times in a row,
+ * ten minutes apart, with two bookings stuck on the board and no way through. A guard that turns away the
+ * one person trying to fix the outage is a wall, not a guard.
+ *
+ * What actually had to be preserved is that login never opens the profile while a run has it. Waiting
+ * preserves that completely; it just queues instead of giving up. So the test now pins the WAIT, and pins
+ * a bounded one — an unbounded wait would swap "come back later" for a window that hangs forever.
+ */
+check('...and WAITS for a run rather than turning the person away', /onWait:/.test(LOGIN), true);
+check('...with a bounded wait, so it cannot hang forever', /timeoutMs: \d+ \* 60 \* 1000/.test(LOGIN), true);
+check('...and still refuses to open the profile if the wait times out',
+  /if \(!releaseLogin\) \{[\s\S]*?process\.exit\(1\);/.test(LOGIN), true);
 check('...releasing it on exit', /process\.on\('exit'/.test(LOGIN), true);
 
 console.log('\n--- and logging in is not on a 45-second clock ---');

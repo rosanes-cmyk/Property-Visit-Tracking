@@ -2,7 +2,7 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { config } from '../src/config.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
-import { acquireLock } from '../src/utils/lock.mjs';
+import { acquireLockWaiting } from '../src/utils/lock.mjs';
 
 /*
  * Logging in takes the same lock as the scrapes.
@@ -10,11 +10,29 @@ import { acquireLock } from '../src/utils/lock.mjs';
  * It opens the same persistent Chromium profile, so a manual login landing on top of a scheduled run
  * is exactly the collision that was logging REI out — and it is the likeliest one to happen, because
  * somebody only runs this WHEN the session has already broken.
+ *
+ * It WAITS for that lock rather than refusing, which is the whole point and was the one place the
+ * waiting version never got wired in. On the office PC the scheduled jobs run often enough that a
+ * person double-clicking this file loses the race almost every time: the client hit "A scheduled REI
+ * run is active" three times in a row, ten minutes apart, with two bookings stuck on the board. Being
+ * told to come back later, repeatedly, by the tool whose whole job is to fix the thing that is broken
+ * is not a guard — it is a wall. The collision it was protecting against is still prevented; the only
+ * change is that we queue instead of giving up.
+ *
+ * Fifteen minutes because a bucket sweep over forty leads legitimately takes that long, and a person
+ * who has just watched two visits sit unprocessed for six hours should not be sent away at minute
+ * twelve. The countdown prints, so a wait is never mistaken for a hang.
  */
-const releaseLogin = await acquireLock();
+const releaseLogin = await acquireLockWaiting('run', {
+  timeoutMs: 15 * 60 * 1000,
+  onWait: (secondsLeft) => {
+    console.log(`   A scheduled REI run is using the browser. Waiting for it to finish — ` +
+      `${Math.ceil(secondsLeft / 60)} min left before giving up. Leave this window open.`);
+  }
+});
 if (!releaseLogin) {
-  console.error('A scheduled REI run is active. Wait a minute and try again —');
-  console.error('logging in while it runs is what corrupts the browser profile.');
+  console.error('A scheduled REI run has held the browser for 15 minutes, which is longer than any');
+  console.error('run should take. Something is stuck. Run scripts\\status.cmd and send what it says.');
   process.exit(1);
 }
 process.on('exit', () => { releaseLogin(); });
