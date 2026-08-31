@@ -686,8 +686,8 @@ function syncVisitCalendar_(sh, rowNum) {
     var res = maybeCreateVisitEvent_({
       'Property Address': addr, 'Seller Name': R.get('Seller Name'), 'Phone': R.get('Phone'),
       'REI BlackBook Link': R.get('REI BlackBook Link'), 'Lead Source': R.get('Lead Source'),
-      'Visit Date': visitDate
-    }, addr);
+      'Visit Date': visitDate, 'Visit Time': R.get('Visit Time')
+    }, addr, R.row);
     logAuto_('CALENDAR', R.get('Property ID'), 'Visit event synced to ' + fmt_(new Date(visitDate)) + ' · ' + res);
     return res;
   } catch (e) {
@@ -812,13 +812,70 @@ function visitCalendar_() {
   if (!id) return null;
   return (id === 'default' || id === 'me') ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(id);
 }
-function maybeCreateVisitEvent_(map, addr) {
+/**
+ * Remember the event this script just created or reused, so the two producers stop being blind to
+ * each other. Returns a short phrase for the caller's log line; never throws.
+ *
+ * Writes ONLY when the live header row actually holds the column. The declared position in HEADERS is
+ * deliberately not trusted here: if the column is missing from the sheet, col() would fall back to the
+ * declared index and we would write an event ID into whatever column happens to occupy it. The Node
+ * writer already refuses to write an absent header for exactly that reason (src/google/sheets.mjs), and
+ * a silent no-op that says so in the log beats a value in the wrong column.
+ *
+ * The '@google.com' suffix is stripped. Apps Script's getId() returns '<id>@google.com', but the Node
+ * side stores the bare API id (response.data.id) and calls events.get({ eventId }) with it, which the
+ * API rejects when the suffix is present. Storing the bare id is what makes the column mean the same
+ * thing to both systems rather than merely being populated by both.
+ */
+function storeEventId_(rowNum, eventId) {
+  if (!rowNum || !eventId) return '';
+  var c = headerIndex_()['Calendar Event ID'];
+  if (!c) return ' · event ID not stored (no "Calendar Event ID" column on the Data tab)';
+  try {
+    dataSheet_().getRange(rowNum, c).setValue(String(eventId).replace(/@google\.com$/i, ''));
+    return ' · event ID stored';
+  } catch (e) { return ' · event ID not stored (' + e + ')'; }
+}
+
+/**
+ * Create the visit's calendar event — at the time it was booked for, and only if one is not there already.
+ *
+ * Two faults this fixes, both found while reviewing whether an automated booking path could safely write
+ * here. Neither showed up as an error; both produced a confidently wrong calendar.
+ *
+ *   TIME. The start was hard-coded to 09:00 and Visit Time was never read, so a visit booked for 2pm went
+ *   on the calendar at 9am. The row, the dashboard and the Chat cards all carried the right time — only the
+ *   calendar did not. visitStartsAt_ is reused rather than re-deriving the parse: it already combines date
+ *   and time for the 4pm card and already handles all three shapes the cell arrives in (a Date, a Sheets
+ *   day-fraction, or typed text like "2:00 PM"). One parser, one set of edge cases. 09:00 remains the
+ *   fallback when there is genuinely no time on the row, which is the case it was written for.
+ *
+ *   DUPLICATES. createEvent was called unconditionally and no event ID was stored, so the same lead written
+ *   twice produced ONE row and TWO events — the row upsert protected the sheet and nothing protected the
+ *   calendar. findVisitEvents_ is consulted first; it already matches the office-PC scraper's
+ *   "Property Visit | seller | addr" titles as well as this script's own, so the check spans both producers.
+ *
+ * A reschedule MOVES the event it finds instead of adding a second one, per the project rule that a
+ * reschedule must update the same event.
+ *
+ * An event already tagged [CANCELED] / [RESCHEDULE NEEDED] is never reused and never moved. Those are the
+ * record of a visit that was called off, kept on their original date at the client's instruction, and
+ * quietly repurposing one would erase that. A genuinely new booking at the same address gets its own live
+ * event alongside it.
+ *
+ * rowNum is optional: pass it and the event ID is written back to the row (see storeEventId_).
+ */
+function maybeCreateVisitEvent_(map, addr, rowNum) {
   if (!CFG.VISIT_CALENDAR_ID && !CFG.VISIT_CALENDAR_NAME) return 'skipped (no calendar configured)';
   try {
     const cal = visitCalendar_();
     if (!cal) return 'calendar not found / not shared';
     if (!map['Visit Date']) return 'no visit date — event skipped';
-    const start = new Date(map['Visit Date']); start.setHours(9, 0, 0, 0);   // default 9:00 window if no time given
+
+    const day = new Date(map['Visit Date']);
+    var start = (typeof visitStartsAt_ === 'function') ? visitStartsAt_(map, day) : null;
+    const timed = !!start;
+    if (!start) { start = new Date(day.getTime()); start.setHours(9, 0, 0, 0); }   // no time on the row
 
     // History never reaches the calendar. The 379 imported legacy records carry visit dates going
     // back to 2023; putting those on Juan's calendar would bury the visits that have not happened
@@ -828,6 +885,27 @@ function maybeCreateVisitEvent_(map, addr) {
     if (start < midnight) return 'visit date is in the past — event skipped (history stays off the calendar)';
 
     const end = new Date(start.getTime() + 60 * 60000);
+    const clock = timed
+      ? Utilities.formatDate(start, Session.getScriptTimeZone(), 'h:mm a')
+      : '9:00 AM (no Visit Time on the row)';
+
+    // Reuse before create. A tagged event is history, not a slot to move.
+    const live = findVisitEvents_(cal, addr, start).filter(function (e) {
+      return !/^\[[A-Z ]+\]/.test(String(e.getTitle() || ''));
+    });
+    if (live.length) {
+      const ev0 = live[0];
+      var moved = '';
+      // A minute of slack: a reused event is not worth rewriting over sub-minute drift.
+      if (Math.abs(ev0.getStartTime().getTime() - start.getTime()) > 60000) {
+        ev0.setTime(start, end);
+        moved = ', moved to ' + clock;
+      }
+      return 'event already on the calendar — reused' + moved +
+        (live.length > 1 ? ' (' + live.length + ' matched; the extras predate this check)' : '') +
+        storeEventId_(rowNum, ev0.getId());
+    }
+
     const desc = 'Seller: ' + (map['Seller Name'] || '') + '\nPhone: ' + (map['Phone'] || '') +
                  '\nREI: ' + (map['REI BlackBook Link'] || '') + '\nLead source: ' + (map['Lead Source'] || '');
     const ev = cal.createEvent('Property Visit - ' + addr, start, end, { description: desc, location: addr });
@@ -835,7 +913,8 @@ function maybeCreateVisitEvent_(map, addr) {
     ev.removeAllReminders();
     if (mins) ev.addPopupReminder(mins);   // "leave office by" — mins before start (never shifts the event itself)
     ev.addPopupReminder(30);
-    return 'event created (' + (mins ? mins + 'm drive reminder' : '30m only') + ')';
+    return 'event created at ' + clock + ' (' + (mins ? mins + 'm drive reminder' : '30m only') + ')' +
+      storeEventId_(rowNum, ev.getId());
   } catch (e) { return 'error: ' + e; }
 }
 
@@ -1030,13 +1109,17 @@ function webIntake_(lead) {
     up('Current Stage', g('Current Stage', 'stage'));
     up('Next Action', g('Next Action', 'next'));
     up('Visit Date', g('Visit Date', 'visitDate'));
+    // Visit Time was missing from this list while Visit Date was on it, so a reschedule to a new TIME on
+    // the same day updated nothing: the row kept the old clock, and the event was then moved to match it.
+    up('Visit Time', g('Visit Time', 'visitTime'));
     up('Assigned Visitor', g('Assigned Visitor', 'visitor'));
     U.set('Last Contact Date', today_());
     U.set('Updated By', 'Apps Script'); U.set('Last Updated Date', today_());
     U.flush();
     var calMap = { 'Property Address': addr, 'Seller Name': U.get('Seller Name'), 'Phone': U.get('Phone'),
-                   'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'), 'Visit Date': U.get('Visit Date') };
-    var calU = maybeCreateVisitEvent_(calMap, addr);
+                   'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'),
+                   'Visit Date': U.get('Visit Date'), 'Visit Time': U.get('Visit Time') };
+    var calU = maybeCreateVisitEvent_(calMap, addr, dup.rowNum);
     SpreadsheetApp.flush();
     logAuto_('INTAKE', dup.id, 'Lead updated from REI webhook · ' + addr +
       (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') + ' · calendar: ' + calU);
@@ -1063,7 +1146,7 @@ function webIntake_(lead) {
   R.set('Source', CFG.SANDBOX ? 'Intake-Sandbox' : 'Intake');
   R.set('Created Date', today_());
   stamp_(R); R.flush();
-  const cal = maybeCreateVisitEvent_(map, addr);
+  const cal = maybeCreateVisitEvent_(map, addr, row);
   SpreadsheetApp.flush();
   logAuto_('INTAKE', R.get('Property ID'), 'New lead created from REI webhook · ' + addr +
     ' · visitor: ' + (map['Assigned Visitor'] || '(none)') + ' · visit: ' + (map['Visit Date'] ? fmt_(new Date(map['Visit Date'])) : '(none)') +
@@ -1172,7 +1255,8 @@ function restoreFromTrash_(trashRow) {
   if (addr && row[col('Visit Date') - 1]) {   // put the calendar event back
     maybeCreateVisitEvent_({ 'Property Address': addr, 'Seller Name': row[col('Seller Name') - 1],
       'Phone': row[col('Phone') - 1], 'REI BlackBook Link': row[col('REI BlackBook Link') - 1],
-      'Lead Source': row[col('Lead Source') - 1], 'Visit Date': row[col('Visit Date') - 1] }, addr);
+      'Lead Source': row[col('Lead Source') - 1], 'Visit Date': row[col('Visit Date') - 1],
+      'Visit Time': row[col('Visit Time') - 1] }, addr, dest);
   }
   SpreadsheetApp.flush();
   return { ok: true };

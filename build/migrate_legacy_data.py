@@ -44,6 +44,10 @@ HEADERS = [
     # Appended for the legacy migration - fields the old workbook tracked that had no home here.
     'City', 'Deal Stage', 'Deal Status', 'Contract Status', 'Closer', 'Golden Needle',
     'Market Status Update',
+    # Shared with the office-PC automation, which writes the ID of the calendar event it created.
+    # The migration never fills it: a legacy row has no event, and inventing one would make the
+    # Apps Script skip creating a real event for any visit that is still to happen.
+    'Calendar Event ID',
 ]
 
 # The sheet owns these - they are formulas. Never write them.

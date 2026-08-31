@@ -83,6 +83,17 @@ const HEADERS = [
   // Fields the live "Property Visit Tracking" workbook tracked that had no home here. Appended so
   // every existing column keeps its position on the live sheet.
   'City','Deal Stage','Deal Status','Contract Status','Closer','Golden Needle','Market Status Update',
+  /*
+   * Shared with the office-PC automation, which has always written it (src/google/sheets.mjs) while this
+   * script neither read nor wrote it. That is why the two producers could not see each other's calendar
+   * events: each created its own and neither left a note saying so.
+   *
+   * Declared LAST, like every other late addition here, so no existing column moves. Nothing writes it
+   * blindly on the strength of this declaration — storeEventId_ writes only when the column is genuinely
+   * present in the live header row, which is the same rule the Node writer follows (an absent header
+   * means the field is skipped, never written to whatever column happens to sit at the declared position).
+   */
+  'Calendar Event ID',
 ];
 
 const DROPDOWNS = {
