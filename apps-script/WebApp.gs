@@ -796,7 +796,15 @@ function driveMinutes_(dest) {
   } catch (e) { return 0; }
 }
 
-/** Create Juan's calendar event with a drive-time "leave by" reminder. Sandbox-gated. */
+/**
+ * Resolve the calendar that visit events go on.
+ *
+ * NOT sandbox-gated, whatever this comment used to claim. CFG.SANDBOX only decides the Source label
+ * written on the row ('Intake-Sandbox' vs 'Intake'); events are created either way, and the only
+ * switch that stops them is clearing VISIT_CALENDAR_NAME and VISIT_CALENDAR_ID. Anyone reading the
+ * old line would have concluded a sandbox run could not touch a real calendar, which is the wrong
+ * way round for a mistake to point.
+ */
 function visitCalendar_() {
   // Prefer the named calendar. getCalendarsByName covers calendars shared WITH this account, so
   // "Juan's Official Calendar" resolves without anyone copying an ID out of Calendar settings.

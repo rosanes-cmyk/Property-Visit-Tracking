@@ -2207,6 +2207,15 @@ function driveMinutes_(dest) {
     return Math.ceil(d.routes[0].legs[0].duration.value / 60);
   } catch (e) { return 0; }
 }
+/**
+ * Resolve the calendar that visit events go on.
+ *
+ * NOT sandbox-gated, whatever this comment used to claim. CFG.SANDBOX only decides the Source label
+ * written on the row ('Intake-Sandbox' vs 'Intake'); events are created either way, and the only
+ * switch that stops them is clearing VISIT_CALENDAR_NAME and VISIT_CALENDAR_ID. Anyone reading the
+ * old line would have concluded a sandbox run could not touch a real calendar, which is the wrong
+ * way round for a mistake to point.
+ */
 function visitCalendar_() {
   // Prefer the named calendar. getCalendarsByName covers calendars shared WITH this account, so
   // "Juan's Official Calendar" resolves without anyone copying an ID out of Calendar settings.
