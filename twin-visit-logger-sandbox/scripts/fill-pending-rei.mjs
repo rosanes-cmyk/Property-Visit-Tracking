@@ -147,6 +147,87 @@ function columnLetter(index) {
   return out;
 }
 
+/*
+ * PASS 2 — backfill a missing REI BlackBook Link.
+ *
+ * A row with a REAL address never comes here as a parked row, and recheck.mjs refuses any row without a
+ * link ("no REI link"). So a booking that arrives complete-looking falls between both jobs and is
+ * permanently outside the REI sweep: no stage changes, no gift tracking, no owner corrections, no
+ * cancellation detection, and nothing anywhere saying so.
+ *
+ * That was an edge case until the client confirmed their colleague will ALWAYS reply with the address.
+ * Now it is every booking from the phone path, and manual dashboard bookings where somebody typed the
+ * address have always had it too.
+ *
+ * BOUNDED ON PURPOSE, twice over. The 379 imported legacy rows have no link either, and each lookup is a
+ * real browser page on a machine whose 2-minute board-intake job is already losing its turn to the long
+ * sweeps. An unbounded version would send it browsing REI for hours and starve the job a colleague is
+ * actually watching.
+ *
+ *   30 days  — covers every live booking and cannot reach the 2023-24 history
+ *   10 a run — at roughly a minute a page, a bounded slice of one run
+ *
+ * A row whose Created Date cannot be read is SKIPPED, not assumed recent: touching a legacy row is the
+ * worse of the two mistakes. It is logged, so "unreadable" cannot hide.
+ *
+ * It writes ONE cell, the link, and nothing else. Making the row visible to the sweep is the whole job —
+ * the sweep itself then enriches it properly on its own schedule, with all of its own guards. A second
+ * writer of the same fields is how a tracker starts disagreeing with itself.
+ */
+const REI_LINK_BACKFILL_DAYS = 30;
+const REI_LINK_BACKFILL_MAX = 10;
+
+/** Days since a display-string date, or null when it cannot be read. */
+function daysSinceCell(raw) {
+  const s = text(raw);
+  if (!s) return null;
+  let y, m, d;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (iso) { [, y, m, d] = iso; }
+  else if (us) { [, m, d, y] = us; }
+  else {
+    const parsed = DateTime.fromJSDate(new Date(s));
+    if (!parsed.isValid) return null;
+    return Math.floor(DateTime.now().diff(parsed, 'days').days);
+  }
+  const dt = DateTime.fromObject({ year: Number(y), month: Number(m), day: Number(d) },
+    { zone: config.calendarTimezone });
+  if (!dt.isValid) return null;
+  return Math.floor(DateTime.now().setZone(config.calendarTimezone).startOf('day').diff(dt.startOf('day'), 'days').days);
+}
+
+/** Rows that have a real address but no REI link, newest first, capped. */
+function rowsNeedingReiLink(rows) {
+  const out = [];
+  let unreadable = 0;
+  for (const r of rows) {
+    const addr = text(r['Property Address']);
+    if (!addr || addr.startsWith(PENDING_PREFIX)) continue;   // blank, or already PASS 1's job
+    if (text(r['REI BlackBook Link'])) continue;              // never overwrite a link that exists
+    if (!text(r['Phone'])) continue;                          // nothing to search REI by
+    const age = daysSinceCell(r['Created Date']);
+    if (age === null) { unreadable += 1; continue; }
+    if (age > REI_LINK_BACKFILL_DAYS || age < 0) continue;
+    out.push({ row: r, age });
+  }
+  out.sort((a, b) => a.age - b.age || b.row.__rowNumber - a.row.__rowNumber);
+  return { rows: out.slice(0, REI_LINK_BACKFILL_MAX).map((x) => x.row), unreadable, total: out.length };
+}
+
+/** Write just the REI BlackBook Link cell. Never throws — a note about a row must not fail the run. */
+async function writeReiLink(sheets, headers, row, link) {
+  const col = headers.indexOf('REI BlackBook Link');
+  if (col < 0) { console.log('    the tracker has no "REI BlackBook Link" column'); return false; }
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.spreadsheetId,
+    range: `${config.trackerSheet}!${columnLetter(col + 1)}${row.__rowNumber}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[link]] }
+  });
+  return true;
+}
+
 /** The phone or REI link a parked row was created with, taken from the row's own columns first. */
 function lookupKeyFor(row) {
   const link = text(row['REI BlackBook Link']);
@@ -231,9 +312,22 @@ async function main() {
   });
 
   const pending = rows.filter((r) => text(r['Property Address']).startsWith(PENDING_PREFIX));
-  if (!pending.length) {
+
+  /*
+   * Worked out BEFORE the early return, or PASS 2 would only ever run on the rare occasions a parked row
+   * happened to be waiting too — which on a good day is never.
+   */
+  const backfill = rowsNeedingReiLink(rows);
+  if (backfill.unreadable) {
+    console.log(`(${backfill.unreadable} row(s) skipped for the link backfill: Created Date could not be read)`);
+  }
+
+  if (!pending.length && !backfill.rows.length) {
     console.log('No rows are waiting on REI. Everything added from the board has been filled in.');
     return;
+  }
+  if (!pending.length) {
+    console.log('No rows are waiting on REI.');
   }
   /*
    * TODAY FIRST. The client: "if the lead was added for today it should be priority... work all ASAP."
@@ -254,11 +348,23 @@ async function main() {
   };
   pending.sort((a, b) => (dayKey(a) < dayKey(b) ? -1 : dayKey(a) > dayKey(b) ? 1 : a.__rowNumber - b.__rowNumber));
 
-  console.log(`${pending.length} row(s) added on the board and waiting on REI, soonest visit first:`);
-  for (const r of pending) {
-    console.log(`  row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} · ${text(r['Property Address'])}`);
+  if (pending.length) {
+    console.log(`${pending.length} row(s) added on the board and waiting on REI, soonest visit first:`);
+    for (const r of pending) {
+      console.log(`  row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} · ${text(r['Property Address'])}`);
+    }
+    console.log('');
   }
-  console.log('');
+  if (backfill.rows.length) {
+    console.log(`${backfill.rows.length} row(s) need their REI link filled in` +
+      (backfill.total > backfill.rows.length
+        ? ` (${backfill.total} in the last ${REI_LINK_BACKFILL_DAYS} days; doing ${REI_LINK_BACKFILL_MAX} this run)`
+        : '') + ':');
+    for (const r of backfill.rows) {
+      console.log(`  row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} · ${text(r['Phone'])}`);
+    }
+    console.log('');
+  }
 
   /*
    * One browser profile, one lock. This waits rather than standing down: it runs on a timer, but the row
@@ -296,6 +402,9 @@ async function main() {
   const context = await launchReiContext();
   let filled = 0;
   let stuck = 0;
+  // Counted apart from `stuck`: a link that could not be found is not a booking that did not happen.
+  let linksFilled = 0;
+  let linksMissed = 0;
 
   /*
    * This is the job the dashboard matters most for. A colleague types a booking on the board and watches
@@ -611,6 +720,43 @@ async function main() {
         stuck += 1;
       }
     }
+
+    /*
+     * PASS 2 — the link backfill. Same lock, same browser, after the rows a colleague is watching.
+     *
+     * Ordered second deliberately: a parked row has somebody staring at a timer on the board, and a
+     * missing link is invisible to everyone. If the lock runs out or the run is killed partway, the
+     * work that gets done is the work someone is waiting for.
+     *
+     * Failures here are counted separately and never touch `stuck`, which feeds the board-intake
+     * summary and the "NOT REACHED" arithmetic. A link that could not be found is not a booking that
+     * did not happen, and reporting it as one would cry wolf on the number that matters.
+     */
+    for (const row of backfill.rows) {
+      const who = text(row['Seller Name']) || `row ${row.__rowNumber}`;
+      const phone = text(row['Phone']);
+      console.log(`\n--- ${who} (REI link)`);
+      try {
+        updateJob({ phase: 'filling in a missing REI link', item: who });
+        const scraped = await scrapeReiVisit(context, '', { phone, sellerName: who, appointmentStartIso: '' });
+        const found = text(scraped?.reiLink);
+        if (!found) {
+          // Reported, not guessed. REI may simply hold no contact on that number.
+          console.log(`    REI returned no contact link for ${phone} — leaving the row as it is`);
+          linksMissed += 1;
+          continue;
+        }
+        if (await writeReiLink(sheets, headers, row, found)) {
+          console.log(`    wrote the REI link — this lead is now swept like any other`);
+          linksFilled += 1;
+        } else {
+          linksMissed += 1;
+        }
+      } catch (error) {
+        console.log(`    could not fill the REI link: ${error.message}`);
+        linksMissed += 1;
+      }
+    }
   } finally {
     await context.close();
     await release();
@@ -628,8 +774,12 @@ async function main() {
      * by a path added later that forgets to increment, which is exactly how this happened.
      */
     const unaccounted = Math.max(0, pending.length - filled - stuck);
+    const links = (linksFilled || linksMissed)
+      ? `, ${linksFilled} REI link(s) filled in`
+        + (linksMissed ? ` (${linksMissed} not found)` : '')
+      : '';
     const summary = `${filled} finished, ${stuck} could not be looked up`
-      + (unaccounted ? `, ${unaccounted} NOT REACHED` : '');
+      + (unaccounted ? `, ${unaccounted} NOT REACHED` : '') + links;
     endJob({ summary, ok: !stuck && !unaccounted });
     recordActivity(`Board intake — ${summary}.`,
       { kind: (stuck || unaccounted) ? 'warn' : 'ok', job: 'board-intake' });
