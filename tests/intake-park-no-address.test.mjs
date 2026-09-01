@@ -122,5 +122,30 @@ const nodePrefix = (NODE.match(/const PENDING_PREFIX = '(.*?)';/) || [])[1];
 check('Apps Script defines the prefix', typeof appsPrefix, 'string');
 check('the office PC uses the identical string', nodePrefix, appsPrefix);
 
+
+console.log('\n=== A reschedule of an existing lead still gets its event ===');
+/*
+ * THE BUG THIS SECTION EXISTS FOR. A booking from the phone path carries no address, so it reaches
+ * webIntake_ holding the "PENDING REI LOOKUP — <phone>" placeholder. It matched an existing row by phone
+ * and updated the time correctly — and then the placeholder guard refused to make a calendar event, even
+ * though the ROW being updated already had a real address on it.
+ *
+ * So the board showed the new time and Juan's calendar got nothing: everything reported success and the
+ * visit reached nobody. The row is the authority; the incoming placeholder is only a lookup key.
+ */
+for (const [label, src] of [['WebApp.gs', WEBAPP], ['Code.combined.gs', COMBINED]]) {
+  check(`${label}: the row's own address is read`,
+    /var rowAddr = String\(U\.get\('Property Address'\) \|\| ''\)\.trim\(\);/.test(src), true);
+  check(`${label}: ...and preferred unless it is itself a placeholder`,
+    /var calAddr = \(rowAddr && rowAddr\.indexOf\(PENDING_REI_PREFIX\) !== 0\) \? rowAddr : addr;/.test(src), true);
+  check(`${label}: the calendar is given that address, not the incoming one`,
+    /maybeCreateVisitEvent_\(calMap, calAddr, dup\.rowNum\)/.test(src), true);
+  check(`${label}: and the event describes it too`,
+    /'Property Address': calAddr,/.test(src), true);
+  // The guard itself must stay: a row with NO real address must still never reach the calendar.
+  check(`${label}: a genuinely placeholder-only row still gets no event`,
+    /String\(addr \|\| ''\)\.indexOf\(PENDING_REI_PREFIX\) === 0/.test(src), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

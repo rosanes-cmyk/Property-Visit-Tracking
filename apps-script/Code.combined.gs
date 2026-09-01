@@ -2605,10 +2605,28 @@ function webIntake_(lead) {
     U.set('Last Contact Date', today_());
     U.set('Updated By', 'Apps Script'); U.set('Last Updated Date', today_());
     U.flush();
-    var calMap = { 'Property Address': addr, 'Seller Name': U.get('Seller Name'), 'Phone': U.get('Phone'),
+    /*
+     * The calendar uses the address ON THE ROW, not the one that arrived with this message.
+     *
+     * A booking from the phone path carries no address — the Chat card says so in its own words — so it
+     * reaches here holding the "PENDING REI LOOKUP — <phone>" placeholder. The guard in
+     * maybeCreateVisitEvent_ correctly refuses to put a placeholder on Juan's calendar, and equally
+     * correctly refused this: it was looking at the placeholder.
+     *
+     * But the ROW being updated already had a real address, filled in earlier. So a reschedule of an
+     * existing lead updated the time on the board and silently made no event, which is precisely the
+     * shape of failure this whole evening has been about: everything reports success and the visit
+     * reaches nobody.
+     *
+     * The row is the authority here. It is what the team works from, and it is what the event describes.
+     * The incoming placeholder is only ever a lookup key.
+     */
+    var rowAddr = String(U.get('Property Address') || '').trim();
+    var calAddr = (rowAddr && rowAddr.indexOf(PENDING_REI_PREFIX) !== 0) ? rowAddr : addr;
+    var calMap = { 'Property Address': calAddr, 'Seller Name': U.get('Seller Name'), 'Phone': U.get('Phone'),
                    'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'),
                    'Visit Date': U.get('Visit Date'), 'Visit Time': U.get('Visit Time') };
-    var calU = maybeCreateVisitEvent_(calMap, addr, dup.rowNum);
+    var calU = maybeCreateVisitEvent_(calMap, calAddr, dup.rowNum);
     SpreadsheetApp.flush();
     logAuto_('INTAKE', dup.id, 'Lead updated from REI webhook · ' + addr +
       (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') + ' · calendar: ' + calU);
