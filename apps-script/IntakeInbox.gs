@@ -103,10 +103,27 @@ function processIntakeInbox_() {
     var lookupKey = String(inboxGet_(row, idx, 'Phone') ||
                            inboxGet_(row, idx, 'REI BlackBook Link') || '').trim();
     var parked = '';
-    if (!addr && !body) {
+    /*
+     * "No address anywhere" — the FIELD, and the task body, which can carry one.
+     *
+     * This condition was `!addr && !body`, and that was wrong in the one way that mattered. The voice-AI
+     * path writes a Task Body on every row ("Human-answered call. Campaign PROPERTY-LEADS. Booked by
+     * Thea. Agreed time 2:00 PM. Ref ..."), so `body` was never empty, so the parking branch could never
+     * run for the very path it was written for. The row fell through to webIntake_, which found no
+     * address in the fields or the body and rejected it — exactly the behaviour the parking was meant to
+     * replace. I tested it against a row with an empty Task Body, which is a shape those rows never have.
+     *
+     * A body that DOES carry "Property address: ..." is left alone: webIntake_ parses it out and the row
+     * completes normally with no parking and no PC lookup needed.
+     */
+    var addrInBody = '';
+    if (!addr && body && typeof parseReiTaskBody_ === 'function') {
+      try { addrInBody = String((parseReiTaskBody_(body) || {}).address || '').trim(); } catch (e) { addrInBody = ''; }
+    }
+    if (!addr && !addrInBody) {
       var hasSomething = ['Seller Name', 'Phone', 'Email', 'Visit Date', 'Visit Time']
         .some(function (f) { return String(inboxGet_(row, idx, f)).trim(); });
-      if (!hasSomething) continue;                                     // blank row — skip
+      if (!hasSomething && !body) continue;                            // blank row — skip
       if (!lookupKey) {
         sh.getRange(rowNum, idx['Status'] + 1)
           .setValue('NOT LOGGED: no Property Address and no phone to look one up with — ' +

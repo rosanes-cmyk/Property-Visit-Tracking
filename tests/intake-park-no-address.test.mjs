@@ -50,6 +50,29 @@ for (const [label, src] of [['IntakeInbox.gs', INBOX], ['Code.combined.gs', COMB
     /\[since ' \+ new Date\(\)\.toISOString\(\) \+ '\]/.test(src), true);
 }
 
+console.log('\n=== A Task Body must not stop the parking ===');
+/*
+ * THE REGRESSION THIS EXISTS FOR. The condition was `!addr && !body`, and the voice-AI path writes a Task
+ * Body on EVERY row — "Human-answered call. Campaign PROPERTY-LEADS. Booked by Thea. Agreed time 2:00 PM.
+ * Ref ..." — so `body` was never empty and the parking branch could never run for the one path it was
+ * written for. The row fell through to webIntake_ and was rejected for having no address: exactly the
+ * behaviour the parking was meant to replace. It was tested against a row with an empty Task Body, a shape
+ * those rows never have.
+ */
+for (const [label, src] of [['IntakeInbox.gs', INBOX], ['Code.combined.gs', COMBINED]]) {
+  check(`${label}: the guard is on the ADDRESS, not on the body`,
+    /if \(!addr && !addrInBody\) \{/.test(src), true);
+  check(`${label}: '!addr && !body' is gone`, /if \(!addr && !body\) \{/.test(src), false);
+  // A body that really does carry "Property address: ..." still completes normally, no parking needed.
+  check(`${label}: the body is searched for an address first`,
+    /parseReiTaskBody_\(body\) \|\| \{\}\)\.address/.test(src), true);
+  check(`${label}: ...defensively, so a parser change cannot break intake`,
+    /typeof parseReiTaskBody_ === 'function'/.test(src), true);
+  // And a truly empty row is still skipped in silence — a body alone is not "real content".
+  check(`${label}: a blank row with no body is still skipped quietly`,
+    /if \(!hasSomething && !body\) continue;/.test(src), true);
+}
+
 console.log('\n=== A row with nothing to look up with is still marked ===');
 // Parking is only possible when something can find the address. With neither an address nor a phone
 // there is genuinely nothing to be done, and silence is what made three appointments invisible for days.
@@ -63,8 +86,10 @@ check('...and the message says to CLEAR THE CELL', /CLEAR THIS CELL/.test(INBOX)
  */
 check('the skip-if-Status-set rule is still what makes that necessary',
   /if \(String\(row\[idx\['Status'\]\]\)\.trim\(\)\) continue;/.test(INBOX), true);
+// The `&& !body` is part of it now: a row carrying only a Task Body is not "genuinely empty", and
+// silence is what made three real appointments invisible for days.
 check('a genuinely empty row is still skipped in silence',
-  /if \(!hasSomething\) continue;/.test(INBOX), true);
+  /if \(!hasSomething && !body\) continue;/.test(INBOX), true);
 
 console.log('\n=== A parked row gets NO calendar event ===');
 for (const [label, src] of [['WebApp.gs', WEBAPP], ['Code.combined.gs', COMBINED]]) {
