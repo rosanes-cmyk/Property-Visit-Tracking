@@ -40,6 +40,7 @@ import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
+import { bookingIsWaiting } from '../src/utils/priority.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 import { beginJob, updateJob, endJob, recordActivity } from '../src/utils/heartbeat.mjs';
@@ -474,8 +475,29 @@ const failures = [];
  */
 beginJob(BUCKETS_ONLY ? 'bucket-sweep' : 'recheck', { total: candidates.length, phase: 'opening REI' });
 let checkedSoFar = 0;
+/*
+ * Set when this sweep stood aside for a booking. It suppresses the SWEEP stamp below, because a sweep that
+ * stopped early did NOT check its buckets and must not tell the work-queue card that it did.
+ */
+let yieldedToBooking = false;
 try {
   for (const row of candidates) {
+    /*
+     * BOOKINGS COME FIRST. Checked between leads, never mid-lead: the row in hand is finished and written
+     * before this stops, so yielding can never lose work.
+     *
+     * There is one REI browser. A sweep over forty leads holds it for the best part of an hour, and the
+     * job finishing a booking somebody is watching a timer on used to queue behind it — which is how a
+     * visit booked for the next day sat unprocessed for six hours on the client's machine. Their
+     * instruction: "the booking should be prio at always." A bulk re-check has no audience and its next
+     * run is minutes away; a booking has a person waiting and a visitor who needs to know where to drive.
+     */
+    if (bookingIsWaiting()) {
+      console.log(`\n  A booking is waiting for REI — standing down after ${checkedSoFar} lead(s).`);
+      console.log('  The remaining leads are picked up by the next sweep; nothing is lost.');
+      yieldedToBooking = true;
+      break;
+    }
     const link = String(row['REI BlackBook Link']).trim();
     checkedSoFar += 1;
     updateJob({
@@ -994,7 +1016,17 @@ function sweepStamp(checked, updated) {
   };
 }
 
-if (APPLY && BUCKETS_ONLY) auditRows.push(sweepStamp(candidates.length, changedRows.length));
+/*
+ * No stamp when this sweep yielded. Same rule as the lock exits: the stamp means "the buckets were
+ * checked", and a run that stopped a third of the way through did not check them. Stamping anyway would
+ * tell the 9am/11am/4pm card its data is fresh when it is partial — and that card going out wrong is more
+ * damaging than it arriving late, because it trains the team to trust a number that is not true.
+ */
+if (APPLY && BUCKETS_ONLY && !yieldedToBooking) auditRows.push(sweepStamp(candidates.length, changedRows.length));
+if (yieldedToBooking) {
+  auditRows.push({ level: 'INFO',
+    message: `Bucket sweep stood down for a booking after ${checkedSoFar} of ${candidates.length} lead(s) — not stamped as a completed sweep.` });
+}
 
 if (APPLY && auditRows.length) {
   const n = await appendAuditLog(sheets, config.spreadsheetId, auditRows);

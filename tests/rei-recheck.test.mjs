@@ -1675,8 +1675,20 @@ console.log('\n=== the sweep stamp the Chat card now depends on ===');
  */
 {
   const R = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
-  const stampAt = R.indexOf("if (APPLY && BUCKETS_ONLY) auditRows.push(sweepStamp(");
+  const stampAt = R.indexOf("if (APPLY && BUCKETS_ONLY && !yieldedToBooking) auditRows.push(sweepStamp(");
   check('the sweep stamps when it finishes', stampAt > 0, true);
+  /*
+   * ...but NOT when it stood aside for a booking. Same rule as the lock exits: the stamp means "the
+   * buckets were checked", and a sweep that stopped a third of the way through did not check them.
+   * Stamping anyway would tell the 9am/11am/4pm card its data is fresh when it is partial — and a card
+   * going out wrong is worse than one arriving late, because it teaches the team to trust a number that
+   * is not true.
+   */
+  check('...but not when it yielded to a booking', /&& !yieldedToBooking\) auditRows\.push\(sweepStamp\(/.test(R), true);
+  check('a yield is still recorded, so the gap is explainable',
+    /Bucket sweep stood down for a booking after/.test(R), true);
+  check('the yield flag can only be set by the booking check',
+    (R.match(/yieldedToBooking = true;/g) || []).length, 1);
   /*
    * THE bug this section exists for. The stamp used to sit inside `if (APPLY && auditRows.length)`, and
    * auditRows only gets a line when something CHANGED — so the ordinary sweep, the one that reads twelve
@@ -1689,8 +1701,10 @@ console.log('\n=== the sweep stamp the Chat card now depends on ===');
   /* And an empty card is a finished check with a result of zero, not a check that never happened. */
   check('a sweep with an empty card stamps too',
     /if \(APPLY && BUCKETS_ONLY\) \{\s*\n\s*await appendAuditLog\(/.test(R), true);
+  // One bare `if (APPLY && BUCKETS_ONLY)` remains (the empty-card append); the stamp itself now also
+  // carries the yield guard, so the two are counted separately rather than as one shape.
   check('...only in bucket mode, never the ordinary rotation',
-    (R.match(/if \(APPLY && BUCKETS_ONLY\)/g) || []).length, 2);
+    (R.match(/if \(APPLY && BUCKETS_ONLY(?:\)| &&)/g) || []).length, 2);
   /*
    * The lock exits must NOT stamp. "REI is busy" and "a run died holding the lock" are the exact cases
    * where the card has to know the buckets were not checked — stamping there would make the guarantee a

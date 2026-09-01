@@ -33,6 +33,7 @@ import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { acquireLockWaiting } from '../src/utils/lock.mjs';
+import { claimBookingPriority, clearBookingPriority } from '../src/utils/priority.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { buildDescription } from '../src/google/calendar.mjs';
 import { briefingFromDescription } from '../src/whatsapp/note.mjs';
@@ -375,6 +376,13 @@ async function main() {
    * A scheduled run waits 90 seconds — comfortably inside its own 2-minute period, so copies cannot stack
    * — and a typed one waits the full twelve, because nothing is coming after it.
    */
+  /*
+   * Say a booking is queueing BEFORE waiting for the lock, so a sweep already holding the browser can
+   * finish its current lead and stand down instead of making this wait out the whole run. Claimed only
+   * when there is real work: an empty run must never make sweeps yield to nothing.
+   */
+  claimBookingPriority(`${pending.length} booking(s), ${backfill.rows.length} link(s)`);
+
   let lastSaid = 0;
   const release = await acquireLockWaiting('run', {
     timeoutMs: SCHEDULED ? 90 * 1000 : 12 * 60 * 1000,
@@ -386,6 +394,7 @@ async function main() {
     }
   });
   if (!release) {
+    clearBookingPriority();
     if (SCHEDULED) {
       /*
        * Exit 0, deliberately. This is not a failure: REI was busy and the next run is two minutes away.
@@ -760,6 +769,8 @@ async function main() {
   } finally {
     await context.close();
     await release();
+    // Withdrawn here, not on the happy path only: a run that threw must not leave sweeps yielding.
+    clearBookingPriority();
     // In the finally, so a crash still marks the job finished rather than leaving it reading as "running".
     /*
      * The count of rows it never accounted for, and this exists because the client's dashboard showed
