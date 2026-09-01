@@ -486,10 +486,23 @@ async function main() {
          *
          * A diagnosis that only exists on the machine nobody is looking at is not a diagnosis.
          */
-        console.log('    REI has no Property Address on that contact — leaving the row parked');
-        await noteParkReason(sheets, headers, row,
-          'REI has no Property Address on this contact. Add it in REI and this row finishes itself '
-          + 'within a couple of minutes — nothing needs restarting.');
+        /*
+         * Which of the two it was, on the row itself.
+         *
+         * "REI holds no address" and "the page did not finish rendering" produced the identical message,
+         * and the first is a believable, expected answer — so a timing bug wearing it got written onto the
+         * row as REI's verdict and acted on. The scraper now says which; this passes that through instead
+         * of overwriting it with the confident version.
+         */
+        var renderWarning = (scraped?.warnings || []).find((w) => /finished rendering/i.test(String(w)));
+        console.log(renderWarning
+          ? '    REI showed the Property Address label but no value — the page may not have finished loading'
+          : '    REI has no Property Address on that contact — leaving the row parked');
+        await noteParkReason(sheets, headers, row, renderWarning
+          ? 'The REI page did not finish loading, so the address could not be read. This usually clears '
+            + 'itself on the next run — no action needed unless it keeps saying this.'
+          : 'REI has no Property Address on this contact. Add it in REI and this row finishes itself '
+            + 'within a couple of minutes — nothing needs restarting.');
         stuck += 1;
         continue;
       }

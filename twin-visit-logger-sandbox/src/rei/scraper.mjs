@@ -217,6 +217,43 @@ async function captureDebug(page, prefix, extra = {}) {
  * Only ever narrows to `/contacts/<id>`, and returns the input untouched when it does not match that shape —
  * a link this does not recognise must be followed as given rather than rewritten into something else.
  */
+/**
+ * Wait until REI has finished rendering the About panel, rather than guessing at a delay.
+ *
+ * The old wait was waitForSelector('[data-testid="list-item"]') plus a flat 2500ms — which resolves the
+ * moment the FIRST field appears. REI renders that panel progressively, so on a slow load the scrape read
+ * a half-built page: it reported "REI has no Property Address on that contact" for a contact whose
+ * Property Address was plainly on screen, and read 1 note where another contact gave 8.
+ *
+ * That failure is the worst shape available here, because it looks exactly like the honest answer. "REI
+ * holds no address" is a real and expected outcome — it is what the no-guessing rule produces — so a
+ * timing bug wearing that message gets believed, written onto the row as the reason, and acted on.
+ *
+ * So: sample the field count until it stops changing. A page that has finished growing is finished; one
+ * still arriving keeps the loop going. No fixed delay to tune, and a fast page is not made to wait for a
+ * slow one's budget.
+ *
+ * Returns the count it settled on, which the caller logs — so the next time a field is missing there is a
+ * number saying how much of the page was actually seen.
+ */
+async function waitForFieldsToSettle(page, { quietMs = 1200, timeoutMs = 15000 } = {}) {
+  const started = Date.now();
+  let last = -1;
+  let stableSince = 0;
+  while (Date.now() - started < timeoutMs) {
+    const n = await page.locator('[data-testid="list-item"]').count().catch(() => -1);
+    if (n > 0 && n === last) {
+      if (!stableSince) stableSince = Date.now();
+      if (Date.now() - stableSince >= quietMs) return n;
+    } else {
+      stableSince = 0;
+      last = n;
+    }
+    await page.waitForTimeout(250);
+  }
+  return last;
+}
+
 export function contactPageUrl(link) {
   const m = /(https?:\/\/[^/]*reiblackbook\.com\/contacts\/\d+)/i.exec(String(link || ''));
   return m ? m[1] : String(link || '');
@@ -245,7 +282,8 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     // REI is a single-page app; wait for the network to settle and the field list to render.
     await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
     await page.waitForSelector('[data-testid="list-item"]', { timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(2500);
+    const fieldCount = await waitForFieldsToSettle(page);
+    console.log(`   About panel settled with ${fieldCount} field(s)`);
     await assertAuthenticated(page, selectorConfig.login || {});
 
     /* Stored without the tab too, so the next run and anybody clicking it from the board get the About panel. */
@@ -561,7 +599,18 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
     };
 
     if (!result.sellerName) result.warnings.push('Seller name was not found.');
-    if (!result.propertyAddress) result.warnings.push('Property address was not found.');
+    if (!result.propertyAddress) {
+      /*
+       * Say WHICH of the two this is. "No address on the contact" and "the page did not render its fields"
+       * are opposite problems — one is REI's data, the other is ours — and they produced the identical
+       * message until now, so a timing bug got written onto the row as though REI had answered.
+       */
+      const labelWasOnScreen = /property address/i.test(visibleText);
+      result.warnings.push(labelWasOnScreen
+        ? 'Property address label is on the page but its value could not be read — the page may not have '
+          + 'finished rendering. Worth re-running before treating this as REI having no address.'
+        : 'Property address was not found.');
+    }
     if (!result.appointmentStartIso) {
       // Say exactly which pieces were found so the gap is obvious (usually a missing TIME).
       const seen = [

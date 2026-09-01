@@ -1769,6 +1769,15 @@ console.log('\n=== a pasted REI link opens the About panel, not the chat tab ===
   const from = SRC.indexOf('export function contactPageUrl');
   const to = SRC.indexOf('}', SRC.indexOf('return m ? m[1]', from)) + 1;
   check('the normaliser exists', from > 0, true);
+  /*
+   * Pinned explicitly, because it was silently un-exported once. A helper inserted with the anchor
+   * "function contactPageUrl(" matched the tail of "export function contactPageUrl(" and landed BETWEEN
+   * the export keyword and the function — which exported the new helper instead and left this one
+   * internal. node --check passed; it is valid JavaScript. Only this test noticed.
+   */
+  check('...and is still the thing being exported', /export function contactPageUrl\(/.test(SRC), true);
+  check('...and nothing else got the export by accident',
+    /export\s+\/\*\*/.test(SRC), false);
   const contactPageUrl = new Function(`${SRC.slice(from, to).replace('export function', 'function')}
     return contactPageUrl;`)();
 
