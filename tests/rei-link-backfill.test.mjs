@@ -111,5 +111,32 @@ check('the scraper is the only REI call in the new pass',
   (code.slice(code.indexOf('for (const row of backfill.rows)')).match(/scrapeReiVisit|readTasks|completeTask/g) || []).join(','),
   'scrapeReiVisit');
 
+
+console.log('\n=== Every long holder of the REI lock yields to a booking ===');
+/*
+ * The fix was shipped half-done: only the bucket sweep yielded, so when the parked-leads sweep held the
+ * browser a booking still waited twenty minutes — which is exactly what the client saw and reported.
+ *
+ * So this enumerates the holders rather than checking one. A new job that takes 'run' and loops over leads
+ * without this check reintroduces the same fault silently, and this is the only thing that would notice.
+ */
+const HOLDERS = [
+  ['scripts/recheck-rei.mjs', 'the bucket sweep'],
+  ['scripts/sweep-parked.mjs', 'the parked-leads sweep']
+];
+for (const [file, what] of HOLDERS) {
+  const src = fs.readFileSync(path.resolve(`twin-visit-logger-sandbox/${file}`), 'utf8');
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  check(`${what} imports the check`, /import \{ bookingIsWaiting \}/.test(code), true);
+  check(`${what} checks it INSIDE its per-lead loop`, /if \(bookingIsWaiting\(\)\) \{/.test(code), true);
+  // Before the work, not after: checking at the end of a lead is a whole page too late on a slow one.
+  const loopAt = code.search(/for \(const row of (candidates|batch)\) \{/);
+  check(`${what} checks before doing the lead`,
+    loopAt >= 0 && code.indexOf('bookingIsWaiting()', loopAt) - loopAt < 400, true);
+}
+// And the booking job is the one that CLAIMS, never yields to itself.
+const FILLSRC = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs'), 'utf8');
+check('the booking job claims and never yields', /claimBookingPriority\(/.test(FILLSRC) && !/bookingIsWaiting\(\)/.test(FILLSRC), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

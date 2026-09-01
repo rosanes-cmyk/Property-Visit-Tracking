@@ -44,6 +44,7 @@ import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { mapReiStage, reiSaysLost } from '../src/rei/stage-map.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
 import { acquireLock } from '../src/utils/lock.mjs';
+import { bookingIsWaiting } from '../src/utils/priority.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 import { beginJob, updateJob, endJob, recordActivity } from '../src/utils/heartbeat.mjs';
@@ -139,6 +140,22 @@ try {
   context = await launchReiContext();
   let n = 0;
   for (const row of batch) {
+    /*
+     * Stand down for a booking, between leads.
+     *
+     * This job already refuses to WAIT for the lock, on the grounds that it is the lowest-priority sweep —
+     * but it never asked the opposite question, whether something more urgent wanted the browser while it
+     * already HELD it. It walks a batch of dead leads one page at a time, so a booking arriving thirty
+     * seconds after it started used to queue for the whole batch. The client watched exactly that: twenty
+     * minutes with a booking waiting and nothing happening.
+     *
+     * A weekly rotation losing a day costs nothing. A colleague watching a timer costs something real.
+     */
+    if (bookingIsWaiting()) {
+      console.log(`\n  A booking is waiting for REI — standing down after ${n} lead(s).`);
+      console.log('  These are parked leads; tomorrow will do.');
+      break;
+    }
     const who = text(row['Seller Name']) || `row ${row.__rowNumber}`;
     n += 1;
     updateJob({ phase: 'checking parked leads', item: who, index: n, total: batch.length });
