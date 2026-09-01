@@ -12,10 +12,11 @@ import path from 'node:path';
  * So this writes down the three facts that would actually distinguish the remaining possibilities, once
  * per run, into a file a person can read:
  *
- *   OPEN    how many REI cookies the profile had when the browser opened, and whether any of them is the
- *           session cookie. "Opened with none" means the session was already gone before this run — the
- *           loss happened earlier. "Opened with some, and REI still showed a login page" means REI ended
- *           it server-side, which is a completely different problem.
+ *   OPEN    how many REI cookies the profile had when the browser opened, and what the first few are
+ *           called. "Opened with none" means the session was already gone before this run — the loss
+ *           happened earlier. "Opened with some, and REI still showed a login page" means REI ended it
+ *           server-side, which is a completely different problem. It does NOT try to say which cookie is
+ *           the login: guessing that produced `sessionCookies=1 [__stripe_sid]` on the first live run.
  *   CLOSE   whether the context actually closed. A missing CLOSE line after an OPEN is a run that was
  *           killed, and a killed Chromium never writes its cookies to disk.
  *   EXIT    how the process ended, so a crash and a clean finish are distinguishable.
@@ -50,33 +51,46 @@ function line(text) {
 /**
  * What the profile holds for REI right now.
  *
- * Counts cookies on the REI domain and looks for a session-ish one by name. The name is not asserted
- * against a fixed list on purpose — REI can rename its cookie and the useful signal is "were there
- * credentials in the jar at all", which a count answers on its own.
+ * Reports the COUNT of cookies on the REI domain and NAMES the first few, rather than claiming to know
+ * which one is the login.
+ *
+ * It used to guess, matching names against /sess|auth|token|login|sid/ — and on the first real run it
+ * proudly reported `sessionCookies=1 [__stripe_sid]`, which is Stripe's analytics cookie caught by the
+ * "sid". A number that says "1 session cookie" when there is none would read as reassuring on exactly the
+ * log line being examined after a logout. That is the WhatsApp doctor failure again: a diagnostic
+ * reporting the wrong state is worse than one reporting nothing.
+ *
+ * So it does not guess. The count answers the question that matters — were there credentials in the jar
+ * at all — and the names let a person see what is actually there without the tool pretending to know
+ * which of them REI cares about.
+ *
+ * Third-party names are listed last, so the REI-looking ones are the ones that fit in the line.
  */
 export async function describeReiCookies(context) {
   try {
     const all = await context.cookies();
     const mine = all.filter((c) => String(c.domain || '').includes('reiblackbook'));
-    const session = mine.filter((c) => /sess|auth|token|login|sid/i.test(String(c.name || '')));
+    const thirdParty = (n) => /^_|^__/.test(String(n || ''));
+    const names = mine
+      .map((c) => String(c.name || ''))
+      .sort((a, b) => (thirdParty(a) ? 1 : 0) - (thirdParty(b) ? 1 : 0));
     const expiring = mine
       .filter((c) => typeof c.expires === 'number' && c.expires > 0)
       .sort((a, b) => a.expires - b.expires)[0];
     return {
       total: mine.length,
-      session: session.length,
-      names: session.map((c) => c.name).slice(0, 5),
+      names: names.slice(0, 6),
       soonestExpiry: expiring ? new Date(expiring.expires * 1000).toISOString() : ''
     };
   } catch (error) {
-    return { total: -1, session: -1, names: [], soonestExpiry: '', error: String(error.message || error) };
+    return { total: -1, names: [], soonestExpiry: '', error: String(error.message || error) };
   }
 }
 
 /** Record the state the browser opened in, and arm the close/exit records. */
 export async function noteReiSessionOpen(context, profileDir) {
   const c = await describeReiCookies(context);
-  line(`OPEN   profile=${profileDir}  reiCookies=${c.total}  sessionCookies=${c.session}` +
+  line(`OPEN   profile=${profileDir}  reiCookies=${c.total}` +
     (c.names.length ? `  [${c.names.join(', ')}]` : '') +
     (c.soonestExpiry ? `  soonestExpiry=${c.soonestExpiry}` : '') +
     (c.error ? `  cookieReadError=${c.error}` : ''));

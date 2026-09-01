@@ -39,7 +39,17 @@ const BROWSER = strip(read('twin-visit-logger-sandbox/src/rei/browser.mjs'));
 
 console.log('=== It records the three things that distinguish the causes ===');
 check('cookie count at open', /OPEN\s+profile=/.test(LOG) && /reiCookies=/.test(LOG), true);
-check('whether a session cookie was among them', /sessionCookies=/.test(LOG), true);
+/*
+ * It reports the NAMES rather than claiming which is the login. The first live run of the guessing
+ * version announced `sessionCookies=1 [__stripe_sid]` — Stripe's analytics cookie, caught by the "sid" —
+ * which would read as reassuring on exactly the line being examined after a logout.
+ */
+// Negative checked against the COMMENT-STRIPPED source: the comment above explains the old
+// `sessionCookies=1 [__stripe_sid]` line, so testing the raw file would fail on the explanation of the
+// very thing being asserted gone. Fourth time this project has been caught by a comment matching a test.
+check('it names the cookies instead of guessing which is the login',
+  /names: names\.slice\(0, 6\)/.test(log) && !/sessionCookies=/.test(log), true);
+check('...and does not claim a session-cookie count', /const session = mine\.filter/.test(log), false);
 check('whether the context closed', /CLOSE\s+context closed/.test(LOG), true);
 check('what REI answered', /AUTH\s+REI accepted the session/.test(LOG) && /AUTH\s+REI showed a login page/.test(LOG), true);
 
