@@ -880,6 +880,23 @@ function maybeCreateVisitEvent_(map, addr, rowNum) {
     if (!cal) return 'calendar not found / not shared';
     if (!map['Visit Date']) return 'no visit date — event skipped';
 
+    /*
+     * A parked row has no address yet, only 'PENDING REI LOOKUP — (phone)' standing in for one.
+     *
+     * Without this guard an event appears on Juan's calendar titled 'Property Visit - PENDING REI
+     * LOOKUP — (415) 770-8107', with that string as its location, and the drive-time lookup tries to
+     * route to it. The rule is already the project's: do not create a Calendar event without a valid
+     * appointment start AND a property address — and a placeholder is not an address.
+     *
+     * It sits at the single choke point on purpose, so it also covers a person editing Visit Date on a
+     * parked row in the sheet, which fires syncVisitCalendar_ and had exactly this fault today. The
+     * event is created on the PC's pass, once the real address is known.
+     */
+    if (typeof PENDING_REI_PREFIX === 'string' &&
+        String(addr || '').indexOf(PENDING_REI_PREFIX) === 0) {
+      return 'address not known yet (parked for REI lookup) — event skipped until the PC fills it in';
+    }
+
     const day = new Date(map['Visit Date']);
     var start = (typeof visitStartsAt_ === 'function') ? visitStartsAt_(map, day) : null;
     const timed = !!start;
@@ -1146,7 +1163,14 @@ function webIntake_(lead) {
     'Assigned Visitor': g('Assigned Visitor', 'visitor'),
     'Visit Status': 'Scheduled', 'Current Stage': 'Visit Scheduled',
     'Next Action': 'Conduct scheduled visit & log outcome',
-    'Next Action Due Date': g('Visit Date', 'visitDate')
+    'Next Action Due Date': g('Visit Date', 'visitDate'),
+    /*
+     * Pass-throughs, so a caller that parks a row can flag it the way the booking form does — Incomplete,
+     * with the '[since ...]' stamp the BEING ADDED card subtracts to show how long it has been waiting.
+     * The loop below skips empty values, so every existing caller is unaffected.
+     */
+    'Data Quality Status': g('Data Quality Status', 'dataQuality'),
+    'Exception Reason': g('Exception Reason', 'exceptionReason')
   };
   const R = new RowAccessor_(sh, row);
   Object.keys(map).forEach(function(h){ var v = map[h]; if (v === '' || v == null) return; if (h.indexOf('Date') >= 0) R.set(h, new Date(v)); else R.set(h, v); });

@@ -82,21 +82,48 @@ function processIntakeInbox_() {
      * never filled that column. Silence made them invisible — Status stayed blank, so the tab looked
      * like nothing had arrived, while the dashboard showed nothing because no Data row was ever made.
      *
-     * A genuinely empty row is still skipped quietly. A row with real content but no address is now
-     * MARKED, because an address is the one thing that cannot be worked around: no address means no
-     * tracker row and no calendar event, and nobody can be sent to a house that was never named.
+     * A genuinely empty row is still skipped quietly.
+     *
+     * A row with a PHONE but no address is now PARKED, not rejected — the same thing the dashboard's
+     * booking form does with `PENDING REI LOOKUP — (phone)`, so the office PC looks the contact up in
+     * REI and fills in the address, the notes, the owner and the REI link on its next pass.
+     *
+     * This was the same situation reaching two different outcomes. The booking form was built for a
+     * colleague who has the phone in front of them and would have to go into REI to fetch the address —
+     * exactly the errand the form exists to remove — and it parks. This tab rejected. And the tab is
+     * what the voice-AI path writes into, on a Chat card whose own words are "No address on file — add
+     * it after the time": the address is OPTIONAL by design there, so every reply without one produced
+     * a rejection. Nine of them were sitting in this tab, each a booking that reached neither the board
+     * nor Juan's calendar.
+     *
+     * A row with NEITHER an address nor anything to look one up with is still marked, because then
+     * there genuinely is nothing to be done with it: nobody can be sent to a house that was never
+     * named, and there is no way to find out which house it was.
      */
+    var lookupKey = String(inboxGet_(row, idx, 'Phone') ||
+                           inboxGet_(row, idx, 'REI BlackBook Link') || '').trim();
+    var parked = '';
     if (!addr && !body) {
       var hasSomething = ['Seller Name', 'Phone', 'Email', 'Visit Date', 'Visit Time']
         .some(function (f) { return String(inboxGet_(row, idx, f)).trim(); });
-      if (hasSomething) {
+      if (!hasSomething) continue;                                     // blank row — skip
+      if (!lookupKey) {
         sh.getRange(rowNum, idx['Status'] + 1)
-          .setValue('NOT LOGGED: no Property Address — fill it in on this row, then re-run');
+          .setValue('NOT LOGGED: no Property Address and no phone to look one up with — ' +
+                    'add either on this row, CLEAR THIS CELL, then re-run');
         if (idx['Processed At'] != null) sh.getRange(rowNum, idx['Processed At'] + 1).setValue(new Date());
         processed++; errors++;
+        continue;
       }
-      continue;
-    }                                    // blank row — skip
+      /*
+       * The placeholder is not cosmetic. webIntake_ finds the next free row by looking for a blank
+       * Property Address, so a genuinely blank one would be handed out again to the next booking and
+       * overwritten. Same reasoning as webAddRecordLocked_, and the prefix must match PENDING_REI_PREFIX
+       * or the office PC will not recognise the row as one to look up.
+       */
+      parked = PENDING_REI_PREFIX + ' ' + lookupKey;
+      addr = parked;
+    }
     // Respect hands-off tags — never auto-log these contacts.
     var tags = String(inboxGet_(row, idx, 'Tags')).toLowerCase();
     var blocked = INTAKE_SKIP_TAGS.filter(function (t) { return tags.indexOf(t) >= 0; });
@@ -119,6 +146,18 @@ function processIntakeInbox_() {
       'REI BlackBook Link': inboxGet_(row, idx, 'REI BlackBook Link'),
       'Task Body': body
     };
+    /*
+     * A parked row is flagged the same way the booking form flags one, so it reads as visibly unfinished
+     * on the board rather than as a complete record with a strange address — and so the BEING ADDED card
+     * can count how long it has been waiting. The timestamp goes inside the TEXT because Created Date and
+     * Last Updated Date are both midnight-only dates; the card subtracts this ISO instant instead.
+     */
+    if (parked) {
+      lead['Property Address'] = parked;
+      lead['Data Quality Status'] = 'Incomplete';
+      lead['Exception Reason'] = 'Waiting for the PC to read REI and fill in the address and details.' +
+        ' [since ' + new Date().toISOString() + ']';
+    }
     var res;
     try { res = webIntake_(lead); } catch (e) { res = { ok: false, error: String(e) }; }
     sh.getRange(rowNum, idx['Status'] + 1).setValue(
