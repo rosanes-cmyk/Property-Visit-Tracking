@@ -391,7 +391,26 @@ function webRescheduleRow_(row, params) {
 
   stamp_(R);
   R.flush();
-  if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
+  /*
+   * Through runHandler_, exactly as webAction does — and NOT `onVisitStatus_(new RowAccessor_(sh, row))`,
+   * which is what stood here and was broken twice over.
+   *
+   * THE CALENDAR NEVER MOVED. This is the Book / reschedule form: a colleague changes the date, the board
+   * shows the new date, and Juan's calendar still holds the old slot. Nothing in this function called
+   * syncVisitCalendar_, and no onEdit fires for a dashboard write, so there was no path by which the event
+   * could follow the row. Reported by the client as "reschedule is not working", which it was not.
+   *
+   * AND THE HANDLER'S WRITES WERE THROWN AWAY. onVisitStatus_ sets Current Stage, Next Action and
+   * Next Action Due Date on the accessor it is given — and that accessor, created inline here, was never
+   * flushed. Every one of those writes was discarded. So a reschedule also silently skipped the stage
+   * cascade and the visitor's Task Queue reminder kept whatever the row had before.
+   *
+   * runHandler_ is the piece that gets both right: handler(R), then R.flush(), then syncVisitCalendar_.
+   * The else branch matters just as much — a plain date change sends no Visit Status at all, and that is
+   * the commonest reschedule there is.
+   */
+  if (params['Visit Status']) runHandler_(onVisitStatus_, sh, row);
+  else syncVisitCalendar_(sh, row);
   SpreadsheetApp.flush();
   return { ok: true, updated: true, row: row, changed: changed,
     id: R.get('Property ID'), seller: R.get('Seller Name'), data: webGetData() };
