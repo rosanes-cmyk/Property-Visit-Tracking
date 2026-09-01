@@ -579,11 +579,42 @@ async function main() {
         // matching runs. The line that used to sit here assigned the field to itself and did nothing.
       }
 
-      const calendarEventId = await syncCalendarEvent(auth, visit, match.calendarEventId || '');
+      /*
+       * A calendar failure must not throw the ADDRESS away.
+       *
+       * This threw and the per-row catch marked the whole row failed — for a booking where REI had already
+       * answered with "123 Main Street, Test, Test, CA, 95446" and eight notes. The row kept its
+       * placeholder and went back on the board to fail identically on every later run, and the one thing
+       * it had successfully learned was discarded each time.
+       *
+       * The calendar is one of four things this does; the other three are worth keeping on their own. So a
+       * failure here is recorded on the row and the run carries on to write it. A visit with an address and
+       * no event is a lead the team can work and somebody can put in the diary by hand; a row still reading
+       * PENDING REI LOOKUP is neither.
+       */
+      let calendarEventId = '';
+      let calendarProblem = '';
+      try {
+        calendarEventId = await syncCalendarEvent(auth, visit, match.calendarEventId || '');
+      } catch (error) {
+        calendarProblem = String(error.message || error);
+        console.log(`    calendar event NOT created: ${calendarProblem}`);
+        console.log('    the row is still filled in below — only the calendar entry is missing.');
+      }
       visit.calendarEventId = calendarEventId;
       const written = await upsertVisit(auth, visit, match);
       console.log(`    filled row ${written?.rowNumber ?? '?'}` +
         ` · calendar event ${calendarEventId ? 'set' : 'NOT created (no valid time yet)'}`);
+      /*
+       * On the row, not only in a log nobody opens. The reason a visit is missing from the calendar has to
+       * be somewhere the person looking at the board can see it — that lesson has been learned twice here
+       * already.
+       */
+      if (calendarProblem) {
+        await noteParkReason(sheets, headers, row,
+          `Filled in from REI, but no calendar event: ${calendarProblem} `
+          + 'Check Visit Date and Visit Time on this row.');
+      }
 
       /*
        * Clear the "waiting" flag, or the finished row is branded an Exception for ever.

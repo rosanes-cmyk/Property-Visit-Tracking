@@ -305,8 +305,20 @@ function notifyNewBookings() {
     var id = String(rec['Property ID'] || '').trim();
     if (!id || !rec['Property Address']) return;
     if (String(rec['Source']).trim() === 'TEST') return;
-    ids.push(id);
-    if (seen[id]) return;
+    /*
+     * Keyed on the ID *and* the address, because a Property ID gets REUSED.
+     *
+     * nextPropertyId_ hands out the next free number, so deleting a row frees its ID and the next booking
+     * inherits it. The watcher had already seen that ID, so it treated a brand-new lead as old and said
+     * nothing. That is exactly what happened to the client: they deleted a test row, the next booking came
+     * back as TVL-1397, and it was never announced.
+     *
+     * The address makes the key unique to the actual lead. A reissued ID at a different property is a
+     * different key and gets its card; the same lead re-read on the next run is the same key and does not.
+     */
+    var key = id + '|' + String(rec['Property Address'] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+    ids.push(key);
+    if (seen[key]) return;
     if (rec['Current Stage'] === 'Lost / Closed Out') return;   // nothing to action
     fresh.push({
       id: id,
@@ -322,10 +334,23 @@ function notifyNewBookings() {
   });
 
   var isFirstRun = (stored === null);
+  /*
+   * The stored list is from BEFORE the key changed — re-seed instead of announcing everything.
+   *
+   * The old keys were bare Property IDs and the new ones carry the address after a '|'. Without this, the
+   * first run after the change would match nothing, decide every row in the tracker is a brand-new
+   * booking, and post a card for all four hundred of them into the team's Space. That is the single most
+   * damaging thing this function could do, and it would be irreversible.
+   *
+   * Detected by the absence of '|' in what was stored rather than by a version number: the format IS the
+   * marker, so there is nothing to forget to bump.
+   */
+  var isReseed = !isFirstRun && ids.length > 0 && String(stored || '').indexOf('|') < 0;
   props.setProperty(CHAT_SEEN_PROP, ids.slice(-1500).join(','));
 
-  if (isFirstRun) {
-    logAuto_('CHAT', '', 'New-booking watcher seeded with ' + ids.length + ' existing record(s); nothing posted.');
+  if (isFirstRun || isReseed) {
+    logAuto_('CHAT', '', 'New-booking watcher ' + (isReseed ? 're-seeded (key format changed)' : 'seeded')
+      + ' with ' + ids.length + ' existing record(s); nothing posted.');
     return { posted: 0, seeded: true };
   }
   if (!fresh.length) return { posted: 0, seeded: false };

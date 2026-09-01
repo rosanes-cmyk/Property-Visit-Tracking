@@ -1810,6 +1810,36 @@ var STAGES_BEFORE_OFFER = ['', 'Visit Scheduled', 'Visit Completed — Needs Rev
  * since that is already [there]." Right — and creating duplicates would have broken the rule this
  * project holds everywhere else, while double-counting the lead in every number at the top of the board.
  */
+/**
+ * A Visit Time the sheet will DISPLAY as a time.
+ *
+ * Sheets stores a time-only value as a fraction of a day on its 1899-12-30 epoch. Write a Date into the
+ * cell and, if that column happens to carry a date format, it shows "12/30/1899" — the epoch day, with the
+ * clock nowhere on screen. The client saw exactly that on a new booking, and it is the same epoch that
+ * once printed "Sat Dec 30 1899" on a Chat card.
+ *
+ * Worse than ugly: the office PC reads DISPLAY values, so what reached it was the literal text
+ * "12/30/1899" with no time in it at all. It could not build an appointment from that, so the calendar
+ * event was refused and the whole row failed — for a booking whose address REI had answered perfectly.
+ *
+ * Storing the clock as TEXT is what a person typing on the form produces anyway, so this makes the
+ * automated path match the manual one instead of quietly diverging from it. timeCell_ already handles the
+ * three shapes a time arrives in (a Date, a day-fraction, or typed text) and hands back "2:00 PM".
+ *
+ * Anything it cannot read is passed through untouched rather than blanked — a value nobody can parse is
+ * still somebody's data, and losing it would be worse than displaying it oddly.
+ */
+function timeValue_(v) {
+  if (v === '' || v == null) return v;
+  try {
+    if (typeof timeCell_ === 'function') {
+      var s = timeCell_(v);
+      if (s) return s;
+    }
+  } catch (e) { /* fall through to the raw value */ }
+  return v;
+}
+
 function webRescheduleRow_(row, params) {
   var sh = dataSheet_();
   var R = new RowAccessor_(sh, row);
@@ -1819,7 +1849,9 @@ function webRescheduleRow_(row, params) {
     'Lead Source', 'Next Action', 'Next Action Due Date', 'REI BlackBook Link', 'Phone'
   ].forEach(function (h) {
     if (params[h] === undefined || params[h] === '') return;
-    var value = h.indexOf('Date') >= 0 ? new Date(params[h]) : params[h];
+    var value = h === 'Visit Time' ? timeValue_(params[h])
+      : h.indexOf('Date') >= 0 ? new Date(params[h])
+      : params[h];
     var before = R.get(h);
     R.set(h, value);
     if (String(before) !== String(value)) changed.push(h);
@@ -1944,7 +1976,9 @@ function webAddRecordLocked_(params) {
     'Next Action','Next Action Due Date','REI BlackBook Link','Data Quality Status','Exception Reason'];
   map.forEach(function(h){
     if (params[h] === undefined || params[h] === '') return;
-    if (h.indexOf('Date') >= 0) R.set(h, new Date(params[h])); else R.set(h, params[h]);
+    if (h === 'Visit Time') R.set(h, timeValue_(params[h]));
+    else if (h.indexOf('Date') >= 0) R.set(h, new Date(params[h]));
+    else R.set(h, params[h]);
   });
   R.set('Property ID', nextPropertyId_());
   R.set('Source', 'Manual');
@@ -2552,7 +2586,13 @@ function webIntake_(lead) {
   if (dup) {
     const U = new RowAccessor_(sh, dup.rowNum);
     var updated = [];
-    var up = function(h, v){ if (v !== '' && v != null) { if (h.indexOf('Date') >= 0) U.set(h, new Date(v)); else U.set(h, v); updated.push(h); } };
+    var up = function(h, v){
+      if (v === '' || v == null) return;
+      if (h === 'Visit Time') U.set(h, timeValue_(v));
+      else if (h.indexOf('Date') >= 0) U.set(h, new Date(v));
+      else U.set(h, v);
+      updated.push(h);
+    };
     up('Last Contact Result', g('Last Contact Result', 'note') || g('Notes', 'notes') || g('Status update', 'statusUpdate'));
     up('Visit Status', g('Visit Status', 'visitStatus'));
     up('Current Stage', g('Current Stage', 'stage'));
@@ -2596,7 +2636,13 @@ function webIntake_(lead) {
     'Exception Reason': g('Exception Reason', 'exceptionReason')
   };
   const R = new RowAccessor_(sh, row);
-  Object.keys(map).forEach(function(h){ var v = map[h]; if (v === '' || v == null) return; if (h.indexOf('Date') >= 0) R.set(h, new Date(v)); else R.set(h, v); });
+  Object.keys(map).forEach(function(h){
+    var v = map[h];
+    if (v === '' || v == null) return;
+    if (h === 'Visit Time') R.set(h, timeValue_(v));
+    else if (h.indexOf('Date') >= 0) R.set(h, new Date(v));
+    else R.set(h, v);
+  });
   R.set('Property ID', nextPropertyId_());
   R.set('Source', CFG.SANDBOX ? 'Intake-Sandbox' : 'Intake');
   R.set('Created Date', today_());
@@ -3796,8 +3842,20 @@ function notifyNewBookings() {
     var id = String(rec['Property ID'] || '').trim();
     if (!id || !rec['Property Address']) return;
     if (String(rec['Source']).trim() === 'TEST') return;
-    ids.push(id);
-    if (seen[id]) return;
+    /*
+     * Keyed on the ID *and* the address, because a Property ID gets REUSED.
+     *
+     * nextPropertyId_ hands out the next free number, so deleting a row frees its ID and the next booking
+     * inherits it. The watcher had already seen that ID, so it treated a brand-new lead as old and said
+     * nothing. That is exactly what happened to the client: they deleted a test row, the next booking came
+     * back as TVL-1397, and it was never announced.
+     *
+     * The address makes the key unique to the actual lead. A reissued ID at a different property is a
+     * different key and gets its card; the same lead re-read on the next run is the same key and does not.
+     */
+    var key = id + '|' + String(rec['Property Address'] || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+    ids.push(key);
+    if (seen[key]) return;
     if (rec['Current Stage'] === 'Lost / Closed Out') return;   // nothing to action
     fresh.push({
       id: id,
@@ -3813,10 +3871,23 @@ function notifyNewBookings() {
   });
 
   var isFirstRun = (stored === null);
+  /*
+   * The stored list is from BEFORE the key changed — re-seed instead of announcing everything.
+   *
+   * The old keys were bare Property IDs and the new ones carry the address after a '|'. Without this, the
+   * first run after the change would match nothing, decide every row in the tracker is a brand-new
+   * booking, and post a card for all four hundred of them into the team's Space. That is the single most
+   * damaging thing this function could do, and it would be irreversible.
+   *
+   * Detected by the absence of '|' in what was stored rather than by a version number: the format IS the
+   * marker, so there is nothing to forget to bump.
+   */
+  var isReseed = !isFirstRun && ids.length > 0 && String(stored || '').indexOf('|') < 0;
   props.setProperty(CHAT_SEEN_PROP, ids.slice(-1500).join(','));
 
-  if (isFirstRun) {
-    logAuto_('CHAT', '', 'New-booking watcher seeded with ' + ids.length + ' existing record(s); nothing posted.');
+  if (isFirstRun || isReseed) {
+    logAuto_('CHAT', '', 'New-booking watcher ' + (isReseed ? 're-seeded (key format changed)' : 'seeded')
+      + ' with ' + ids.length + ' existing record(s); nothing posted.');
     return { posted: 0, seeded: true };
   }
   if (!fresh.length) return { posted: 0, seeded: false };

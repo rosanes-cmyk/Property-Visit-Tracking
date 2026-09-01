@@ -11,8 +11,16 @@ rem was reilogin3.mjs and put the OLD file back. Six files across three folders 
 rem hand at the end of a long day.
 rem
 rem So this takes the NEWEST download matching each pattern and puts it where it belongs, under its proper
-rem name. It says exactly what it did, and MISSING for anything not downloaded — a file you did not save is
-rem not an error, it just was not part of this update.
+rem name.
+rem
+rem SORTED BY CreationTime, NOT LastWriteTime, and that distinction cost a file. A download keeps the
+rem timestamp of the file it came from, so LastWriteTime is when the file was WRITTEN, not when it arrived
+rem here. Sorting by it picked reilogin3.mjs, dated 6 August, over a copy saved minutes earlier — and
+rem cheerfully installed the old login script over the good one. CreationTime is when it landed in
+rem Downloads, which is the thing actually being asked for.
+rem
+rem It says exactly what it did, and MISSING for anything not downloaded — a file you did not save is not
+rem an error, it just was not part of this update.
 rem
 rem Safe to run twice: copying the same file again changes nothing.
 rem
@@ -45,12 +53,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  'CopyUpdates*.cmd'    = 'scripts\CopyUpdates.cmd'" ^
   "};" ^
   "foreach ($k in $map.Keys) {" ^
-  "  $src = Get-ChildItem (Join-Path $dl $k) -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1;" ^
+  "  $src = Get-ChildItem (Join-Path $dl $k) -ErrorAction SilentlyContinue | Sort-Object CreationTime -Descending | Select-Object -First 1;" ^
   "  if (-not $src) { Write-Host ('  MISSING  ' + $k + '  (not downloaded - skipped)'); continue }" ^
   "  $dest = Join-Path $app $map[$k];" ^
   "  New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null;" ^
   "  Copy-Item $src.FullName $dest -Force;" ^
-  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $map[$k] + '   (' + $src.LastWriteTime.ToString('MMM d HH:mm') + ')')" ^
+  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $map[$k] + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')')" ^
   "}"
 
 echo.
