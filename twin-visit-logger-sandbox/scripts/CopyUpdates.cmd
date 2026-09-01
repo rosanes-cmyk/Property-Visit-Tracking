@@ -45,6 +45,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  'fillpendingrei*.mjs' = 'scripts\fill-pending-rei.mjs';" ^
   "  'recheckrei*.mjs'     = 'scripts\recheck-rei.mjs';" ^
   "  'reilogin*.mjs'       = 'scripts\rei-login.mjs';" ^
+  "  'sweepparked*.mjs'    = 'scripts\sweep-parked.mjs';" ^
+  "  'scraper*.mjs'        = 'src\rei\scraper.mjs';" ^
   "  'sessionlog*.mjs'     = 'src\rei\session-log.mjs';" ^
   "  'browser*.mjs'        = 'src\rei\browser.mjs';" ^
   "  'priority*.mjs'       = 'src\utils\priority.mjs';" ^
