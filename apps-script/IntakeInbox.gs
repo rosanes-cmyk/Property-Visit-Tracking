@@ -9,9 +9,25 @@
  * nothing is ever sent to a seller.
  */
 
+/*
+ * 'REI BlackBook Link' is APPENDED, after the columns the script writes back, so no existing column
+ * moves and ensureIntakeInbox_ can add it to a live tab without touching what is already there.
+ *
+ * It was the one field the tracker needs that this contract had no way to carry, and its absence was not
+ * cosmetic. A row that arrives with a real address is never looked up by fill-pending-rei.mjs (that only
+ * takes rows carrying the PENDING REI LOOKUP placeholder), and recheck.mjs returns 'no REI link' and
+ * skips any row without one. So a booking from the phone path landed in a dead zone: complete enough to
+ * look finished, and permanently invisible to the REI sweep — no stage changes, no gift tracking, no
+ * owner corrections, no cancellation detection, and nothing anywhere saying so.
+ *
+ * Found on TVL-1397, whose calendar event read "REI:" with nothing after it.
+ *
+ * webIntake_ already maps this header into the Data row, so nothing downstream needed changing — the
+ * field simply had no way in.
+ */
 var INTAKE_INBOX_HEADERS = ['Timestamp', 'Seller Name', 'Phone', 'Email', 'Property Address',
   'Visit Date', 'Visit Time', 'Assigned Visitor', 'Lead Source', 'Task Body', 'Tags',
-  'Status', 'Property ID', 'Processed At'];
+  'Status', 'Property ID', 'Processed At', 'REI BlackBook Link'];
 
 // Contacts carrying any of these tags are NEVER auto-logged. Only an explicit hands-off flag.
 // (Empty this array to log everything.)
@@ -98,6 +114,9 @@ function processIntakeInbox_() {
       'Visit Time': inboxGet_(row, idx, 'Visit Time'),
       'Assigned Visitor': inboxGet_(row, idx, 'Assigned Visitor'),
       'Lead Source': inboxGet_(row, idx, 'Lead Source'),
+      // Optional, and the tab may predate the column — inboxGet_ returns '' when idx has no entry for it,
+      // and webIntake_ skips empty values, so an older Inbox tab keeps working untouched.
+      'REI BlackBook Link': inboxGet_(row, idx, 'REI BlackBook Link'),
       'Task Body': body
     };
     var res;
