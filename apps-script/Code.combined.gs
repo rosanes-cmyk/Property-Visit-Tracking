@@ -2627,6 +2627,14 @@ function webIntake_(lead) {
                    'REI BlackBook Link': U.get('REI BlackBook Link'), 'Lead Source': U.get('Lead Source'),
                    'Visit Date': U.get('Visit Date'), 'Visit Time': U.get('Visit Time') };
     var calU = maybeCreateVisitEvent_(calMap, calAddr, dup.rowNum);
+    /*
+     * The briefing goes out the moment the visit reaches the calendar — but ONLY when an event was newly
+     * created. A reschedule that merely moves an existing one stays silent, which is the client's own
+     * standing instruction about updates confusing the team.
+     */
+    if (String(calU).indexOf('event created') === 0 && typeof postVisitBriefing_ === 'function') {
+      postVisitBriefing_(dup.rowNum);
+    }
     SpreadsheetApp.flush();
     logAuto_('INTAKE', dup.id, 'Lead updated from REI webhook · ' + addr +
       (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') + ' · calendar: ' + calU);
@@ -2666,6 +2674,9 @@ function webIntake_(lead) {
   R.set('Created Date', today_());
   stamp_(R); R.flush();
   const cal = maybeCreateVisitEvent_(map, addr, row);
+  if (String(cal).indexOf('event created') === 0 && typeof postVisitBriefing_ === 'function') {
+    postVisitBriefing_(row);
+  }
   SpreadsheetApp.flush();
   logAuto_('INTAKE', R.get('Property ID'), 'New lead created from REI webhook · ' + addr +
     ' · visitor: ' + (map['Assigned Visitor'] || '(none)') + ' · visit: ' + (map['Visit Date'] ? fmt_(new Date(map['Visit Date'])) : '(none)') +
@@ -3941,6 +3952,83 @@ function buildNewBookingCard_(items) {
               subtitle: 'Added to the tracker · ' + fmt_(today_()) },
     sections: [{ widgets: widgets }]
   } }] };
+}
+
+/**
+ * The visit briefing, posted the moment a booking lands on Juan's calendar.
+ *
+ * The briefing already existed and was good — the property, the drive, the seller's number, what they
+ * said — but it only went out at 07:30 on the DAY of the visit, or when somebody ran it by hand. The
+ * client, on being told that: "no that is stupid once it add to calendar shoudl fire that one as we;;"
+ *
+ * They are right. A visit booked at 4pm for tomorrow morning left the visitor with nothing until 07:30 the
+ * next day, and a booking taken by phone can be for the same afternoon. The information exists at the
+ * moment the event is created; there is no reason to sit on it.
+ *
+ * WHY THIS SITS IN APPS SCRIPT rather than reusing the office PC's builder: bookings from the phone path
+ * reach the calendar through webIntake_, which runs in Google, not on the PC. The PC's briefing cannot
+ * fire for them at all. Two producers, one message — the shapes are deliberately kept close.
+ *
+ * SCOPE, deliberately narrow. This posts ONLY when an event was newly CREATED, and only from the booking
+ * path. It does not fire on a reschedule that merely MOVES an existing event, because that is the exact
+ * thing the client asked to be silent about — "i dont want the update for this in the chat, it will
+ * confuse my teammate" — and it does not fire from the import, the trash restore or the stage-fixer, any
+ * of which can touch many rows at once and would turn a maintenance job into a flood.
+ *
+ * It carries the seller's phone on purpose. A briefing that sends somebody to a house to meet a person
+ * they cannot ring is worse than no briefing; the destination is the team's own Space.
+ */
+function postVisitBriefing_(rowNum) {
+  try {
+    if (!chatWebhookUrl_() || !rowNum) return '';
+    var R = new RowAccessor_(dataSheet_(), rowNum);
+    var addr = String(R.get('Property Address') || '').trim();
+    if (!addr) return '';
+
+    var when = R.get('Visit Date');
+    var day = when ? fmt_(new Date(when)) : 'date not set';
+    var clock = (typeof timeCell_ === 'function' ? timeCell_(R.get('Visit Time')) : '') || 'time not set';
+    var seller = String(R.get('Seller Name') || '').trim() || '(no name)';
+    var phone = String(R.get('Phone') || '').trim();
+    var visitor = String(R.get('Assigned Visitor') || R.get('Assigned Owner') || '').trim() || 'UNASSIGNED';
+    var source = String(R.get('Lead Source') || '').trim();
+    var rei = String(R.get('REI BlackBook Link') || '').trim();
+    var maps = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+
+    var lines = [
+      '<b>' + addr + '</b>',
+      '📅 ' + day + ' · ' + clock,
+      '🧑 ' + seller + (phone ? ' · ' + phone : ''),
+      '👤 ' + visitor + (source ? ' · ' + source : '')
+    ];
+    if (visitor === 'UNASSIGNED') lines.push('⚠️ <b>Needs a visitor assigned</b>');
+
+    /* The drive time is why the calendar reminder exists; saying it here saves opening the event. */
+    var mins = 0;
+    try { mins = (typeof driveMinutes_ === 'function') ? driveMinutes_(addr) : 0; } catch (e) { mins = 0; }
+    if (mins) lines.push('🚗 about ' + mins + ' min from the office — leave in good time');
+
+    var buttons = [{ text: 'Directions', onClick: { openLink: { url: maps } } }];
+    if (rei) buttons.push({ text: 'Open in REI', onClick: { openLink: { url: rei } } });
+    var dash = dashboardUrl_();
+    if (dash) buttons.push({ text: 'Dashboard', onClick: { openLink: { url: dash } } });
+
+    var err = chatPost_({ cardsV2: [{ cardId: 'visit-booked', card: {
+      header: { title: 'Visit booked — ' + seller, subtitle: day + ' · ' + clock + ' · on the calendar now' },
+      sections: [{ widgets: [
+        { textParagraph: { text: lines.join('<br>') } },
+        { buttonList: { buttons: buttons } }
+      ] }]
+    } }] });
+    logAuto_('CHAT', R.get('Property ID'), err
+      ? ('Visit briefing FAILED: ' + err)
+      : ('Visit briefing posted for ' + seller + ' · ' + day + ' ' + clock));
+    return err ? ('briefing failed: ' + err) : 'briefing posted';
+  } catch (e) {
+    /* Never fatal. The row and the event are already correct; a message about them must not undo that. */
+    try { logAuto_('ERROR', 'postVisitBriefing_', String(e)); } catch (ignored) {}
+    return 'briefing error: ' + e;
+  }
 }
 
 /** Menu: check for new bookings now. */
