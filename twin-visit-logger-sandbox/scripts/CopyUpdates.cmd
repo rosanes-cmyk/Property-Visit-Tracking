@@ -128,35 +128,71 @@ if defined NOENV (
   echo.
 )
 
-rem One PowerShell call rather than a dozen copy lines: it can sort by date, which cmd cannot do simply,
-rem and picking the NEWEST match is the whole point.
+rem ======================================================================================================
+rem  NO PATTERN GUESSING. The wanted filename is DERIVED from the destination.
+rem
+rem  This used to carry a glob per file -- 'notes*.mjs', 'browser*.mjs' -- and globs collide. src\rei\ holds
+rem  both notes.mjs and notes-tab.mjs, and the browser strips hyphens on download, so notes-tab.mjs arrives
+rem  as notestab.mjs and 'notes*.mjs' matches it. The newest match would then be installed OVER notes.mjs:
+rem  a wrong file, under a right name, reported as COPIED. This project has already lost a file to a subtler
+rem  version of that (reilogin.mjs when the newest was reilogin3.mjs).
+rem
+rem  So the list is now just destinations, and the download name is worked out from each one: strip the
+rem  hyphens the browser strips, then allow the suffix a browser adds for a repeat download -- "2", " (2)",
+rem  "(2)". Anchored at both ends, so notestab.mjs cannot satisfy notes.mjs.
+rem
+rem  EVERY FILE IN src\rei AND src\utils IS LISTED, not only the ones being changed today. A file that is
+rem  not in this list cannot be delivered at all, and that is not theoretical: src\utils\shutdown.mjs was a
+rem  NEW file, the list had no entry for it, browser.mjs shipped importing it, and the whole automation died
+rem  with "Cannot find module ...\src\utils\shutdown.mjs". MISSING costs nothing; a gap costs everything.
+rem  tests/copy-updates-lands-in-the-app.test.mjs fails if a file appears in those folders and not here.
+rem ======================================================================================================
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$dl = Join-Path $env:USERPROFILE 'Downloads';" ^
   "$app = '%APP%';" ^
-  "$map = [ordered]@{" ^
-  "  'fillpendingrei*.mjs' = 'scripts\fill-pending-rei.mjs';" ^
-  "  'recheckrei*.mjs'     = 'scripts\recheck-rei.mjs';" ^
-  "  'reilogin*.mjs'       = 'scripts\rei-login.mjs';" ^
-  "  'sweepparked*.mjs'    = 'scripts\sweep-parked.mjs';" ^
-  "  'scraper*.mjs'        = 'src\rei\scraper.mjs';" ^
-  "  'sessionlog*.mjs'     = 'src\rei\session-log.mjs';" ^
-  "  'browser*.mjs'        = 'src\rei\browser.mjs';" ^
-  "  'priority*.mjs'       = 'src\utils\priority.mjs';" ^
-  "  'shutdown*.mjs'       = 'src\utils\shutdown.mjs';" ^
-  "  'lock*.mjs'           = 'src\utils\lock.mjs';" ^
-  "  'FinishBookings*.cmd' = 'scripts\FinishBookings.cmd';" ^
-  "  'SessionLog*.cmd'     = 'scripts\SessionLog.cmd';" ^
-  "  'WhereIsTheApp*.cmd'  = 'scripts\WhereIsTheApp.cmd';" ^
-  "  'WhereIsTheApp*.ps1'  = 'scripts\WhereIsTheApp.ps1';" ^
-  "  'CopyUpdates*.cmd'    = 'scripts\CopyUpdates.cmd'" ^
-  "};" ^
-  "foreach ($k in $map.Keys) {" ^
-  "  $src = Get-ChildItem (Join-Path $dl $k) -ErrorAction SilentlyContinue | Sort-Object CreationTime -Descending | Select-Object -First 1;" ^
-  "  if (-not $src) { Write-Host ('  MISSING  ' + $k + '  (not downloaded - skipped)'); continue }" ^
-  "  $dest = Join-Path $app $map[$k];" ^
+  "$want = @(" ^
+  "  'scripts\fill-pending-rei.mjs'," ^
+  "  'scripts\recheck-rei.mjs'," ^
+  "  'scripts\rei-login.mjs'," ^
+  "  'scripts\sweep-parked.mjs'," ^
+  "  'scripts\FinishBookings.cmd'," ^
+  "  'scripts\SessionLog.cmd'," ^
+  "  'scripts\WhereIsTheApp.cmd'," ^
+  "  'scripts\WhereIsTheApp.ps1'," ^
+  "  'scripts\CopyUpdates.cmd'," ^
+  "  'src\rei\attention-rules.mjs'," ^
+  "  'src\rei\browser.mjs'," ^
+  "  'src\rei\cancel-signal.mjs'," ^
+  "  'src\rei\expand.mjs'," ^
+  "  'src\rei\gift.mjs'," ^
+  "  'src\rei\notes-tab.mjs'," ^
+  "  'src\rei\notes.mjs'," ^
+  "  'src\rei\recheck.mjs'," ^
+  "  'src\rei\scraper.mjs'," ^
+  "  'src\rei\session-log.mjs'," ^
+  "  'src\rei\stage-map.mjs'," ^
+  "  'src\rei\task-gate.mjs'," ^
+  "  'src\rei\tasks.mjs'," ^
+  "  'src\utils\heartbeat.mjs'," ^
+  "  'src\utils\lock.mjs'," ^
+  "  'src\utils\logger.mjs'," ^
+  "  'src\utils\notify.mjs'," ^
+  "  'src\utils\paused.mjs'," ^
+  "  'src\utils\priority.mjs'" ^
+  ");" ^
+  "$have = @(Get-ChildItem $dl -File -ErrorAction SilentlyContinue);" ^
+  "foreach ($rel in $want) {" ^
+  "  $leaf = Split-Path $rel -Leaf;" ^
+  "  $flat = $leaf -replace '-','';" ^
+  "  $base = [IO.Path]::GetFileNameWithoutExtension($flat);" ^
+  "  $ext  = [IO.Path]::GetExtension($flat);" ^
+  "  $rx = '^' + [regex]::Escape($base) + '( ?\(?\d+\)?)?' + [regex]::Escape($ext) + '$';" ^
+  "  $src = $have | Where-Object { $_.Name -match $rx } | Sort-Object CreationTime -Descending | Select-Object -First 1;" ^
+  "  if (-not $src) { Write-Host ('  MISSING  ' + $leaf + '  (not downloaded - skipped)'); continue }" ^
+  "  $dest = Join-Path $app $rel;" ^
   "  New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null;" ^
   "  Copy-Item $src.FullName $dest -Force;" ^
-  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $map[$k] + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')')" ^
+  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $rel + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')')" ^
   "}"
 
 echo.

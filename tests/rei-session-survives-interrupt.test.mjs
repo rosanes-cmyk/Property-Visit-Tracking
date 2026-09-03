@@ -49,8 +49,20 @@ function check(name, got, want) {
 const read = (p) => fs.readFileSync(path.resolve(p), 'utf8');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
-const SHUT = read('twin-visit-logger-sandbox/src/utils/shutdown.mjs');
+/*
+ * The coordinator and the lock are ONE FILE now, and that was forced by delivery rather than taste.
+ *
+ * It was src/utils/shutdown.mjs, and shipping it took the client's automation down: every fix reaches that
+ * PC as a hand-copied file, the copy tool there had no entry for a file that never existed before, and
+ * browser.mjs arrived importing a module that was not on disk —
+ *
+ *     Cannot find module '...\\src\\utils\\shutdown.mjs' imported from '...\\src\\rei\\browser.mjs'
+ *
+ * — so nothing REI-related could start at all. A NEW file is the one change delivery cannot absorb here.
+ * Both names still point at lock.mjs so the assertions below read as what they check.
+ */
 const LOCK = read('twin-visit-logger-sandbox/src/utils/lock.mjs');
+const SHUT = LOCK;
 const BROWSER = read('twin-visit-logger-sandbox/src/rei/browser.mjs');
 const SESSLOG = read('twin-visit-logger-sandbox/src/rei/session-log.mjs');
 const RECHECK = read('twin-visit-logger-sandbox/scripts/recheck-rei.mjs');
@@ -63,12 +75,25 @@ console.log('=== The lock no longer kills the process out from under the browser
  * come back with it, and they present as "REI signs us out daily" rather than as anything to do with Ctrl+C
  * — which is why it went undiagnosed for a week.
  */
-check('the lock installs no signal handler of its own',
-  /process\.once\('SIGINT'|for \(const signal of \['SIGINT'/.test(strip(LOCK)), false);
-check('...and calls process.exit nowhere', /process\.exit/.test(strip(LOCK)), false);
+/*
+ * Stated as "the LOCK PATH does not exit", not "this file does not exit", because the coordinator now
+ * lives in this same file and its exit is the correct one — after the closers have run. The first version
+ * of these two assertions predated the merge and failed on correct code once the files came together.
+ *
+ * What must never come back is a handler that releases the lock and exits in the same breath, and any exit
+ * at all inside acquireLock, which is the function that runs before the browser is even open.
+ */
+check('the release-then-exit handler is gone',
+  /releaseSync\(\);\s*\n?\s*process\.exit\(/.test(strip(LOCK)), false);
+const acquire = strip(LOCK).slice(strip(LOCK).indexOf('export async function acquireLock('));
+check('...and it is a real slice, not an empty one', acquire.length > 800, true);
+check('acquireLock itself never exits the process', /process\.exit/.test(acquire), false);
+check('the signal handlers hand off to the coordinator instead',
+  /process\.on\(signal, \(\) => \{ runShutdown\(signal\); \}\);/.test(LOCK), true);
 check('it registers its release with the shutdown coordinator',
   /onShutdown\(releaseSync, \{ order: 90, sync: true/.test(LOCK), true);
-check('...and imports it', /import \{ onShutdown \} from '\.\/shutdown\.mjs';/.test(LOCK), true);
+check('...defined in the same file, so there is nothing extra to import',
+  /function runShutdown\(signal\)/.test(LOCK), true);
 // The lock still has to be released on a plain exit — that part was never wrong.
 check('the release still runs on a plain process exit (sync: true)', /sync: true/.test(LOCK), true);
 check('...and is still guarded so it cannot delete another run\'s lock',
@@ -90,7 +115,12 @@ check('a closed context deregisters itself, so a clean run leaves no stale close
   /context\.on\('close', drop\)/.test(BROWSER), true);
 
 console.log('\n=== The coordinator exits only after the closers have run ===');
-check('shutdown.mjs exists and exports onShutdown', /export function onShutdown\(/.test(SHUT), true);
+check('onShutdown is exported', /export function onShutdown\(/.test(SHUT), true);
+// The file it used to live in must STAY gone, or the copy tool's list drifts from the imports again.
+check('there is no separate shutdown.mjs to forget to copy',
+  fs.existsSync(path.resolve('twin-visit-logger-sandbox/src/utils/shutdown.mjs')), false);
+check('the browser imports it from lock.mjs',
+  /import \{ onShutdown \} from '\.\.\/utils\/lock\.mjs';/.test(BROWSER), true);
 // Awaited in a loop, so an async close (the browser) genuinely completes before the exit below it.
 check('each closer is awaited', /await h\.fn\(\);/.test(SHUT), true);
 check('the exit happens after the wait, not before',
@@ -149,7 +179,7 @@ console.log('\n=== It is RUN, not just read: a real signal, a real ordered clean
   const probe = path.join(SANDBOX, 'shutdown-probe.mjs');
   const out = path.join(dir, 'order.txt');
   fs.writeFileSync(probe, `
-import { onShutdown } from './src/utils/shutdown.mjs';
+import { onShutdown } from './src/utils/lock.mjs';
 import fs from 'node:fs';
 const OUT = process.argv[2];
 onShutdown(async () => {

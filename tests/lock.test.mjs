@@ -157,8 +157,22 @@ try {
    * tripping on the comment explaining the removal. A negative assertion has to read the code only.
    */
   const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  check('the lock no longer calls process.exit itself', /process\.exit/.test(CODE), false);
-  check('...and installs no signal handler of its own', /'SIGINT'/.test(CODE), false);
+  /*
+   * Scoped to acquireLock, because the shutdown coordinator now lives in this same file and its exit is
+   * the CORRECT one — it runs after the browser has closed. It was moved in from src/utils/shutdown.mjs
+   * after that new file took the client's automation down: every fix reaches their PC as a hand-copied
+   * file, and the copy tool there had no entry for a file that had never existed, so browser.mjs arrived
+   * importing a module that was not on disk.
+   *
+   * So the rule is not "this file never exits". It is "the lock path never exits" — acquireLock runs
+   * before the browser is even open, and an exit there is what killed Chromium mid-write.
+   */
+  const ACQUIRE = CODE.slice(CODE.indexOf('export async function acquireLock('));
+  check('...and it is a real slice, not an empty one', ACQUIRE.length > 800, true);
+  check('acquireLock never calls process.exit itself', /process\.exit/.test(ACQUIRE), false);
+  check('...and installs no signal handler of its own', /'SIGINT'/.test(ACQUIRE), false);
+  check('the release-then-exit handler that cost the REI session is gone',
+    /releaseSync\(\);\s*\n?\s*process\.exit\(/.test(CODE), false);
   /*
    * The guard that makes the cleanup safe rather than dangerous: without it, this process releases the lock,
    * another takes it, this one later exits — and deletes the OTHER run's lock file. Two browsers on one REI

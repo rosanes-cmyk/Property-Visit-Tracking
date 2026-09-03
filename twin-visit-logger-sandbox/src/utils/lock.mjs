@@ -1,7 +1,147 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { onShutdown } from './shutdown.mjs';
+
+/*
+ * ======================================================================================================
+ *  THE SHUTDOWN COORDINATOR LIVES HERE, IN THE LOCK, AND IT IS WHY REI KEPT SIGNING ITSELF OUT.
+ * ======================================================================================================
+ *
+ * What stood below was the lock's own signal handling, ending in process.exit():
+ *
+ *     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+ *       process.once(signal, () => { releaseSync(); process.exit(signal === 'SIGINT' ? 130 : 143); });
+ *     }
+ *
+ * The lock is acquired BEFORE the browser opens, so that handler was always first in line, and
+ * process.exit() ends the process on the spot: no `finally`, no `await context.close()`, no Playwright
+ * cleanup. Chromium was killed rather than shut down.
+ *
+ * Chromium keeps cookies in memory and writes them to the profile's `Cookies` database on a lazy timer
+ * and, in full, on a GRACEFUL shutdown. Kill it and whatever the REI session cookie had become since the
+ * last commit is gone — the profile reverts to a value REI has already rotated past, and the next run is
+ * redirected to the login page. Nothing errors; the sweep just reads 0 of 20 leads with 20 login
+ * redirects. Every Ctrl+C, every Task Scheduler stop, every closed console window cost the REI login.
+ *
+ * The fix is that the exit now happens only after registered closers have run, in order:
+ *
+ *     order 10   the browser   `await context.close()`, which flushes the cookie database
+ *     order 90   the lock      released last, so nothing can open the profile while Chromium is closing
+ *
+ * WHY IT IS IN THIS FILE RATHER THAN ITS OWN.
+ *
+ * It WAS its own file, src/utils/shutdown.mjs, and that shipped a broken app to the client's PC. Every fix
+ * in this project reaches that machine as a hand-copied file, and the copy tool there did not know about a
+ * file that had never existed before — so browser.mjs arrived importing a module that was not there:
+ *
+ *     Cannot find module '...\src\utils\shutdown.mjs' imported from '...\src\rei\browser.mjs'
+ *
+ * and nothing REI-related could start at all. A NEW file is the one kind of change that delivery cannot
+ * absorb, and this is not a hypothetical: it happened, and it took the whole automation down.
+ *
+ * So it sits in the module that already owned the signal handling, is already imported by every script,
+ * and is already in the copy tool's list. That is a delivery constraint driving a design decision, which
+ * is worth being honest about — and on the merits it is no worse: the lock and the browser close are two
+ * halves of one ordered shutdown, and they are now described in one place.
+ */
+
+const handlers = new Set();
+let installed = false;
+let shuttingDown = false;
+
+/*
+ * Long enough for Chromium to close (it takes a second or two, more with several tabs open), short enough
+ * that Ctrl+C never feels ignored. Past this we exit anyway — losing the cookie flush is bad, but leaving
+ * somebody unable to stop a run is worse, and they will reach for Task Manager and lose it regardless.
+ */
+const SHUTDOWN_BUDGET_MS = 10_000;
+
+/**
+ * Register something to run before the process exits on a signal.
+ *
+ * Returns a deregister function — call it on the normal path, so a context that has already been closed by
+ * its own `finally` is not closed a second time.
+ *
+ * `sync` marks a handler that can also run on plain process exit, where nothing can be awaited. The lock
+ * release is one; closing a browser is not, which is the whole reason this file exists.
+ */
+export function onShutdown(fn, { order = 50, sync = false, label = '' } = {}) {
+  const entry = { fn, order, sync, label };
+  handlers.add(entry);
+  install();
+  return () => handlers.delete(entry);
+}
+
+function ordered() {
+  return [...handlers].sort((a, b) => a.order - b.order);
+}
+
+async function runShutdown(signal) {
+  /*
+   * A second signal exits immediately. Somebody pressing Ctrl+C twice is telling us to stop asking, and
+   * honouring that is what keeps them from killing the process a way that skips this entirely.
+   */
+  if (shuttingDown) process.exit(signal === 'SIGINT' ? 130 : 143);
+  shuttingDown = true;
+
+  const label = signal === 'SIGINT' ? 'Ctrl+C' : signal;
+  console.log(`\n${label} — closing the browser properly before exiting. This matters: killing Chromium`);
+  console.log('loses the REI login, which is what kept signing this machine out. One moment...');
+
+  const work = (async () => {
+    for (const h of ordered()) {
+      /*
+       * Removed BEFORE it runs, not after, and each handler runs at most once across both paths.
+       *
+       * A signal handler is followed by the 'exit' handler below, so a closer registered as `sync` was
+       * called twice — the lock release was, in a live check. It is idempotent so nothing broke, but a
+       * closer that is not would have run twice with no sign of it, and "cleanup ran twice" is a nasty
+       * class of bug to go looking for later. Removing it first also means a closer that hangs until the
+       * budget expires is not then re-run on the way out.
+       */
+      handlers.delete(h);
+      try { await h.fn(); } catch (error) {
+        console.warn(`  could not ${h.label || 'clean up'}: ${error.message}`);
+      }
+    }
+  })();
+
+  let timedOut = false;
+  await Promise.race([
+    work,
+    new Promise((resolve) => { setTimeout(() => { timedOut = true; resolve(); }, SHUTDOWN_BUDGET_MS); })
+  ]);
+  if (timedOut) {
+    console.warn(`  Chromium did not close within ${SHUTDOWN_BUDGET_MS / 1000}s — exiting anyway.`);
+    console.warn('  If REI asks you to sign in on the next run, that is why.');
+  } else {
+    console.log('  Closed cleanly. The REI session is saved.');
+  }
+  process.exit(signal === 'SIGINT' ? 130 : 143);
+}
+
+function install() {
+  if (installed) return;
+  installed = true;
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => { runShutdown(signal); });
+  }
+  /*
+   * Plain exit — an uncaught throw, or a process.exit() somewhere. Nothing can be awaited here, so only the
+   * sync handlers run. The browser CANNOT be closed from here, which is precisely why the signal path above
+   * must not be short-circuited by an exit() call of its own.
+   */
+  process.on('exit', () => {
+    for (const h of ordered()) {
+      if (!h.sync) continue;
+      handlers.delete(h);                 // at most once across both paths — see runShutdown
+      try { h.fn(); } catch { /* on the way out; nothing useful left to do */ }
+    }
+  });
+}
+
+/** True once a shutdown has begun, so a long loop can stop starting new work. */
+export function isShuttingDown() { return shuttingDown; }
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
 
@@ -99,9 +239,9 @@ export async function acquireLock(name = 'run') {
      * Signing back in worked until the next interrupt, which is exactly what they kept describing: "i
      * laready log in earlier why i kept logging in".
      *
-     * The exit now happens in src/utils/shutdown.mjs, AFTER the browser has been closed properly — order 90
-     * here against the browser's order 10, so the lock is the last thing released and nothing can open the
-     * profile while Chromium is still writing to it. See shutdown.mjs for the full account.
+     * The exit now happens in runShutdown at the top of this file, AFTER the browser has been closed
+     * properly — order 90 here against the browser's order 10, so the lock is the last thing released and
+     * nothing can open the profile while Chromium is still writing to it.
      */
     onShutdown(releaseSync, { order: 90, sync: true, label: 'release the run lock' });
 

@@ -63,11 +63,11 @@ check('a failed staging falls back to running in place', /if errorlevel 1 \(/.te
 check('...and says the trailing error is harmless if it happens',
   /everything\s*\r?\n\s*echo\s+above that line still copied correctly/.test(CMD), true);
 // The self-update is still in the map — that is the point of staging, not something to remove.
-check('it still updates itself', /'CopyUpdates\*\.cmd'\s+= 'scripts\\CopyUpdates\.cmd'/.test(BODY), true);
+check('it still updates itself', /'scripts\\CopyUpdates\.cmd'/.test(BODY), true);
 
 console.log('\n=== The .env is the test, and only the .env ===');
 check('a missing .env is caught', /if not exist "%APP%\\\.env" set "NOENV=1"/.test(BODY), true);
-check('it stops before copying anything', BODY.indexOf('NOENV') < BODY.indexOf('$map = [ordered]'), true);
+check('it stops before copying anything', BODY.indexOf('NOENV') < BODY.indexOf('$want = @('), true);
 check('it names what is wrong, not just that something is',
   /\*\* WAIT - there is no \.env file here/.test(CMD), true);
 check('it says why copying here would be pointless',
@@ -186,29 +186,63 @@ check('...and only counts folders that hold the launcher too',
 check('a Downloads install is flagged as risky, not as wrong',
   /works, but Downloads is risky/.test(WHERE), true);
 
-console.log('\n=== The map carries everything the current fix needs ===');
+console.log('\n=== A file the copier does not carry cannot be shipped, so it must carry them all ===');
 /*
- * Named individually. A count would pass while the one file that matters is missing, and the file that
- * matters here is the one that stops REI logging out — the single most annoying bug in the project.
+ * THE FAILURE THIS EXISTS FOR, and it took the client's whole automation down.
+ *
+ * src/utils/shutdown.mjs was a NEW file. CopyUpdates had no entry for it, because its list named only the
+ * files being changed that day. browser.mjs — which the list DID carry — shipped importing it, so the PC
+ * received a browser module pointing at a file that was not on disk:
+ *
+ *     Cannot find module '...\src\utils\shutdown.mjs' imported from '...\src\rei\browser.mjs'
+ *
+ * Every REI script died on startup. Not a wrong result — nothing ran at all.
+ *
+ * A NEW FILE IS THE ONE CHANGE THIS DELIVERY ROUTE CANNOT ABSORB, and nothing anywhere checked for it. So
+ * the list now names every file in the two folders updates actually touch, whether or not today's change
+ * needs them, and this fails the moment one appears that is not listed. MISSING costs a line of output;
+ * a gap costs the automation.
  */
-for (const [pattern, dest] of [
-  ['shutdown*.mjs', 'src\\utils\\shutdown.mjs'],
-  ['lock*.mjs', 'src\\utils\\lock.mjs'],
-  ['browser*.mjs', 'src\\rei\\browser.mjs'],
-  ['sessionlog*.mjs', 'src\\rei\\session-log.mjs'],
-  ['recheckrei*.mjs', 'scripts\\recheck-rei.mjs'],
-  ['WhereIsTheApp*.cmd', 'scripts\\WhereIsTheApp.cmd'],
-  // The launcher is useless without it, and "download them as a pair" is a step people skip.
-  ['WhereIsTheApp*.ps1', 'scripts\\WhereIsTheApp.ps1']
-]) {
-  const re = new RegExp(`'${pattern.replace(/[*.]/g, (c) => '\\' + c)}'\\s+= '${dest.replace(/\\/g, '\\\\')}'`);
-  check(`${pattern} -> ${dest}`, re.test(BODY), true);
+const carried = new Set([...BODY.matchAll(/"\s+'([^']+)'/g)].map((m) => m[1].replace(/\\/g, '/')));
+for (const dir of ['src/rei', 'src/utils']) {
+  const onDisk = fs.readdirSync(path.resolve('twin-visit-logger-sandbox', dir))
+    .filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
+  const missing = onDisk.filter((f) => !carried.has(f));
+  check(`every .mjs in ${dir} is carried`, missing, []);
+  check(`...and ${dir} was actually read`, onDisk.length > 0, true);
 }
-// The hyphen-stripping is the whole reason these patterns look the way they do.
-check('every source pattern is hyphen-free, because the browser strips hyphens on download',
-  (BODY.match(/^\s*"\s+'([^']+)'\s+=/gm) || []).every((l) => !/'[^']*-[^']*'/.test(l)), true);
-check('CreationTime, not LastWriteTime — a download keeps the SOURCE file\'s write time',
+// The destination list is what the copier now works from — no globs to collide. See the .cmd for why.
+check('the copier derives the download name from the destination, not a glob',
+  /\$rx = '\^' \+ \[regex\]::Escape\(\$base\) \+ '\( \?\\\(\?\\d\+\\\)\?\)\?' \+ \[regex\]::Escape\(\$ext\) \+ '\$'/.test(BODY), true);
+check('...stripping the hyphens the browser strips', /\$flat = \$leaf -replace '-',''/.test(BODY), true);
+check('...anchored, so notestab.mjs cannot satisfy notes.mjs',
+  /both notes\.mjs and notes-tab\.mjs/.test(CMD), true);
+check('...and both are carried, which is what makes the collision reachable',
+  ['src/rei/notes.mjs', 'src/rei/notes-tab.mjs'].every((f) => carried.has(f)), true);
+
+console.log('\n=== The files this fix needs are named individually ===');
+/*
+ * Named one by one rather than counted. A count passes while the one file that matters is absent, and the
+ * file that matters here is the pair that stops REI logging out — the single most disruptive bug in the
+ * project. lock.mjs carries the shutdown coordinator and browser.mjs registers the closer with it; either
+ * one arriving alone is a broken app, which is exactly what happened.
+ */
+for (const rel of [
+  'src/utils/lock.mjs',
+  'src/rei/browser.mjs',
+  'src/rei/session-log.mjs',
+  'scripts/recheck-rei.mjs',
+  'scripts/WhereIsTheApp.cmd',
+  // The launcher is useless without it, and "download them as a pair" is a step people skip.
+  'scripts/WhereIsTheApp.ps1'
+]) check(`carries ${rel}`, carried.has(rel), true);
+
+// CreationTime, because a downloaded file keeps the SOURCE file's write time — this already cost a file.
+check('newest by CreationTime, not LastWriteTime',
   /Sort-Object CreationTime -Descending/.test(BODY), true);
+// Downloads is read ONCE and filtered in memory: 28 Get-ChildItem calls over the same folder is waste.
+check('Downloads is listed once, not once per file',
+  (BODY.match(/Get-ChildItem \$dl -File/g) || []).length, 1);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

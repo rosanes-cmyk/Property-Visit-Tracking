@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { config } from '../config.mjs';
 import { noteReiSessionOpen, noteReiAuthResult, readLastChromiumExit } from './session-log.mjs';
-import { onShutdown } from '../utils/shutdown.mjs';
+import { onShutdown } from '../utils/lock.mjs';
 
 export class ReiSessionExpiredError extends Error {
   constructor(message = 'REI BlackBook session is not authenticated.') {
