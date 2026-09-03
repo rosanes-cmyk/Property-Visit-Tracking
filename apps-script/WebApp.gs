@@ -920,6 +920,11 @@ function syncVisitCalendar_(sh, rowNum) {
         notifyVisitTagged_(R, tag, visitDate, marked);
         R.setNote('cancelAlert', tag);
       }
+      /*
+       * A cancelled visit forgets it was briefed, so a lead re-booked later is announced again. That is a
+       * new visit for somebody to organise a group around, not a repeat of the old one.
+       */
+      R.setNote('briefed', '');
       return marked.detail;
     }
 
@@ -939,6 +944,20 @@ function syncVisitCalendar_(sh, rowNum) {
       'Visit Date': visitDate, 'Visit Time': R.get('Visit Time')
     }, addr, R.row);
     logAuto_('CALENDAR', R.get('Property ID'), 'Visit event synced to ' + fmt_(new Date(visitDate)) + ' · ' + res);
+    /*
+     * AND TELL SOMEBODY. This is the path a booking takes when it is typed on the DASHBOARD or edited in
+     * the sheet — the two doors the team actually uses — and it announced nothing at all. The client, on a
+     * visit they had just put on the calendar: "once i add to the calendar it should fire as well ...
+     * because someone is waiting to create a gc that will post for that."
+     *
+     * postVisitBriefing_ decides whether this booking has already been announced (a note on the row), so a
+     * plain reschedule stays silent even though this function deletes and recreates the event every time
+     * and therefore always reports "event created". The rule lives there rather than here so that all four
+     * producers share it and cannot double-post between them.
+     */
+    if (String(res).indexOf('event created') === 0 && typeof postVisitBriefing_ === 'function') {
+      postVisitBriefing_(R.row);
+    }
     return res;
   } catch (e) {
     logAuto_('ERROR', 'syncVisitCalendar', String(e));

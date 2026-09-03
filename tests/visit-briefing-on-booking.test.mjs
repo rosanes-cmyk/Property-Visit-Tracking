@@ -72,8 +72,18 @@ for (const [label, src] of [['WebApp.gs', WEB], ['Code.combined.gs', strip(COMBI
    */
   check(`${label}: a reused or moved event posts nothing`,
     /indexOf\('event already/.test(src), false);
-  check(`${label}: guarded by typeof, so ChatNotify being absent cannot break intake`,
-    (src.match(/typeof postVisitBriefing_ === 'function'/g) || []).length, 2);
+  /*
+   * THREE now, not two: the two webIntake_ paths plus syncVisitCalendar_, which is the door a booking takes
+   * when it is typed on the dashboard or edited in the sheet. That third one is the fix for "once i add to
+   * the calendar it should fire as well" — a booking the team entered themselves used to reach Juan's
+   * calendar and tell nobody.
+   *
+   * Counted rather than spot-checked, so a fourth producer appearing without this guard is caught: every
+   * one of them is inside a write path, and an undefined function there would fail the BOOKING to send a
+   * message about it.
+   */
+  check(`${label}: every call is guarded by typeof, so ChatNotify being absent cannot break a booking`,
+    (src.match(/typeof postVisitBriefing_ === 'function'/g) || []).length, 3);
 }
 // The choke point itself must stay silent: it is shared with the import, the restore and the stage-fixer.
 // Bounded to the FUNCTION BODY. An unbounded [\s\S]*? runs straight past the closing brace and matches the
@@ -244,6 +254,54 @@ check('a skipped one says which switch skipped it',
  */
 check('written before PASS 2, so a later crash cannot lose it',
   FILL.indexOf('Logged ${n} briefing outcome(s)') < FILL.indexOf('PASS 2 — the link backfill'), true);
+
+console.log('\n=== A booking typed on the DASHBOARD announces itself too ===');
+/*
+ * THE GAP THE CLIENT FOUND, and they were right to call it stupid. postVisitBriefing_ was wired into
+ * webIntake_ only — the REI and Intake Inbox doors. A booking typed on the dashboard, or a Visit Date
+ * edited in the sheet, reaches Juan's calendar through syncVisitCalendar_ and announced NOTHING.
+ *
+ * Their words: "once i add to the calendar it should fire as well ... because someone is waiting to create
+ * a gc that will post for that." The whole value of the message is that a colleague makes the WhatsApp
+ * group off it. A booking that reaches the calendar in silence has nobody organising it.
+ */
+for (const [label, src] of [['WebApp.gs', WEB], ['Code.combined.gs', strip(COMBINED)]]) {
+  check(`${label}: syncVisitCalendar_ announces a booking`,
+    /if \(String\(res\)\.indexOf\('event created'\) === 0 && typeof postVisitBriefing_ === 'function'\) \{\s*\n\s*postVisitBriefing_\(R\.row\);/.test(src), true);
+  // After the log line, so a briefing that throws cannot cost the calendar record of what just happened.
+  check(`${label}: ...after the calendar is recorded, not before`,
+    src.indexOf("'Visit event synced to '") < src.indexOf('postVisitBriefing_(R.row)'), true);
+}
+
+console.log('\n=== ...but a RESCHEDULE still says nothing ===');
+/*
+ * This is why the rule cannot live at the call site. syncVisitCalendar_ DELETES the old event and creates a
+ * fresh one on every sync, so "event created" is true for a plain move as well — and a move must stay
+ * silent: "i dont want the update for this in the chat, it will confuse my teammate."
+ *
+ * The result string cannot tell a first booking from a move. Whether the ROW has ever been briefed can.
+ */
+check('the marker is checked inside postVisitBriefing_, so every producer obeys it',
+  /if \(R\.getNote\('briefed'\)\) return 'already briefed for this booking';/.test(CHAT), true);
+check('...and set only after a post that actually succeeded',
+  /if \(!err\) \{ try \{ R\.setNote\('briefed', day \|\| 'yes'\); \} catch \(ignored\) \{\} \}/.test(CHAT), true);
+/*
+ * A briefing that FAILED to send has not been sent. Marking it regardless would turn one dropped webhook
+ * call into a booking that can never be announced again.
+ */
+check('a failed briefing does not mark the row as briefed',
+  /Marked only on a SUCCESSFUL post/.test(CHAT), true);
+check('the guard sits before any work is done',
+  CHAT.indexOf("R.getNote('briefed')") < CHAT.indexOf("R.get('Visit Date')"), true);
+
+console.log('\n=== A cancelled visit forgets, so a re-booking is announced again ===');
+// A lead cancelled and later re-booked is a new visit for somebody to organise, not a repeat of the old one.
+for (const [label, src] of [['WebApp.gs', WEB], ['Code.combined.gs', strip(COMBINED)]]) {
+  check(`${label}: the marker is cleared when a visit is tagged`,
+    /R\.setNote\('briefed', ''\);/.test(src), true);
+  check(`${label}: ...on the cancel path, next to the cancel alert`,
+    src.indexOf("R.setNote('cancelAlert', tag)") < src.indexOf("R.setNote('briefed', '')"), true);
+}
 
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.

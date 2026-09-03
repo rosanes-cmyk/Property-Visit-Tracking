@@ -2338,6 +2338,11 @@ function syncVisitCalendar_(sh, rowNum) {
         notifyVisitTagged_(R, tag, visitDate, marked);
         R.setNote('cancelAlert', tag);
       }
+      /*
+       * A cancelled visit forgets it was briefed, so a lead re-booked later is announced again. That is a
+       * new visit for somebody to organise a group around, not a repeat of the old one.
+       */
+      R.setNote('briefed', '');
       return marked.detail;
     }
 
@@ -2357,6 +2362,20 @@ function syncVisitCalendar_(sh, rowNum) {
       'Visit Date': visitDate, 'Visit Time': R.get('Visit Time')
     }, addr, R.row);
     logAuto_('CALENDAR', R.get('Property ID'), 'Visit event synced to ' + fmt_(new Date(visitDate)) + ' · ' + res);
+    /*
+     * AND TELL SOMEBODY. This is the path a booking takes when it is typed on the DASHBOARD or edited in
+     * the sheet — the two doors the team actually uses — and it announced nothing at all. The client, on a
+     * visit they had just put on the calendar: "once i add to the calendar it should fire as well ...
+     * because someone is waiting to create a gc that will post for that."
+     *
+     * postVisitBriefing_ decides whether this booking has already been announced (a note on the row), so a
+     * plain reschedule stays silent even though this function deletes and recreates the event every time
+     * and therefore always reports "event created". The rule lives there rather than here so that all four
+     * producers share it and cannot double-post between them.
+     */
+    if (String(res).indexOf('event created') === 0 && typeof postVisitBriefing_ === 'function') {
+      postVisitBriefing_(R.row);
+    }
     return res;
   } catch (e) {
     logAuto_('ERROR', 'syncVisitCalendar', String(e));
@@ -4237,6 +4256,29 @@ function postVisitBriefing_(rowNum) {
     var addr = String(R.get('Property Address') || '').trim();
     if (!addr) return '';
 
+    /*
+     * ONCE PER BOOKING, and the marker lives on the ROW so every path shares one rule.
+     *
+     * The client, on a visit they had put on the calendar themselves: "once i add to the calendar it should
+     * fire as well ... because someone is waiting to create a gc that will post for that." They were right,
+     * and this was only wired into webIntake_ — so a booking typed on the DASHBOARD reached Juan's calendar
+     * through syncVisitCalendar_ and told nobody. A colleague was waiting to make the group for a visit
+     * whose arrival was never announced.
+     *
+     * Wiring syncVisitCalendar_ up to it is the fix, and it needs this marker to be safe. That function
+     * DELETES the old event and creates a fresh one on every sync, so "an event was created" is true for a
+     * plain reschedule too — and a reschedule must stay silent: "i dont want the update for this in the
+     * chat, it will confuse my teammate." The result string cannot tell the two apart. Whether this row has
+     * ever been briefed can.
+     *
+     * Kept HERE rather than at the call sites so all four producers obey it and cannot double-post between
+     * them — the intake and a follow-up sheet edit are the same booking arriving twice.
+     *
+     * Cleared when a visit is CANCELLED (see syncVisitCalendar_), so a lead re-booked later is announced
+     * again. That is a new visit for somebody to organise, not a repeat of an old one.
+     */
+    if (R.getNote('briefed')) return 'already briefed for this booking';
+
     var when = R.get('Visit Date');
     // Same guard as the booking card: `fmt_(new Date(when))` is what printed 1969-12-31. See bookingDate_.
     var day = when ? bookingDate_(when) : 'date not set';
@@ -4273,6 +4315,8 @@ function postVisitBriefing_(rowNum) {
         { buttonList: { buttons: buttons } }
       ] }]
     } }] });
+    /* Marked only on a SUCCESSFUL post. A briefing that failed to send has not been sent. */
+    if (!err) { try { R.setNote('briefed', day || 'yes'); } catch (ignored) {} }
     logAuto_('CHAT', R.get('Property ID'), err
       ? ('Visit briefing FAILED: ' + err)
       : ('Visit briefing posted for ' + seller + ' · ' + day + ' ' + clock));
