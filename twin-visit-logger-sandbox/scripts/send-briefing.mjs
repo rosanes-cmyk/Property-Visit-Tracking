@@ -72,10 +72,24 @@ async function writeSent(state) {
 }
 
 if (!NEEDLE && !TODAY && !TOMORROW) {
-  console.log('\nWho is the briefing for?\n');
-  console.log('  node scripts/send-briefing.mjs "Sheng Luo"');
-  console.log('  node scripts/send-briefing.mjs --today');
-  console.log('  node scripts/send-briefing.mjs --tomorrow\n');
+  /*
+   * SAY THAT NOTHING WAS SENT, first and plainly.
+   *
+   * This printed three usage lines and exited, and the client's response to seeing it was "what is this?"
+   * — which is fair: a bare list of command forms reads like output, not like an instruction, and there was
+   * nothing on screen saying the briefing had NOT gone. They had asked for tomorrow's briefings and
+   * reasonably assumed they were on their way.
+   *
+   * Easy to dismiss as cosmetic. It is not: the whole complaint being worked on at that moment was
+   * "the notif is not firing", and this was one more way to end up with no message and no explanation.
+   */
+  console.log('\nNOTHING WAS SENT — this needs to know WHICH briefing you want.\n');
+  console.log('  Easiest: double-click  scripts\\send-briefing.cmd  and pick from the menu.\n');
+  console.log('  Or say which, here:');
+  console.log('    node scripts/send-briefing.mjs --tomorrow      every visit booked for tomorrow');
+  console.log('    node scripts/send-briefing.mjs --today         every visit booked for today');
+  console.log('    node scripts/send-briefing.mjs "Sheng Luo"     one seller, by name');
+  console.log('\n  Add --force to re-send one that already went out today.\n');
   process.exit(1);
 }
 

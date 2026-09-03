@@ -169,6 +169,54 @@ check('...it defers to the line above', /NOT posted \(reason above\)/.test(FILL)
 check('the startup banner names the second switch too',
   /CHAT_ALERTS=off — per-lead alerts are silenced, but the briefing/.test(FILL), true);
 
+console.log('\n=== Asking for a briefing by hand cannot end in silence ===');
+/*
+ * The client ran the sender and got three lines of usage back, then a prompt. Their question was "what is
+ * this?" — which is the right question: a bare list of command forms reads like output rather than an
+ * instruction, and nothing on screen said the briefing had NOT gone. They had asked for tomorrow's and
+ * reasonably assumed it was on its way.
+ *
+ * Cosmetic-looking, and not: the complaint being worked on at that moment was "the notif is not firing",
+ * and this was one more way to end up with no message and no explanation.
+ */
+const SEND = read('twin-visit-logger-sandbox/scripts/send-briefing.mjs');
+const SENDCMD = read('twin-visit-logger-sandbox/scripts/send-briefing.cmd');
+check('the usage says outright that nothing was sent',
+  /NOTHING WAS SENT — this needs to know WHICH briefing you want\./.test(SEND), true);
+check('...and points at the double-click first', /double-click  scripts\\\\send-briefing\.cmd/.test(SEND), true);
+check('...and explains each form rather than just listing it',
+  /every visit booked for tomorrow/.test(SEND), true);
+
+console.log('\n=== The double-click version is a menu, not a guess-the-word prompt ===');
+/*
+ * "Type today or tomorrow" required typing one of two words exactly. Everything else in this project is a
+ * double-click, so the two commonest answers are now keys and nothing typed can match nothing.
+ */
+check('it offers numbered choices', /choice \/C 1234 \/N \/M/.test(SENDCMD), true);
+check('tomorrow is option 1, the commonest ask', /\[1\]  Tomorrow's visits/.test(SENDCMD), true);
+check('there is a way out', /\[4\]  Cancel/.test(SENDCMD), true);
+/*
+ * LABELS, not parenthesised blocks. cmd expands %VAR% when it PARSES a block, so `set /p WHO=` followed by
+ * `%WHO%` inside the same ( ) reads the value from BEFORE anything was typed. My first draft of this menu
+ * had exactly that and would have said "nothing typed" at whatever name was entered.
+ */
+check('the name prompt is not inside a parenthesised block',
+  /:byname\s*\necho\.\s*\nset "WHO="\s*\nset \/p WHO=/.test(SENDCMD), true);
+check('...and branches by goto', /if errorlevel 4 goto cancel/.test(SENDCMD), true);
+// Descending, because `if errorlevel N` means "N or higher" — ascending would take the first branch always.
+check('errorlevel is tested in descending order',
+  SENDCMD.indexOf('if errorlevel 4') < SENDCMD.indexOf('if errorlevel 3')
+  && SENDCMD.indexOf('if errorlevel 3') < SENDCMD.indexOf('if errorlevel 2'), true);
+// Somebody who has just asked for a briefing wants it now; the de-duplication is for the timer.
+/*
+ * Against the CODE only. `rem` lines are comments in a .cmd, and the comment above this menu uses the words
+ * "--force on every path" — so counting them in the raw file gives four for three call sites. Eighth time in
+ * this project an assertion has been decided by prose instead of code.
+ */
+const SENDCODE = SENDCMD.split('\n').filter((l) => !/^\s*rem\b/i.test(l)).join('\n');
+check('every path forces, so an asked-for briefing is never de-duplicated away',
+  (SENDCODE.match(/--force/g) || []).length, 3);
+
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.
 check('the office PC still owns the morning briefing',
