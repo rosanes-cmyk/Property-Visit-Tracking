@@ -83,7 +83,8 @@ function onOpen() {
       .addItem('Send daily report now (preview)', 'sendDailyReport')
       .addItem('Repair sheet (formulas / validation / formatting)', 'repairSheet')
       .addItem('🔧 Fix mismatched stages (cards stuck in wrong section)', 'repairStages')
-      .addItem('🗓 Remove orphaned calendar events', 'purgeOrphanCalendarEvents'))
+      .addItem('🗓 Remove orphaned calendar events', 'purgeOrphanCalendarEvents')
+      .addItem('📅 Clear impossible visit dates (1969 / 1899)', 'repairImpossibleVisitDates'))
     /*
      * On their own at the bottom, and last. Every one of these deletes something that cannot be typed back:
      * rows, calendar events, or every trigger in the project. They were previously in the same flat run as
@@ -1892,6 +1893,101 @@ function dateValue_(v) {
   var iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
   var d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
   return dateSane_(d) ? d : '';
+}
+
+/**
+ * Menu: clear the visit dates that are not dates — 1969-12-31, 1899-12-30 and anything like them.
+ *
+ * dateValue_ stops NEW ones being written. It does nothing for the rows that already carry one, and there
+ * is at least one on the live tab: Linda Perine's row reads 12/31/1969 with the seller, the phone, the real
+ * address and a 9:00 AM time all correct beside it. That row cannot be repaired by the automation — the day
+ * that was booked is genuinely unknown, and the project rule is not to guess dates — but it must stop
+ * presenting a 1969 booking as though somebody could act on it.
+ *
+ * So it clears the cell and says why on the row: Data Quality Status Incomplete, and an Exception Reason
+ * quoting what was there. Missing Required Fields then puts the row on the work queue, which is the one
+ * place a person will actually see it and type the real date.
+ *
+ * IT PREVIEWS AND ASKS FIRST. A menu item that silently rewrites cells across four hundred rows is not
+ * something anybody should click twice, and the list is short enough to read — so it shows exactly which
+ * rows it would touch, with the seller's name, before doing anything.
+ *
+ * Next Action Due Date is tested on its own rather than assumed to match. It is usually copied from the
+ * visit date, so it is usually wrong in the same way; but a row where somebody typed a real due date must
+ * keep it.
+ */
+function repairImpossibleVisitDates() {
+  var ui = SpreadsheetApp.getUi();
+  var sh = dataSheet_();
+  var last = sh.getLastRow();
+  if (last < CFG.FIRST_DATA_ROW) { ui.alert('No data rows yet.'); return; }
+
+  var idx = headerIndex_();
+  if (!idx['Visit Date']) { ui.alert('This tab has no "Visit Date" column.'); return; }
+  var n = last - CFG.FIRST_DATA_ROW + 1;
+  var width = Math.max(sh.getLastColumn(), HEADERS.length);
+  var vals = sh.getRange(CFG.FIRST_DATA_ROW, 1, n, width).getValues();
+  var at = function (rowVals, header) { return idx[header] ? rowVals[idx[header] - 1] : ''; };
+
+  var hits = [];
+  for (var i = 0; i < n; i++) {
+    var v = vals[i];
+    if (!at(v, 'Property Address')) continue;                      // empty row
+    var raw = at(v, 'Visit Date');
+    var badVisit = raw !== '' && raw != null && dateValue_(raw) === '';
+    var due = at(v, 'Next Action Due Date');
+    var badDue = due !== '' && due != null && dateValue_(due) === '';
+    if (!badVisit && !badDue) continue;
+    hits.push({
+      row: CFG.FIRST_DATA_ROW + i,
+      id: String(at(v, 'Property ID') || ''),
+      seller: String(at(v, 'Seller Name') || '(no name)'),
+      badVisit: badVisit,
+      badDue: badDue,
+      shown: badVisit
+        ? ((typeof bookingDate_ === 'function' ? bookingDate_(raw) : String(raw)))
+        : ((typeof bookingDate_ === 'function' ? bookingDate_(due) : String(due)))
+    });
+  }
+
+  if (!hits.length) {
+    ui.alert('Visit dates', 'Every Visit Date and Next Action Due Date on the tab is a real date. '
+      + 'Nothing to fix.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var lines = hits.slice(0, 15).map(function (h) {
+    return '  row ' + h.row + '  ' + (h.id ? h.id + '  ' : '') + h.seller + '  —  ' + h.shown
+      + (h.badVisit && h.badDue ? '  (visit date + due date)' : h.badDue ? '  (due date only)' : '');
+  }).join('\n');
+
+  var ok = ui.alert('Clear ' + hits.length + ' impossible date(s)?',
+    hits.length + ' row(s) carry a date that cannot be real — the 1970 epoch, the spreadsheet\'s own '
+    + '1899 epoch, or something unreadable:\n\n' + lines
+    + (hits.length > 15 ? '\n  ...and ' + (hits.length - 15) + ' more' : '')
+    + '\n\nThe date will be CLEARED and the row flagged Incomplete with the old value written into '
+    + 'Exception Reason, so it appears on the work queue for somebody to put the real date on.\n\n'
+    + 'Nothing else on these rows is touched. Calendar events are not changed.',
+    ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) { ui.alert('Nothing was changed.'); return; }
+
+  var fixed = 0;
+  hits.forEach(function (h) {
+    var R = new RowAccessor_(sh, h.row);
+    var was = [];
+    if (h.badVisit) { was.push('Visit Date "' + h.shown + '"'); R.set('Visit Date', ''); }
+    if (h.badDue) { was.push('Next Action Due Date'); R.set('Next Action Due Date', ''); }
+    R.set('Data Quality Status', 'Incomplete');
+    R.set('Exception Reason', 'Cleared an impossible date (' + was.join(' + ')
+      + ') — it was never a real booking day. Put the real visit date on this row.');
+    R.flush();
+    logAuto_('INTAKE', h.id, 'Cleared an impossible date on row ' + h.row + ' (' + h.seller + '): ' + h.shown);
+    fixed++;
+  });
+  SpreadsheetApp.flush();
+  ui.alert('Done', 'Cleared ' + fixed + ' impossible date(s). Those rows now read "no date" on the cards '
+    + 'and show as Incomplete on the board, so the missing day is visible instead of wrong.',
+    ui.ButtonSet.OK);
 }
 
 function webRescheduleRow_(row, params) {

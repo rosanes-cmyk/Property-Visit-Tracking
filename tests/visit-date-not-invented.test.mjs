@@ -186,6 +186,47 @@ check('the log line names the rejected value', /UNUSABLE Visit Date rejected: /.
 check('the Intake Inbox Status cell carries the warning',
   /\(res\.warning \? ' · ⚠️ ' \+ res\.warning : ''\)/.test(INBOX), true);
 
+console.log('\n=== The rows that ALREADY hold a 1969 date can be repaired ===');
+/*
+ * dateValue_ stops new ones. It does nothing for the rows already carrying one, and the live tab has at
+ * least one: Linda Perine's row reads 12/31/1969 beside a correct seller, phone, address and 9:00 AM.
+ *
+ * The repair cannot invent the day that was booked, and must not try. What it can do is stop the row
+ * presenting a 1969 booking as actionable — clear the cell, flag it, and let Missing Required Fields put it
+ * on the work queue where somebody will type the real date.
+ */
+for (const [label, src] of [['WebApp.gs', strip(WEB)], ['Code.combined.gs', strip(COMBINED)]]) {
+  check(`${label}: repairImpossibleVisitDates exists`,
+    /function repairImpossibleVisitDates\(\) \{/.test(src), true);
+  // The same test as the write path, so the two can never disagree about what counts as impossible.
+  check(`${label}: it uses dateValue_ to decide, not its own rule`,
+    /dateValue_\(raw\) === ''/.test(src), true);
+  check(`${label}: it PREVIEWS and asks before touching anything`,
+    /ui\.ButtonSet\.YES_NO\);[\s\S]{0,200}?if \(ok !== ui\.Button\.YES\)/.test(src), true);
+  check(`${label}: ...and a No changes nothing`, /Nothing was changed\./.test(src), true);
+  check(`${label}: it clears rather than guesses a date`, /R\.set\('Visit Date', ''\);/.test(src), true);
+  check(`${label}: ...flags the row so the board shows it`,
+    /R\.set\('Data Quality Status', 'Incomplete'\);/.test(src), true);
+  check(`${label}: ...and records what was there`,
+    /Cleared an impossible date \(/.test(src), true);
+  check(`${label}: every row is logged individually`,
+    /logAuto_\('INTAKE', h\.id, 'Cleared an impossible date on row /.test(src), true);
+  /*
+   * Next Action Due Date is tested on its OWN. It is usually copied from the visit date so it is usually
+   * wrong the same way — but a row where somebody typed a real due date has to keep it.
+   */
+  check(`${label}: the due date is judged separately`, /dateValue_\(due\) === ''/.test(src), true);
+  check(`${label}: ...and only cleared when it is itself unusable`,
+    /if \(h\.badDue\) \{ was\.push\('Next Action Due Date'\); R\.set\('Next Action Due Date', ''\); \}/.test(src), true);
+  // Empty rows are not "rows with a bad date" — the tab is padded to MAX_ROWS.
+  check(`${label}: empty rows are skipped`, /if \(!at\(v, 'Property Address'\)\) continue;/.test(src), true);
+}
+check('it is on the menu, under Setup and repair',
+  /\.addItem\('📅 Clear impossible visit dates \(1969 \/ 1899\)', 'repairImpossibleVisitDates'\)\)/.test(COMBINED), true);
+// Calendar events are deliberately untouched: maybeCreateVisitEvent_ refuses a past date, so no 1969
+// event was ever created, and there is nothing to clean up there.
+check('it says the calendar is not touched', /Calendar events are not changed\./.test(WEB), true);
+
 console.log('\n=== An existing good date is never blanked by a bad arrival ===');
 /*
  * The one way this fix could be worse than the bug. On an upsert, a booking arriving with a broken date
