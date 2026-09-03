@@ -1,10 +1,10 @@
 @echo off
 rem Copy freshly-downloaded updates out of Downloads and into the right folders, with the right names.
 rem
-rem WHY THIS EXISTS. Every fix has to reach this PC as a file copy — the "Twin Visit Logger Updates" Drive
+rem WHY THIS EXISTS. Every fix has to reach this PC as a file copy -- the "Twin Visit Logger Updates" Drive
 rem folder has never existed, so the app's own update button has nothing to find. And this client's browser
 rem STRIPS HYPHENS from downloaded filenames, so fill-pending-rei.mjs arrives as fillpendingrei.mjs and
-rem rei-login.mjs as reilogin.mjs — sometimes with a number on the end when it has been downloaded before.
+rem rei-login.mjs as reilogin.mjs -- sometimes with a number on the end when it has been downloaded before.
 rem
 rem The result was an evening of hand-typed copy commands, one of which copied reilogin.mjs when the newest
 rem was reilogin3.mjs and put the OLD file back. Six files across three folders is not something to do by
@@ -15,11 +15,11 @@ rem name.
 rem
 rem SORTED BY CreationTime, NOT LastWriteTime, and that distinction cost a file. A download keeps the
 rem timestamp of the file it came from, so LastWriteTime is when the file was WRITTEN, not when it arrived
-rem here. Sorting by it picked reilogin3.mjs, dated 6 August, over a copy saved minutes earlier — and
+rem here. Sorting by it picked reilogin3.mjs, dated 6 August, over a copy saved minutes earlier -- and
 rem cheerfully installed the old login script over the good one. CreationTime is when it landed in
 rem Downloads, which is the thing actually being asked for.
 rem
-rem It says exactly what it did, and MISSING for anything not downloaded — a file you did not save is not
+rem It says exactly what it did, and MISSING for anything not downloaded -- a file you did not save is not
 rem an error, it just was not part of this update.
 rem
 rem Safe to run twice: copying the same file again changes nothing.
@@ -28,7 +28,7 @@ rem The name has no hyphen on purpose.
 setlocal
 
 rem ======================================================================================================
-rem  IT RUNS ITSELF FROM A COPY IN %TEMP%, AND THAT IS NOT TIDINESS — IT IS A BUG FIX.
+rem  IT RUNS ITSELF FROM A COPY IN %TEMP%, AND THAT IS NOT TIDINESS -- IT IS A BUG FIX.
 rem
 rem  cmd.exe reads a batch file FROM DISK AS IT EXECUTES, remembering a byte offset between lines. This
 rem  script has 'CopyUpdates*.cmd' in its own map, so it overwrote itself mid-run. That was harmless while
@@ -50,7 +50,7 @@ set "STAGE=%TEMP%\twin-visit-updates"
 if not exist "%STAGE%" mkdir "%STAGE%" >nul 2>&1
 copy /y "%~f0" "%STAGE%\CopyUpdates.cmd" >nul
 if errorlevel 1 (
-  echo   Could not stage this script in %TEMP% — running in place instead.
+  echo   Could not stage this script in %TEMP% -- running in place instead.
   echo   If it ends with a "not recognized as an internal or external command" error, everything
   echo   above that line still copied correctly. Run it once more and it will be clean.
   goto :run
@@ -77,24 +77,31 @@ rem  A live run copied nine files into:
 rem
 rem      C:\Users\bryan\Downloads\twin-visit-logger-sandbox\twin-visit-logger-sandbox
 rem
-rem  — a freshly extracted archive sitting in Downloads, nested twice, with no .env and no browser-data.
-rem  Every copy reported COPIED. Nothing was wrong with any of them. And not one of them reached the folder
-rem  the scheduled tasks actually run from, so the fix appeared to install and changed nothing.
+rem  Every copy reported COPIED. Nothing was wrong with any of them. And nothing reached the folder the
+rem  automation runs from, so the fix appeared to install and changed nothing. That is the exact failure
+rem  this whole project keeps hitting: a confident success that reached nobody.
 rem
-rem  That is the exact failure this whole project keeps hitting: a confident success that reached nobody.
-rem  So it checks. The installed app must have a .env — it cannot read the sheet or the Chat webhook without
-rem  one — and a fresh extract never does. A path inside Downloads is the other tell.
+rem  THE ONE TEST THAT MEANS ANYTHING IS THE .env. The app cannot read the sheet or the Chat webhook
+rem  without it, and a freshly unzipped archive never has one. If it is here, this IS a working install.
 rem
-rem  It ASKS rather than refusing: someone may genuinely be setting up a new copy, and a tool that flatly
-rem  says no to a thing you meant to do is a tool people work around.
+rem  AND BEING UNDER DOWNLOADS DOES NOT DISQUALIFY IT. My first version treated that as proof this was
+rem  "not the app", and on the client's machine the configured install really does live under Downloads --
+rem  so the guard would have refused the only correct folder on the PC. That is the same mistake in the
+rem  other direction, and a guard that blocks the right answer is worse than no guard. It is now a WARNING
+rem  about where the folder lives -- browsers, disk cleanup and "clear downloads" all delete from there,
+rem  and it is where a second unzipped copy lands -- not a claim about what the folder is.
+rem
+rem  It ASKS rather than refusing either way: someone may genuinely be setting up a new copy, and a tool
+rem  that flatly says no to a thing you meant to do is a tool people work around.
 rem ======================================================================================================
-set "SUSPECT="
-if not exist "%APP%\.env" set "SUSPECT=there is no .env file here, so this is not a configured install"
+set "NOENV="
+set "INDOWNLOADS="
+if not exist "%APP%\.env" set "NOENV=1"
 rem No trailing backslash in the pattern, so Downloads ITSELF is caught as well as a folder inside it.
-echo %APP% | find /i "\Downloads" >nul && set "SUSPECT=this folder is under Downloads"
+echo %APP% | find /i "\Downloads" >nul && set "INDOWNLOADS=1"
 
-if defined SUSPECT (
-  echo   ** WAIT — %SUSPECT%. **
+if defined NOENV (
+  echo   ** WAIT - there is no .env file here, so this is not a configured install. **
   echo.
   echo   This looks like a freshly unzipped copy, NOT the app your scheduled tasks run. Copying into
   echo   it would report success and change nothing that actually runs.
@@ -112,6 +119,12 @@ if defined SUSPECT (
     pause
     exit /b 1
   )
+  echo.
+) else if defined INDOWNLOADS (
+  rem A real install, in a risky place. Say so once and carry on -- this is not a reason to stop.
+  echo   NOTE: this install lives under Downloads. It works, and the .env proves it is the real thing,
+  echo   but Downloads is where browsers and disk-cleanup delete from, and where a second unzipped copy
+  echo   lands. Worth moving it somewhere permanent when there is time. Carrying on.
   echo.
 )
 
@@ -134,6 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  'FinishBookings*.cmd' = 'scripts\FinishBookings.cmd';" ^
   "  'SessionLog*.cmd'     = 'scripts\SessionLog.cmd';" ^
   "  'WhereIsTheApp*.cmd'  = 'scripts\WhereIsTheApp.cmd';" ^
+  "  'WhereIsTheApp*.ps1'  = 'scripts\WhereIsTheApp.ps1';" ^
   "  'CopyUpdates*.cmd'    = 'scripts\CopyUpdates.cmd'" ^
   "};" ^
   "foreach ($k in $map.Keys) {" ^
