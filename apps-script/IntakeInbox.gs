@@ -4,7 +4,7 @@
  * Why: equitytrack.org/twinhomebuyer.com blocks "Anyone" access to Apps Script web apps, so an
  * external webhook (Zapier → /exec) is refused (403). Instead, Zapier's "Google Sheets → Create
  * Spreadsheet Row" writes each REI appointment into the "Intake Inbox" tab (authenticated as you —
- * no public URL). A time trigger (every 10 min) or the manual runner processes new rows through
+ * no public URL). A time trigger (every MINUTE) or the manual runner processes new rows through
  * webIntake_ (create/update the logger row + calendar event + Automation Log). Sandbox-safe;
  * nothing is ever sent to a seller.
  */
@@ -211,12 +211,36 @@ function checkIntakeInboxNow() {
 }
 
 /** Menu: install the every-10-minutes auto-check (approved cadence). Removes any prior copy first. */
+/*
+ * EVERY MINUTE, not every ten, and the reason is what the queue actually holds.
+ *
+ * The client: "the intake inbox kinda take long for 10 mins we need it to for 5 mins ... once there a new
+ * came from intake inbox should auto process in the data because that is prio."
+ *
+ * They asked for five and this is one, because five is not meaningfully closer to what they want and one
+ * costs almost nothing. A row sitting in this tab is a BOOKING somebody took on the phone — a seller
+ * expecting a visit, and a colleague waiting to organise it. Ten minutes of it existing nowhere but a
+ * staging tab is ten minutes where the board, Juan's calendar and the team all say the visit does not
+ * exist.
+ *
+ * The cost is a run a minute, and an idle run is cheap: it reads the tab, finds every row already carries a
+ * Status, and returns. Apps Script's minimum interval is one minute, so this is as close to immediate as a
+ * timer can get.
+ *
+ * IT IS STILL A TIMER, AND THAT IS A REAL LIMITATION worth writing down rather than hiding. Zapier writes
+ * this tab through the Sheets API, and an API write does not fire onEdit or onChange — the same rule that
+ * makes the tracker's own stage cascade need a handler rather than a sheet event. So nothing can react to
+ * the row ARRIVING; the best available is to look very often. Genuinely instant means Zapier calling the
+ * web app's intake endpoint directly instead of writing a row, which is a change on the Zapier side.
+ */
 function installInboxTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'processIntakeInbox_') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('processIntakeInbox_').timeBased().everyMinutes(10).create();
-  SpreadsheetApp.getActive().toast('Auto-check ON: Intake Inbox runs every 10 minutes.', 'Intake Inbox', 8);
+  ScriptApp.newTrigger('processIntakeInbox_').timeBased().everyMinutes(1).create();
+  SpreadsheetApp.getActive().toast(
+    'Auto-check ON: the Intake Inbox is now read EVERY MINUTE, so a booking reaches the board and '
+    + "Juan's calendar within about a minute of Zapier writing it.", 'Intake Inbox', 8);
 }
 
 /** Menu: remove the auto-check. */

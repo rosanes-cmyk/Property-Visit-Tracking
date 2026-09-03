@@ -147,5 +147,40 @@ for (const [label, src] of [['WebApp.gs', WEBAPP], ['Code.combined.gs', COMBINED
     /String\(addr \|\| ''\)\.indexOf\(PENDING_REI_PREFIX\) === 0/.test(src), true);
 }
 
+console.log('\n=== A booking waits a minute, not ten ===');
+/*
+ * The client: "the intake inbox kinda take long for 10 mins we need it to for 5 mins ... once there a new
+ * came from intake inbox should auto process in the data because that is prio."
+ *
+ * They asked for five and it is one, because five is not meaningfully closer to what they want and one
+ * costs almost nothing. A row in this tab is a BOOKING somebody took on the phone — a seller expecting a
+ * visit, a colleague waiting to organise it — and every minute it sits here is a minute the board, the
+ * calendar and the team all say the visit does not exist. An idle run reads the tab, finds every row
+ * already has a Status, and returns.
+ */
+for (const [label, src] of [['IntakeInbox.gs', INBOX], ['Code.combined.gs', COMBINED]]) {
+  check(`${label}: the trigger runs every minute`,
+    /ScriptApp\.newTrigger\('processIntakeInbox_'\)\.timeBased\(\)\.everyMinutes\(1\)\.create\(\);/.test(src), true);
+  check(`${label}: the old ten-minute cadence is gone`,
+    /everyMinutes\(10\)/.test(src), false);
+  // Reinstalling must not leave the old one running alongside the new: two copies double every read.
+  check(`${label}: any existing trigger is removed first`,
+    src.indexOf("if (t.getHandlerFunction() === 'processIntakeInbox_') ScriptApp.deleteTrigger(t);")
+      < src.indexOf('everyMinutes(1)'), true);
+}
+check('the menu says so, so nobody has to guess the cadence',
+  /Turn ON auto-check \(every minute\)/.test(read('apps-script/Code.combined.gs')), true);
+/*
+ * AND THE LIMIT IS WRITTEN DOWN. Zapier writes this tab through the Sheets API, and an API write fires
+ * neither onEdit nor onChange — the same rule that makes the tracker's stage cascade need a handler rather
+ * than a sheet event. So nothing can react to the row ARRIVING, and a minute is as close as a timer gets.
+ * Recording that stops the next person hunting for an event trigger that cannot exist.
+ */
+check('why it cannot be truly instant is recorded',
+  /an API write does not fire onEdit or onChange/.test(read('apps-script/IntakeInbox.gs')), true);
+// Matched on a phrase that does not straddle the comment's line wrap — my first version did and failed.
+check('...along with what WOULD be instant',
+  /intake endpoint directly instead of writing a row/.test(read('apps-script/IntakeInbox.gs')), true);
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
