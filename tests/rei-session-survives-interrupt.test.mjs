@@ -135,6 +135,16 @@ console.log('\n=== ...and Ctrl+C can never feel broken ===');
  * quietly reintroduce the very bug it was written to fix.
  */
 check('there is a hard budget', /const SHUTDOWN_BUDGET_MS = /.test(SHUT), true);
+/*
+ * ...and it fits inside Windows' own deadline. Closing a console window with the X sends CTRL_CLOSE_EVENT,
+ * which Node surfaces as SIGHUP, and Windows kills the process about ten seconds later whatever it is
+ * doing. A budget at or above that is no budget at all on the very path this matters most for — closing
+ * the window is what people actually do — because the OS would kill Chromium mid-flush regardless.
+ */
+check('...comfortably inside the ~10s Windows allows after a console close',
+  Number((SHUT.match(/const SHUTDOWN_BUDGET_MS = ([\d_]+);/) || [])[1].replace(/_/g, '')) <= 8000, true);
+check('SIGHUP is handled, which is what a closed console window sends',
+  /\['SIGINT', 'SIGTERM', 'SIGHUP'\]/.test(SHUT), true);
 check('...and it exits anyway when the budget runs out',
   /if \(timedOut\) \{[\s\S]{0,400}?process\.exit\(/.test(SHUT), true);
 check('a second signal exits immediately',

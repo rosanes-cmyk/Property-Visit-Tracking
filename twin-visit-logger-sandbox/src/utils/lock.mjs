@@ -53,8 +53,14 @@ let shuttingDown = false;
  * Long enough for Chromium to close (it takes a second or two, more with several tabs open), short enough
  * that Ctrl+C never feels ignored. Past this we exit anyway — losing the cookie flush is bad, but leaving
  * somebody unable to stop a run is worse, and they will reach for Task Manager and lose it regardless.
+ *
+ * EIGHT SECONDS, NOT TEN, AND THE DIFFERENCE IS WINDOWS. Closing a console window with the X sends
+ * CTRL_CLOSE_EVENT, which Node surfaces as SIGHUP — and Windows then kills the process after about ten
+ * seconds whatever it is doing. A ten-second budget sits exactly on that deadline, so a Chromium that took
+ * its time would be killed mid-flush by the OS and cost the REI session anyway, on the one path this is
+ * most needed for: closing the window is what people actually do.
  */
-const SHUTDOWN_BUDGET_MS = 10_000;
+const SHUTDOWN_BUDGET_MS = 8_000;
 
 /**
  * Register something to run before the process exits on a signal.
