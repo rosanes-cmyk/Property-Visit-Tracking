@@ -70,6 +70,40 @@ const SCHEDULED = args.includes('--scheduled');
 const PENDING_PREFIX = 'PENDING REI LOOKUP —';
 
 /*
+ * NO SINGLE LEAD MAY HOLD THE QUEUE.
+ *
+ * The client watched one contact sit for fifteen minutes with nothing on screen, and the booking behind it
+ * was never looked at. The cause was found and fixed one layer down (expandTruncatedText could spend
+ * minutes clicking elements that were never clickable), but the shape of that failure is the point: an
+ * unbounded step anywhere inside the scrape stalls every booking after it, and the log shows nothing at all
+ * because the last line printed was a success.
+ *
+ * So the whole per-lead scrape gets a wall clock. This is a backstop, not the fix — the inner budgets are
+ * the fix — and it exists because the next unbounded step will be somewhere I have not thought of.
+ *
+ * Four minutes: a slow REI page legitimately takes 60-90 seconds with the notes tab and its retries, so
+ * this is generous enough never to cut short a run that is genuinely working, and short enough that a
+ * stall costs one lead rather than a morning. The row is left parked and picked up on the next pass.
+ *
+ * The abandoned scrape's page is left to the context close. Racing it means we stop WAITING for it, not
+ * that it stops — and forcing a page closed underneath a running scrape is how you turn a stall into a
+ * crash that loses the leads already done.
+ */
+const LEAD_BUDGET_MS = 4 * 60 * 1000;
+
+function withLeadBudget(promise, who, ms = LEAD_BUDGET_MS) {
+  let timer;
+  const bell = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `gave up after ${Math.round(ms / 60000)} minutes on this contact - REI never finished responding. `
+      + `The row stays parked and the next run will try it again, so the other bookings can carry on.`
+    )), ms);
+  });
+  return Promise.race([promise, bell]).finally(() => clearTimeout(timer));
+}
+
+
+/*
  * Paused before anything is opened or read. This is an auto-update of already-tracked leads — the exact
  * class of job the pause switch exists for — even though the row it finishes was typed by a person.
  */
@@ -457,11 +491,11 @@ async function main() {
 
       let scraped;
       try {
-        scraped = await scrapeReiVisit(context, link, {
+        scraped = await withLeadBudget(scrapeReiVisit(context, link, {
           phone,
           sellerName: text(row['Seller Name']),
           appointmentStartIso: ''
-        });
+        }), who);
       } catch (error) {
         console.log(`    REI could not be read: ${error.message}`);
         stuck += 1;
@@ -791,7 +825,8 @@ async function main() {
       console.log(`\n--- ${who} (REI link)`);
       try {
         updateJob({ phase: 'filling in a missing REI link', item: who });
-        const scraped = await scrapeReiVisit(context, '', { phone, sellerName: who, appointmentStartIso: '' });
+        const scraped = await withLeadBudget(
+          scrapeReiVisit(context, '', { phone, sellerName: who, appointmentStartIso: '' }), who);
         const found = text(scraped?.reiLink);
         if (!found) {
           // Reported, not guessed. REI may simply hold no contact on that number.

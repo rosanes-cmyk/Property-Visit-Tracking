@@ -139,13 +139,35 @@ export function parseNotesPanel(panelText) {
  */
 export const NOTES_KEPT = 8;
 
+/*
+ * How long the whole Notes read may take, across all three attempts and every expander inside them.
+ *
+ * Forty-five seconds. A tab that has not painted its notes in that long is not going to, and the cost of
+ * waiting is not paid by this lead - it is paid by the bookings queued behind it.
+ */
+export const NOTES_BUDGET_MS = 45_000;
+
 /**
  * Open the Notes tab and return its notes, newest first. Never throws — an empty array means the tab could
  * not be opened or held nothing, and the caller falls back to what was on the contact page.
  *
  * READ ONLY. It clicks the tab and safe "Show More" expanders, and nothing else.
  */
-export async function readNotesTab(page, { openPanel, expandTruncatedText, labels = ['Notes'], keep = NOTES_KEPT } = {}) {
+export async function readNotesTab(page, { openPanel, expandTruncatedText, labels = ['Notes'], keep = NOTES_KEPT, budgetMs = NOTES_BUDGET_MS } = {}) {
+  /*
+   * ONE budget for the whole read, shared by all three attempts.
+   *
+   * Each attempt reloads the page, clicks the tab and re-runs every "Show More" expander, and each of those
+   * had its own independent allowance. Three attempts therefore cost three times the worst case, and the
+   * expanders alone could burn minutes on elements that were never clickable — a lead sat for fifteen
+   * minutes while the next booking in the queue was never looked at.
+   *
+   * The notes are enrichment. The address, the appointment and the calendar event are the point and are
+   * already read by the time this runs, so a deadline here loses the tail of a note at worst. The queue is
+   * what must not be lost.
+   */
+  const deadline = Date.now() + budgetMs;
+  const outOfTime = () => Date.now() >= deadline;
   try {
     let opened = await openPanel(page, labels, { nth: 0 });
     if (!opened || !opened.opened) return { notes: [], how: opened?.how || 'no Notes tab found' };
@@ -168,6 +190,7 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
     let clicked = 0;
     let head = '';
     for (; attempts < 3 && !notes.length; attempts += 1) {
+      if (attempts && outOfTime()) break;          // a retry we cannot afford is not a retry
       if (attempts) {
         /*
          * RELOAD, then click. This is the fix, and the reason is a wording difference in one live message.
@@ -200,7 +223,8 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
          */
         opened = await openPanel(page, labels, { nth: attempts - 1 }) || opened;
       }
-      const expanded = await expandTruncatedText(page);
+      /* The SHARED deadline, so the expanders cannot get a fresh allowance on every attempt. */
+      const expanded = await expandTruncatedText(page, { deadline });
       clicked += expanded?.clicked || 0;
       const body = await page.locator('body').innerText().catch(() => '');
       chars = body.length;
@@ -220,7 +244,8 @@ export async function readNotesTab(page, { openPanel, expandTruncatedText, label
     const how = notes.length
       ? `${opened.how}${attempts > 1 ? `, on attempt ${attempts}` : ''}`
       : `${opened.how} — but after ${attempts} attempt(s) the page held ${chars} characters and no note`
-        + ` headers. What it was looking at: ${head}`;
+        + ` headers${outOfTime() ? ` (ran out of its ${Math.round(budgetMs / 1000)}s budget)` : ''}.`
+        + ` What it was looking at: ${head}`;
     return { notes, how, expanded: clicked, attempts };
   } catch {
     return { notes: [], how: 'the Notes tab could not be read' };

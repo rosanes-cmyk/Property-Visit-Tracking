@@ -74,6 +74,31 @@ export function isSafeExpander(label) {
  */
 export const MAX_EXPANDS = 12;
 
+/*
+ * A WALL-CLOCK BUDGET, and this is the fix for a run that sat on one lead for fifteen minutes.
+ *
+ * The click below used a 3-second timeout, and `page.getByText(/^Show More$/i)` matches every element whose
+ * text is that — including ones inside collapsed or off-screen cards, which Playwright waits the full
+ * timeout on before giving up. Mario's contact has 22 associated contacts on the page. So one round could
+ * spend 12 x 3s = 36s, twelve rounds nearly seven minutes, and expandTruncatedText is called FOUR times per
+ * lead (once by the scraper, once per readNotesTab attempt). Half an hour on one contact, all of it in a
+ * step whose entire job is to reveal a bit more text.
+ *
+ * The count cap could not catch it because the cost is per FAILED click, not per successful one.
+ *
+ * So there is now a deadline, checked between clicks, and it is short on purpose: the notes are an
+ * enrichment. The address, the appointment and the calendar event are the point, and they are already read
+ * by the time this runs. Losing the tail of a note costs a sentence; hanging costs every other booking in
+ * the queue, which is what happened — Mario stuck, and Jessica Lee never looked at.
+ */
+export const EXPAND_BUDGET_MS = 20_000;
+
+/*
+ * And a much shorter click timeout. A "Show More" that is on screen and ready responds immediately; three
+ * seconds only ever bought patience for elements that were never going to be clickable.
+ */
+const CLICK_TIMEOUT_MS = 1200;
+
 /**
  * Click every safe expander on the page, and report what happened.
  *
@@ -83,11 +108,18 @@ export const MAX_EXPANDS = 12;
  * Candidates are re-read after each click, because expanding one note can reveal another's control and
  * because clicking invalidates element handles in a single-page app.
  */
-export async function expandTruncatedText(page, { max = MAX_EXPANDS } = {}) {
-  const out = { clicked: 0, skipped: 0, capped: false };
+export async function expandTruncatedText(page, { max = MAX_EXPANDS, deadline = 0 } = {}) {
+  const out = { clicked: 0, skipped: 0, capped: false, ranOut: false };
   const seen = new Set();
+  /*
+   * A caller can pass a SHARED deadline. readNotesTab runs this once per attempt, three attempts, so three
+   * independent budgets would multiply back into the hang this exists to stop.
+   */
+  const until = deadline || (Date.now() + EXPAND_BUDGET_MS);
+  const outOfTime = () => Date.now() >= until;
 
   for (let round = 0; round < max; round += 1) {
+    if (outOfTime()) { out.ranOut = true; return out; }
     let candidates = [];
     try {
       /*
@@ -124,8 +156,22 @@ export async function expandTruncatedText(page, { max = MAX_EXPANDS } = {}) {
       const target = page.getByText(new RegExp(`^\\s*${next.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'));
       const count = await target.count();
       for (let n = 0; n < count && n < max; n += 1) {
-        await target.nth(n).click({ timeout: 3000 }).catch(() => { out.skipped += 1; });
-        out.clicked += 1;
+        if (outOfTime()) { out.ranOut = true; return out; }
+        const one = target.nth(n);
+        /*
+         * VISIBILITY FIRST, and it costs nothing. An element inside a collapsed or off-screen card is not
+         * clickable, and click() discovers that by WAITING the whole timeout. isVisible() answers
+         * immediately, so the elements that used to cost three seconds each now cost nothing.
+         */
+        if (!(await one.isVisible().catch(() => false))) { out.skipped += 1; continue; }
+        /*
+         * `clicked` only counts a click that actually landed. It was incremented unconditionally, right
+         * next to the catch that recorded the failure — so "Expanded 8 truncated note(s)" counted eight
+         * ATTEMPTS, most of which may have been three-second timeouts. Both leads reporting exactly 8 was
+         * the clue: it was not eight notes, it was the loop running out of candidates.
+         */
+        const ok = await one.click({ timeout: CLICK_TIMEOUT_MS }).then(() => true).catch(() => false);
+        if (ok) out.clicked += 1; else out.skipped += 1;
       }
       await page.waitForTimeout(400);
     } catch {
