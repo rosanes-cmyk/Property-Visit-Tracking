@@ -135,9 +135,51 @@ function longTextItems(pairs, minLength = 60, limit = 20) {
  * /contacts/<numeric-id> result link. Used when the email has no usable direct link (REI
  * truncates task titles), so the phone number in the title becomes the lookup key.
  */
+/**
+ * The forms a phone number might be searchable as in REI, most likely first.
+ *
+ * THE BUG THIS FIXES. The tracker stores phones as bare digits WITH the country code — 15104858266 — and
+ * this searched only that, twice (the raw string and its digits are identical when the raw string is
+ * already digits, so the de-duplicated list had one entry). REI stores and displays the same number as
+ * `(510) 485-8266`, and a search for `15104858266` matches nothing.
+ *
+ * So the run reported "Could not locate the REI contact (no direct contact link and no phone match)" for
+ * Mario, whose REI record was open on the client's screen at that moment: right number, `917 26th Ave,
+ * Oakland`, appointment Sep 04 10:00 AM, assigned to Juan. Three parked bookings, all findable, none found.
+ *
+ * The 10-digit national form goes first because that is what REI's own field holds once punctuation is
+ * stripped. The formatted variants follow because a search box may match the rendered text rather than the
+ * digits. The 11-digit original is kept last rather than dropped — it is what the tracker holds, and if REI
+ * ever does match on it, that is worth knowing.
+ *
+ * The last-seven form is deliberately NOT here. It would match several different people's numbers, and the
+ * result of a wrong match is a stranger's address written onto somebody's booking. Failing to find a
+ * contact costs a parked row; finding the WRONG one sends a colleague to the wrong house.
+ */
+export function phoneSearchTerms(phone) {
+  const raw = String(phone || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return [];
+  const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  const terms = [];
+  if (ten.length === 10) {
+    terms.push(ten);
+    terms.push(`(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`);
+    terms.push(`${ten.slice(0, 3)}-${ten.slice(3, 6)}-${ten.slice(6)}`);
+  }
+  terms.push(digits);
+  terms.push(raw);
+  return [...new Set(terms.filter(Boolean))];
+}
+
+/** Digits that identify a US number regardless of formatting or country code: the last ten. */
+export function phoneKey(phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  return d.length > 10 ? d.slice(-10) : d;
+}
+
 async function findContactUrlByPhone(page, phone) {
-  const digits = String(phone).replace(/\D/g, '');
-  const attempts = [...new Set([String(phone).trim(), digits].filter(Boolean))];
+  const attempts = phoneSearchTerms(phone);
   await page.goto('https://my.reiblackbook.com/contacts', { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
   await page.waitForLoadState('networkidle', { timeout: config.reiPageTimeoutMs }).catch(() => {});
   const searchSel = 'input[type="search"], input[placeholder*="Search By Name" i], input[placeholder*="Search" i]';
@@ -178,12 +220,30 @@ async function findContactUrlByPhone(page, phone) {
     await box.type(term, { delay: 30 }).catch(() => {});
     await page.keyboard.press('Enter').catch(() => {});
     await page.waitForTimeout(3500);
-    const href = await page.evaluate(() => {
-      const link = [...document.querySelectorAll('a[href*="/contacts/"]')]
-        .find((a) => /\/contacts\/\d+/.test(a.getAttribute('href') || ''));
-      return link ? link.getAttribute('href') : '';
+    /*
+     * ONE result, or none. Taking the first link off a list of many is how a search that matched nothing
+     * returns somebody else's contact — the page starts as the FULL contact list, so if a search fails to
+     * filter it, every row is still there and the first one is a stranger. That would write their address
+     * onto this booking and send a colleague to the wrong house, which is far worse than staying parked.
+     *
+     * Counting distinct contact ids rather than links, because REI renders several anchors per row (the
+     * name, the avatar, the action) all pointing at the same contact.
+     */
+    const found = await page.evaluate(() => {
+      const ids = new Set();
+      for (const a of document.querySelectorAll('a[href*="/contacts/"]')) {
+        const m = /\/contacts\/(\d+)/.exec(a.getAttribute('href') || '');
+        if (m) ids.add(m[1]);
+      }
+      return [...ids];
     });
-    if (href) return new URL(href, 'https://my.reiblackbook.com').href;
+    if (found.length === 1) {
+      console.log(`      REI matched on "${term}"`);
+      return new URL(`/contacts/${found[0]}`, 'https://my.reiblackbook.com').href;
+    }
+    if (found.length > 1) {
+      console.log(`      "${term}" matched ${found.length} contacts - too many to be sure, trying the next form`);
+    }
   }
   return '';
 }
@@ -271,11 +331,17 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
      * See the note on that function — this one parameter parked two real bookings for twenty-five hours.
      */
     let targetUrl = /reiblackbook\.com\/contacts\/\d+/i.test(String(reiLink || '')) ? contactPageUrl(reiLink) : '';
+    /* Remembered, because a contact reached BY SEARCH has to prove it is the right one — see below. */
+    let foundByPhone = '';
     if (!targetUrl && emailFallback.phone) {
       targetUrl = await findContactUrlByPhone(page, emailFallback.phone);
+      if (targetUrl) foundByPhone = emailFallback.phone;
     }
     if (!targetUrl) {
-      throw new Error('Could not locate the REI contact (no direct contact link and no phone match).');
+      throw new Error('Could not locate the REI contact by phone. Searched '
+        + phoneSearchTerms(emailFallback.phone).map((t) => `"${t}"`).join(', ')
+        + ' and none matched exactly one contact. Open the lead in REI, copy its contact link into the '
+        + 'REI BlackBook Link column, and the next run will use that instead of searching.');
     }
 
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: config.reiPageTimeoutMs });
@@ -308,6 +374,35 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
 
     const sellerName = valueForLabel(pairs, L.sellerName || ['Name']);
     const phone = valueForLabel(pairs, L.phone || ['Phone (Mobile)', 'Phone (Home)', 'Phone']);
+
+    /*
+     * A contact reached BY SEARCH must prove it is the right person, before anything is read off it.
+     *
+     * The search is now strict — exactly one contact or nothing — but strict is not the same as verified.
+     * REI's search could match on a note, an address, a second number on the record; the page could be a
+     * cached render of a previous contact; a UI change could break the filter while leaving one row on
+     * screen. Every one of those ends the same way: a stranger's address, appointment time and assigned
+     * owner written onto this booking, and a colleague sent to the wrong house. That is the one outcome
+     * here that is worse than the row staying parked.
+     *
+     * So the phone on the page has to carry the same last ten digits as the phone we searched for. A
+     * contact with NO phone rendered is not a failure — the panel may not have painted it — but it is also
+     * not proof, so it is refused with a different message and a link to look at.
+     */
+    if (foundByPhone) {
+      const want = phoneKey(foundByPhone);
+      const got = phoneKey(phone);
+      if (!got) {
+        throw new Error(`REI's search matched a contact for ${foundByPhone}, but that contact page shows no `
+          + `phone number, so there is no way to confirm it is the right person. Nothing was read from it. `
+          + `Check ${contactPageUrl(page.url())} by hand.`);
+      }
+      if (want && got !== want) {
+        throw new Error(`REI's search for ${foundByPhone} landed on a contact whose phone is ${phone} `
+          + `- a different person. Nothing was read from it, and this booking stays parked rather than `
+          + `taking a stranger's address. Page: ${contactPageUrl(page.url())}`);
+      }
+    }
     const email = valueForLabel(pairs, L.email || ['Email']);
     const propertyAddress = valueForLabel(pairs, L.propertyAddress || ['Property Address']);
     const apptTime = valueForLabel(pairs, L.appointmentTime || ['Appointment Time']);
