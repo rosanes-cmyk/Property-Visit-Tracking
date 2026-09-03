@@ -87,13 +87,66 @@ export async function describeReiCookies(context) {
   }
 }
 
+/**
+ * How the PREVIOUS run's Chromium ended, according to Chromium itself.
+ *
+ * This is the fact the whole logout hunt needed and nobody had. Chromium writes `profile.exit_type` into
+ * the profile's own Preferences file: it sets it to "Crashed" while running and back to "Normal" on a
+ * graceful shutdown. So anything other than "Normal" means the last run was KILLED — and a killed Chromium
+ * never flushes its cookie database, which is what was costing the REI session.
+ *
+ * It is also the source of the "Restore pages? Chromium didn't shut down correctly" bubble the client
+ * screenshotted. That was Chromium reporting this exact field, and it was the one hard clue in the whole
+ * investigation.
+ *
+ * MUST BE READ BEFORE THE BROWSER LAUNCHES. Chromium stamps "Crashed" as it starts up, so once the context
+ * is open the file describes THIS run, not the last one, and would report a crash on every single launch.
+ * That is a diagnostic that always says yes, which is the same as one that says nothing.
+ *
+ * Never throws, and a missing file is not a problem — it means a fresh profile.
+ */
+export function readLastChromiumExit(profileDir) {
+  for (const rel of ['Default/Preferences', 'Preferences']) {
+    try {
+      const raw = fs.readFileSync(path.join(profileDir, rel), 'utf8');
+      const prefs = JSON.parse(raw);
+      const p = prefs.profile || {};
+      if (p.exit_type == null && p.exited_cleanly == null) continue;
+      return {
+        found: true,
+        exitType: String(p.exit_type == null ? '' : p.exit_type),
+        exitedCleanly: p.exited_cleanly !== false,
+        clean: p.exit_type == null ? p.exited_cleanly !== false : String(p.exit_type) === 'Normal'
+      };
+    } catch { /* try the next location */ }
+  }
+  return { found: false, exitType: '', exitedCleanly: true, clean: true };
+}
+
 /** Record the state the browser opened in, and arm the close/exit records. */
-export async function noteReiSessionOpen(context, profileDir) {
+export async function noteReiSessionOpen(context, profileDir, lastExit) {
   const c = await describeReiCookies(context);
   line(`OPEN   profile=${profileDir}  reiCookies=${c.total}` +
     (c.names.length ? `  [${c.names.join(', ')}]` : '') +
     (c.soonestExpiry ? `  soonestExpiry=${c.soonestExpiry}` : '') +
     (c.error ? `  cookieReadError=${c.error}` : ''));
+
+  /*
+   * Written on its own line, and on screen too when it is bad. A line in a log nobody opens is how this
+   * took a week: the client was told to check the PC three times while Chromium had already recorded the
+   * answer in its own profile.
+   */
+  if (lastExit && lastExit.found) {
+    line(lastExit.clean
+      ? 'PREV   the previous run closed Chromium cleanly (exit_type=Normal)'
+      : `PREV   ** the previous run did NOT close Chromium cleanly (exit_type=${lastExit.exitType || 'not Normal'}) ` +
+        '— cookies from that run were probably lost, which signs REI out **');
+    if (!lastExit.clean) {
+      console.warn('  NOTE: the previous REI run did not shut the browser down cleanly, so its cookies were');
+      console.warn('  probably never written to disk. That is what signs REI out. If this repeats, something');
+      console.warn('  is killing the run — Ctrl+C, the console window being closed, or Task Scheduler.');
+    }
+  }
 
   let closed = false;
   try { context.on('close', () => { closed = true; line('CLOSE  context closed'); }); } catch { /* older API */ }

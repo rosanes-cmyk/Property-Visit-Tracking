@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { config } from '../config.mjs';
-import { noteReiSessionOpen, noteReiAuthResult } from './session-log.mjs';
+import { noteReiSessionOpen, noteReiAuthResult, readLastChromiumExit } from './session-log.mjs';
+import { onShutdown } from '../utils/shutdown.mjs';
 
 export class ReiSessionExpiredError extends Error {
   constructor(message = 'REI BlackBook session is not authenticated.') {
@@ -13,6 +14,12 @@ export class ReiSessionExpiredError extends Error {
 
 export async function launchReiContext({ headless = config.reiHeadless } = {}) {
   await fs.mkdir(config.reiUserDataDir, { recursive: true });
+  /*
+   * Read BEFORE the launch, or it describes this run instead of the last one — Chromium stamps
+   * exit_type="Crashed" as it starts and only rewrites it to "Normal" on a clean shutdown. See
+   * readLastChromiumExit.
+   */
+  const lastExit = readLastChromiumExit(config.reiUserDataDir);
   const context = await chromium.launchPersistentContext(config.reiUserDataDir, {
     headless,
     timezoneId: config.calendarTimezone,
@@ -31,7 +38,25 @@ export async function launchReiContext({ headless = config.reiHeadless } = {}) {
    *
    * Awaited, but it cannot throw — a diagnostic must not be able to fail the run it is describing.
    */
-  await noteReiSessionOpen(context, config.reiUserDataDir);
+  await noteReiSessionOpen(context, config.reiUserDataDir, lastExit);
+  /*
+   * AN INTERRUPTED RUN NOW CLOSES CHROMIUM INSTEAD OF LEAVING IT TO BE KILLED. This is the fix for REI
+   * signing this machine out several times a day.
+   *
+   * Chromium keeps cookies in memory and writes them to the profile's `Cookies` database on a lazy timer
+   * and, in full, on a graceful shutdown. A killed browser never does that last part, so the REI session
+   * cookie on disk reverts to a value REI has already rotated past — and the next run lands on the login
+   * page. Nothing errors; the sweep simply reads 0 of 20 leads with 20 login redirects.
+   *
+   * Order 10, ahead of the lock's 90: the browser must finish closing before the lock is released, or the
+   * next run can open the same profile while this one is still writing to it.
+   *
+   * Deregistered when the context closes, so the normal path — every script closes its context in a
+   * `finally` — does not leave a stale closer behind, and Ctrl+C after a clean close does nothing.
+   */
+  const drop = onShutdown(() => context.close().catch(() => {}),
+    { order: 10, label: 'close the REI browser' });
+  try { context.on('close', drop); } catch { /* older Playwright: the closer is harmless either way */ }
   return context;
 }
 

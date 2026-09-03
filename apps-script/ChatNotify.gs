@@ -624,6 +624,52 @@ function reiSweepAgeMinutes_() {
   return when ? Math.round((Date.now() - when.getTime()) / 60000) : null;
 }
 
+/**
+ * When the office PC last reported REI as SIGNED OUT — or null if the last thing it reported was a sweep.
+ *
+ * WHY THIS EXISTS. The held-queue card could only see the absence of a sweep stamp, so it said "REI has not
+ * been checked" and then listed generic things to look at, starting with "is it switched on and logged in to
+ * Windows?" — while two lines below it in the same Space, the PC's own card said the sweep had RUN and been
+ * redirected to the login page twenty times. The client, correctly: "this is shot ypu know th pc is on".
+ *
+ * A card that asks somebody to verify a thing it already knows is worse than one that says nothing: it costs
+ * a walk to the machine, and it teaches people the card is not worth reading. The PC now writes a LOGOUT row
+ * into the Automation Log, which is the tab both halves of this system already write to, so the two cards
+ * can agree instead of contradicting each other.
+ *
+ * Bounded and blocked exactly like reiSweptAt_, and it stops at whichever comes FIRST from the end: a sweep
+ * newer than a logout means somebody signed in and it is working again, and returning the stale logout then
+ * would be the same class of mistake in the other direction.
+ */
+function reiLoggedOutAt_() {
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName('Automation Log');
+    if (!sh) return null;
+    var last = sh.getLastRow();
+    if (last < 2) return null;
+    var BLOCK = 250;
+    var MAX_SCAN = 2000;
+    var scanned = 0;
+    var upto = last;
+    while (upto >= 2 && scanned < MAX_SCAN) {
+      var from = Math.max(2, upto - BLOCK + 1);
+      var vals = sh.getRange(from, 1, upto - from + 1, 2).getValues();
+      for (var i = vals.length - 1; i >= 0; i--) {
+        var lvl = String(vals[i][1]).trim().toUpperCase();
+        if (lvl === 'SWEEP') return null;            // checked since — not signed out any more
+        if (lvl !== 'LOGOUT') continue;
+        var d = new Date(vals[i][0]);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      scanned += vals.length;
+      upto = from - 1;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function reiFreshness_() {
   try {
     var when = reiSweptAt_();
@@ -1457,26 +1503,58 @@ function postQueueHeldNotice_(age) {
   var hours = age === null ? null : Math.round(age / 60);
   var howOld = age === null ? 'never' : (age < 90 ? age + ' minutes ago' : hours + ' hours ago');
 
-  var body =
-    '<b>The work queue is being held back.</b><br><br>'
-    + 'REI has not been checked ' + (age === null ? '<b>at all</b>' : '<b>since ' + (since || howOld) + '</b>')
-    + (who ? ' — the automation runs on <b>' + who + '</b>.' : '.')
-    + '<br><br>'
-    + 'So today\'s list is <b>not being published</b>: it would be built from a tracker nobody has verified, '
-    + 'and a work queue you cannot trust is worse than none. <b>No lead has been left out — none has been '
-    + 'shown.</b><br><br>'
-    + '<b>What to check on that PC:</b><br>'
-    + '• is it switched on and logged in to Windows?<br>'
-    + '• is REI still signed in? — run <b>scripts\\login-rei.cmd</b><br>'
-    + '• open <b>scripts\\dashboard.cmd</b> — it says which of these it is<br><br>'
-    + 'The queue posts itself as soon as one sweep finishes. Nothing needs restarting.';
+  /*
+   * WHEN WE KNOW WHY, SAY WHY — and drop the checklist.
+   *
+   * The generic version of this card asked "is it switched on and logged in to Windows?" while the PC's own
+   * card, posted minutes earlier into the same Space, said the sweep had run and been bounced to the login
+   * page twenty times. A sweep that runs is proof the machine is on, Chromium launched, and REI answered.
+   * The client, having walked to a PC that was plainly working: "this is shot ypu know th pc is on".
+   *
+   * So a LOGOUT row newer than the last sweep replaces the whole checklist with the one thing that is
+   * actually true and the one command that fixes it. The generic list is kept for the case it was written
+   * for — no sweep and no logout report either, which really can mean the machine is off.
+   */
+  var loggedOutAt = null;
+  try { loggedOutAt = reiLoggedOutAt_(); } catch (e) { loggedOutAt = null; }
+
+  var body;
+  if (loggedOutAt) {
+    var seen = Utilities.formatDate(loggedOutAt, Session.getScriptTimeZone(), 'h:mm a \'on\' EEE d MMM');
+    body =
+      '<b>The work queue is being held back — REI is signed out.</b><br><br>'
+      + 'The automation' + (who ? ' on <b>' + who + '</b>' : '') + ' is running fine: it opened REI at '
+      + '<b>' + seen + '</b> and REI sent it to the login page. So the PC is on and nothing is broken — '
+      + 'the browser just needs signing back in.<br><br>'
+      + 'Today\'s list is <b>not being published</b> because it would be built from a tracker nobody has '
+      + 'verified. <b>No lead has been left out — none has been shown.</b><br><br>'
+      + '<b>The fix, on that PC:</b> double-click <b>scripts\\login-rei.cmd</b>, sign in, close the window.'
+      + '<br><br>'
+      + 'The queue posts itself as soon as one sweep finishes. Nothing needs restarting.';
+  } else {
+    body =
+      '<b>The work queue is being held back.</b><br><br>'
+      + 'REI has not been checked ' + (age === null ? '<b>at all</b>' : '<b>since ' + (since || howOld) + '</b>')
+      + (who ? ' — the automation runs on <b>' + who + '</b>.' : '.')
+      + '<br><br>'
+      + 'So today\'s list is <b>not being published</b>: it would be built from a tracker nobody has verified, '
+      + 'and a work queue you cannot trust is worse than none. <b>No lead has been left out — none has been '
+      + 'shown.</b><br><br>'
+      + '<b>What to check on that PC:</b><br>'
+      + '• is it switched on and logged in to Windows?<br>'
+      + '• is REI still signed in? — run <b>scripts\\login-rei.cmd</b><br>'
+      + '• open <b>scripts\\dashboard.cmd</b> — it says which of these it is<br><br>'
+      + 'The queue posts itself as soon as one sweep finishes. Nothing needs restarting.';
+  }
 
   var widgets = [{ textParagraph: { text: body } }];
   var url = dashboardUrl_();
   if (url) widgets.push({ buttonList: { buttons: [{ text: 'Open dashboard', onClick: { openLink: { url: url } } }] } });
 
   var err = chatPost_({ cardsV2: [{ cardId: 'queueHeld', card: {
-    header: { title: '⚠️ Work queue held — REI not checked', subtitle: fmt_(today_()) + ' · nothing published' },
+    header: { title: loggedOutAt ? '⚠️ Work queue held — REI is signed out'
+                                 : '⚠️ Work queue held — REI not checked',
+              subtitle: fmt_(today_()) + ' · nothing published' },
     sections: [{ widgets: widgets }]
   } }] });
   logAuto_('CHAT', '', err ? ('Outage notice FAILED: ' + err) : 'Outage notice posted instead of the work queue.');

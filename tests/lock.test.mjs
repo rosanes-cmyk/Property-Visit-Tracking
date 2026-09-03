@@ -125,12 +125,40 @@ try {
    * existed. I had told him to Ctrl+C a sweep three times that day, so it was not an edge case.
    */
   const SRC = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/src/utils/lock.mjs'), 'utf8');
-  check('an interrupt is handled', /for \(const signal of \['SIGINT', 'SIGTERM', 'SIGHUP'\]\)/.test(SRC), true);
-  check('...and a clean exit too', /process\.once\('exit', releaseSync\)/.test(SRC), true);
+  /*
+   * Still true, but the lock no longer does it ITSELF — and that change is a bug fix, not a refactor.
+   *
+   * The handlers used to live here and end in `process.exit()`. The lock is taken BEFORE the REI browser
+   * opens, so that handler was always first in line, and process.exit() ends the process on the spot: no
+   * finally, no `await context.close()`. Chromium was killed rather than shut down, so it never flushed its
+   * cookie database — and REI signed this machine out several times a day for a week because of it.
+   *
+   * The exit now happens in src/utils/shutdown.mjs, after the browser has closed. The signal handling and
+   * the 130/143 codes are asserted there, along with the guard against this loop ever coming back;
+   * tests/rei-session-survives-interrupt.test.mjs owns that. What this file still owns is the lock's own
+   * half of the bargain: it registers a release that runs on both paths, and it releases LAST.
+   */
+  check('the release is registered with the shutdown coordinator',
+    /onShutdown\(releaseSync, \{ order: 90, sync: true/.test(SRC), true);
+  check('...sync, so a plain exit releases it too', /sync: true/.test(SRC), true);
   check('...unlinking synchronously, because the process is on its way out',
     /fsSync\.unlinkSync\(LOCK_PATH\)/.test(SRC), true);
-  check('...and exiting with the conventional 128 + signal',
-    /process\.exit\(signal === 'SIGINT' \? 130 : 143\)/.test(SRC), true);
+  /*
+   * Order 90 against the browser's 10. Release the lock first and the next scheduled run can open the same
+   * REI profile while this Chromium is still writing to it — two browsers on one profile, which is the exact
+   * failure the lock exists to prevent and which presents identically to the logout bug.
+   */
+  check('...and released LAST, after the browser has closed',
+    Number((SRC.match(/order: (\d+), sync: true/) || [])[1]) > 10, true);
+  /*
+   * Against comment-STRIPPED source, because the comment above the fix says the words "process.exit()" and
+   * this assertion matched them and failed. That is the sixth time in this project a check has passed or
+   * failed on prose rather than code — including, twice, an assertion that something had been REMOVED
+   * tripping on the comment explaining the removal. A negative assertion has to read the code only.
+   */
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  check('the lock no longer calls process.exit itself', /process\.exit/.test(CODE), false);
+  check('...and installs no signal handler of its own', /'SIGINT'/.test(CODE), false);
   /*
    * The guard that makes the cleanup safe rather than dangerous: without it, this process releases the lock,
    * another takes it, this one later exits — and deletes the OTHER run's lock file. Two browsers on one REI

@@ -82,8 +82,9 @@ check('...and keeps the NEWEST entries', /\.slice\(-Math\.floor\(MAX_BYTES \/ 2\
 check('it is its own file, not the noisy main log', /logs\/rei-session\.log/.test(LOG), true);
 
 console.log('\n=== It is actually wired into the browser ===');
+// The third argument is Chromium's own verdict on the PREVIOUS run — see readLastChromiumExit.
 check('every REI context records its open state',
-  /await noteReiSessionOpen\(context, config\.reiUserDataDir\);/.test(BROWSER), true);
+  /await noteReiSessionOpen\(context, config\.reiUserDataDir, lastExit\);/.test(BROWSER), true);
 check('...before the context is handed to the caller',
   BROWSER.indexOf('noteReiSessionOpen') < BROWSER.indexOf('return context;'), true);
 check('a login-page redirect is recorded before it throws',

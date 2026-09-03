@@ -899,6 +899,26 @@ if (failures.length) {
      * is "nothing is being checked at all", which is the opposite of noise.
      */
     await alertLoggedOut(loggedOut, candidates.length);
+    /*
+     * And write it into the workbook's Automation Log, where Apps Script can SEE it.
+     *
+     * The Chat alert went straight to the webhook, so the 9am/11am/4pm held-queue card had no idea why the
+     * sweep had stopped stamping. It could only say "REI has not been checked" and then list generic
+     * checks — starting with "is the PC switched on and logged in to Windows?" — while the other card, two
+     * lines below it in the same Space, said the sweep had RUN and been bounced to the login page twenty
+     * times. The client, reasonably: "this is shot ypu know th pc is on".
+     *
+     * They were right, and a card that asks you to verify something it already knows is worse than a card
+     * that says nothing: it costs a trip to the machine and it teaches people the card is not worth
+     * reading. One shared signal, in the log both halves already write to, so the two cards agree.
+     *
+     * NOT rate-limited like the Chat message. The alert is throttled to once every two hours so the Space
+     * is not spammed; the log row is what the card reads to know the CURRENT state, so it must be written
+     * on every run that hits this.
+     */
+    auditRows.push({ level: 'LOGOUT', id: '',
+      message: `REI is signed out on ${os.hostname()} — the sweep ran and was redirected to the login page `
+        + `on ${loggedOut} of ${candidates.length} lead(s). Run scripts\\login-rei.cmd on that PC.` });
   }
   for (const f of failures.filter((x) => !/login/i.test(x.reason)).slice(0, 5)) {
     console.log(`  row ${f.row.__rowNumber}  ${f.row['Seller Name'] || '(no name)'} — ${f.reason}`);

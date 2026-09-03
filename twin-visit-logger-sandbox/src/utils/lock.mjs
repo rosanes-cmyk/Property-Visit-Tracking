@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { onShutdown } from './shutdown.mjs';
 
 const STALE_AFTER_MS = 30 * 60 * 1000;
 
@@ -72,8 +73,6 @@ export async function acquireLock(name = 'run') {
      * exists. I told him to Ctrl+C a sweep three times today, so this is my omission rather than an edge case.
      *
      * Synchronous unlink on purpose: the process is on its way out and an await here may never resolve.
-     * signal:false so a second Ctrl+C still kills it outright, and the exit code is the conventional
-     * 128 + signal so a wrapper script can still tell it was interrupted.
      */
     /*
      * `released` guards both handlers, and it is not a nicety.
@@ -87,15 +86,24 @@ export async function acquireLock(name = 'run') {
       released = true;
       try { fsSync.unlinkSync(LOCK_PATH); } catch { /* already gone */ }
     };
-    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-      process.once(signal, () => {
-        releaseSync();
-        // 128 + signal, the conventional code, so a wrapper can still tell this was interrupted.
-        process.exit(signal === 'SIGINT' ? 130 : 143);
-      });
-    }
-    /* A clean exit — including an uncaught throw — leaves nothing behind either. */
-    process.once('exit', releaseSync);
+    /*
+     * THE LOCK NO LONGER CALLS process.exit(), AND THAT ONE LINE IS THE REI LOGOUT BUG.
+     *
+     * What stood here was its own SIGINT/SIGTERM/SIGHUP handler ending in `process.exit()`. The lock is
+     * taken BEFORE the browser opens, so this handler was always first in line — and process.exit() ends
+     * the process on the spot. No finally, no `await context.close()`, no Playwright cleanup. Chromium was
+     * killed rather than shut down, so it never flushed its cookie database, so the REI session cookie on
+     * disk fell back to a value REI no longer accepted, and the next run was redirected to the login page.
+     *
+     * Every Ctrl+C, every Task Scheduler stop, every closed console window cost the client their REI login.
+     * Signing back in worked until the next interrupt, which is exactly what they kept describing: "i
+     * laready log in earlier why i kept logging in".
+     *
+     * The exit now happens in src/utils/shutdown.mjs, AFTER the browser has been closed properly — order 90
+     * here against the browser's order 10, so the lock is the last thing released and nothing can open the
+     * profile while Chromium is still writing to it. See shutdown.mjs for the full account.
+     */
+    onShutdown(releaseSync, { order: 90, sync: true, label: 'release the run lock' });
 
     return release;
   } catch (error) {
