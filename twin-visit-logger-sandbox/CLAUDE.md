@@ -361,11 +361,25 @@ The visit briefing is the ONE message allowed to keep the seller's phone and ema
 { keepContactDetails: true })`, at exactly one call site, asserted by `tests/notify.test.mjs`. A redacted
 briefing sends the visitor to a house to meet somebody they cannot ring. Both destinations are team-only.
 
-The briefing is a WhatsApp thing and does NOT go to Google Chat. It was routed there when WhatsApp was
-switched off; the client saw it land in the alerts channel and decided otherwise — *"it should be in the
-whatsapp only, so we dont need that in the alert gc, and should be only in the whatsapp if we enable again."*
-`CHAT_VISIT_BRIEFING` defaults to `false`. Nothing is lost: a booking still creates the row, the dashboard
-entry and Juan's calendar event, and still appears on the 11am/3pm work queue under Upcoming Visit.
+**`CHAT_VISIT_BRIEFING` now defaults to `true`, and this paragraph used to say the opposite.** The client
+first sent the briefing to WhatsApp only — *"it should be in the whatsapp only, so we dont need that in the
+alert gc"* — and then reversed it twice over, once when WhatsApp was abandoned (*"it will send notif always
+in the gc about the notes instead for whats app"*) and again when a booking reached the calendar in silence:
+*"no that is stupid once it add to calendar shoudl fire that one as we;;"*. With WhatsApp gone, Chat is not a
+duplicate of anything — it is the only place the visitor gets this.
+
+The default changed rather than the documentation, because a setting somebody must edit before the software
+does its job is a bug with a workaround. The client's words when asked to edit it: *"why would i type that,
+it should be automated."* `CHAT_VISIT_BRIEFING=false` still turns it off.
+
+**It fires from BOTH producers, and only on a NEWLY CREATED event.** `postVisitBriefing_` in
+`apps-script/ChatNotify.gs` covers bookings that reach the calendar through `webIntake_`; the block at the
+end of the per-row loop in `scripts/fill-pending-rei.mjs` covers the ones the office PC finishes off a parked
+row. Having it on one side only is precisely the fault the client reported — *"the notif is not firing once
+the calendar is created"* — on a row the PC had filled. A visit that merely MOVES still posts nothing.
+
+Neither path may skip in silence. A run with the briefing switched off SAYS so, on the row and in the
+startup banner, because an absent line is indistinguishable from a failure and a day was lost to that.
 
 Google Chat (`CHAT_WEBHOOK_URL`) remains the client's own Workspace and permitted to
 automate. That was always the valuable part — the visitor having the property, the drive plan, the numbers and

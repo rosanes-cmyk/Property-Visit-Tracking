@@ -316,7 +316,21 @@ async function noteParkReason(sheets, headers, row, reason) {
 
 async function main() {
   console.log('Twin Visit Logger · finish the rows added on the board');
-  console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY RUN — nothing will be written'}\n`);
+  console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY RUN — nothing will be written'}`);
+  /*
+   * SAY UP FRONT WHETHER THE BRIEFING WILL GO OUT.
+   *
+   * The client: "the notif is not firing once the calendar is created, it should create and fire as well".
+   * The code to post it has been here all along and its default is ON — so either their .env turns it off,
+   * or something skipped it. From the output there was no way to tell those apart, because a run with the
+   * briefing switched off printed NOTHING about it. That is the same silent-skip this project keeps being
+   * bitten by: the absence of a line read as "it did not happen for some unknown reason", when the honest
+   * answer was "it was switched off, here is the switch".
+   */
+  console.log(`Chat briefing: ${config.chatVisitBriefing
+    ? 'ON — a new calendar event posts the visit briefing to Google Chat'
+    : 'OFF — set CHAT_VISIT_BRIEFING=true in .env to have bookings post to Chat'}`);
+  console.log('');
 
   const auth = await authorizeGoogle();
   const sheets = google.sheets({ version: 'v4', auth });
@@ -781,6 +795,14 @@ async function main() {
           { kind: 'ok', keepContactDetails: true }
         );
         console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted — check CHAT_WEBHOOK_URL'}`);
+      } else {
+        /*
+         * NEVER SKIP IN SILENCE. A booking that reaches the board and the calendar and then says nothing
+         * about the briefing looks identical to one where the briefing failed — and the client spent a day
+         * on exactly that, asking why the notification was not firing when the answer was a switch.
+         */
+        console.log('    Chat briefing SKIPPED — CHAT_VISIT_BRIEFING is off in .env.'
+          + ' Set CHAT_VISIT_BRIEFING=true to have this booking post to Chat.');
       }
 
       if (mergingInto) {

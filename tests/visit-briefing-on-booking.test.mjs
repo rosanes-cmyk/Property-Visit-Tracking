@@ -84,6 +84,41 @@ check('maybeCreateVisitEvent_ does not post anything itself',
   /postVisitBriefing_/.test(chokePoint), false);
 check('...and it is a real slice, not an empty one', chokePoint.length > 500, true);
 
+console.log('\n=== The PC path says whether the briefing will fire, and never skips in silence ===');
+/*
+ * THE CLIENT'S REPORT: "the notif is not firing once the calendar is created, it should create and fire as
+ * well." The row in question was filled by the PC (fill-pending-rei.mjs), not by webIntake_ — the output
+ * read:
+ *
+ *     filled row 400 - calendar event set
+ *     cleared the "waiting for the PC" flag on row 400
+ *     REI task still open - no matching REI task was found on the contact
+ *
+ * and nothing at all about the briefing. The posting code has been there all along and its default is ON,
+ * so the honest answer was one of two things — the .env switches it off, or something skipped it — and the
+ * output gave no way to tell them apart. An absent line is not evidence; it is the absence of evidence, and
+ * this project has lost days to exactly that.
+ */
+const FILL = read('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs');
+check('the run says up front whether the briefing is on',
+  /Chat briefing: \$\{config\.chatVisitBriefing/.test(FILL), true);
+check('...naming the switch when it is off',
+  /set CHAT_VISIT_BRIEFING=true in \.env/.test(FILL), true);
+check('a booking with the briefing off SAYS so',
+  /Chat briefing SKIPPED — CHAT_VISIT_BRIEFING is off in \.env\./.test(FILL), true);
+check('...and a booking with it on reports posted or not',
+  /Chat briefing \$\{posted \? 'posted' : 'NOT posted — check CHAT_WEBHOOK_URL'\}/.test(FILL), true);
+// The default is ON, so nobody has to edit a config file to get the one channel the team actually has.
+check('the default is on', /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, true\)/.test(
+  read('twin-visit-logger-sandbox/src/config.mjs')), true);
+/*
+ * WhatsApp stays OFF. Four numbers have been banned or restricted running it, and the agreed design is that
+ * the briefing lands in Chat with a line telling a person to make the group by hand. That line is the
+ * handover, and it must not quietly become an automated group creation.
+ */
+check('the Chat message still hands the group to a person',
+  /NEXT: create the WhatsApp group, add the team, and paste this briefing/.test(FILL), true);
+
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.
 check('the office PC still owns the morning briefing',
