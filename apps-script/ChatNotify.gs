@@ -324,7 +324,8 @@ function notifyNewBookings() {
       id: id,
       seller: rec['Seller Name'] || '(no name)',
       address: rec['Property Address'],
-      date: cellDisplay_('Visit Date', rec['Visit Date']) || 'no date',
+      // bookingDate_, NOT cellDisplay_: an unusable date says so instead of printing 1969-12-31.
+      date: bookingDate_(rec['Visit Date']),
       time: cellDisplay_('Visit Time', rec['Visit Time']) || 'time not set',
       visitor: rec['Assigned Visitor'] || rec['Assigned Owner'] || 'UNASSIGNED',
       stage: rec['Current Stage'] || '(no stage)',
@@ -421,7 +422,8 @@ function postVisitBriefing_(rowNum) {
     if (!addr) return '';
 
     var when = R.get('Visit Date');
-    var day = when ? fmt_(new Date(when)) : 'date not set';
+    // Same guard as the booking card: `fmt_(new Date(when))` is what printed 1969-12-31. See bookingDate_.
+    var day = when ? bookingDate_(when) : 'date not set';
     var clock = (typeof timeCell_ === 'function' ? timeCell_(R.get('Visit Time')) : '') || 'time not set';
     var seller = String(R.get('Seller Name') || '').trim() || '(no name)';
     var phone = String(R.get('Phone') || '').trim();
@@ -1204,6 +1206,33 @@ function digestMoney_(v) {
  * only sign was two tests failing with "the rules are carried verbatim: false". A marker that means
  * something is one that cannot be edited by accident.
  */
+
+/*
+ * The earliest year a VISIT date can plausibly be. The imported legacy records go back to 2023, so this is
+ * nowhere near the real data; it is here to catch a manufactured date, and it matches dateValue_'s floor.
+ */
+var CARD_DATE_FLOOR_YEAR = 2015;
+
+/**
+ * A visit date for a CARD — or a warning that says so, and never a date nobody booked.
+ *
+ * "🗓 1969-12-31 · time not set", on a New property visit booked card, which is what the client was looking
+ * at when they asked "do you see the date is bug". The row genuinely held that date: a booking arrived with
+ * no usable Visit Date, `new Date(v)` at the write site turned the epoch into a real one, and a Pacific
+ * sheet put it on the evening before — 1969, not 1970. dateValue_ stops new rows getting that far.
+ *
+ * This is the other half, and it is the half that matters for rows that ALREADY hold a bad date: the card is
+ * the last thing between a wrong value and a person acting on it. A card that prints 1969-12-31 reads as a
+ * broken alert and gets scrolled past; one that says the date is not usable sends somebody to the row. The
+ * offending value is quoted, because "no usable date" with nothing else leaves them guessing what to fix.
+ */
+function bookingDate_(raw) {
+  var d = dateCell_(raw);
+  if (d && d.getFullYear() >= CARD_DATE_FLOOR_YEAR) return fmt_(d);
+  var shown = d ? fmt_(d) : String(raw == null ? '' : raw).trim();
+  if (!shown || shown === '0') return 'no date';
+  return '⚠️ no usable date (sheet says ' + shown + ')';
+}
 
 /*
  * ── Check the buckets FIRST, then send. ──────────────────────────────────────────────────────────

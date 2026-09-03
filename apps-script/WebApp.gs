@@ -399,18 +399,78 @@ function timeValue_(v) {
   return v;
 }
 
+/*
+ * A date the sheet will hold as a REAL date, or NOTHING — never an invented one.
+ *
+ * `new Date(v)` stood at every date write site in this file, and it is wrong in two separate ways that
+ * both reached the client's screen.
+ *
+ *   IT INVENTS A DATE OUT OF NOTHING. A booking whose date was never captured arrives here as 0, or as
+ *   the "1970-01-01" that an upstream `new Date(0).toISOString()` produces, and `new Date` turns either
+ *   into a real, valid, catastrophically wrong date. Written into a Pacific sheet the epoch lands the
+ *   evening BEFORE, so the row, the board and the Chat card all read "1969-12-31" — which is exactly what
+ *   the client was looking at on Linda Perine's booking: "do you see the date is bug". A time-only cell
+ *   does the same thing one epoch earlier and prints 1899-12-30, which this project has already seen
+ *   twice. The project rule is not to guess dates, and there is a real difference between the two
+ *   failures: "no date" sends somebody to go and find out, while "1969-12-31" reads as a broken alert and
+ *   gets ignored.
+ *
+ *   A DATE-ONLY ISO STRING PARSES AS UTC. `new Date('2026-09-02')` is midnight UTC, which is 2026-09-01
+ *   17:00 in Pacific — so the cell holds the DAY BEFORE the one that was booked, with nothing on screen
+ *   saying so. This is the same gotcha that has bitten the Node side of this project. The parts are split
+ *   and rebuilt in local time instead, so the day that arrives is the day that is stored.
+ *
+ * Returns '' for anything it will not vouch for. Callers must SKIP the write on '' rather than writing it:
+ * blanking a good date already on the row because a bad one arrived would be worse than either bug above.
+ *
+ * The accepted window is deliberately wide. The 379 imported legacy records carry visit dates back to
+ * 2023, and a genuine booking can be a long way out, so anything from 2015 to five years ahead is fine.
+ * This is here to catch a manufactured date, not to police what the team types.
+ */
+var DATE_FLOOR_MS_ = new Date(2015, 0, 1).getTime();
+
+function dateSane_(d) {
+  if (!(d instanceof Date)) return false;
+  var t = d.getTime();
+  if (!isFinite(t)) return false;                                   // Invalid Date
+  if (t < DATE_FLOOR_MS_) return false;                             // the 1970 epoch, the 1899 serial epoch
+  return t < Date.now() + 5 * 365.25 * 86400000;
+}
+
+function dateValue_(v) {
+  if (v === '' || v == null) return '';
+  if (v instanceof Date) return dateSane_(v) ? v : '';
+  if (typeof v === 'number') {
+    // A Sheets serial. Anything at or under 1000 is a day-fraction (a time) or a zero, not a date.
+    if (!isFinite(v) || v <= 1000) return '';
+    var u = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+    var fromSerial = new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+    return dateSane_(fromSerial) ? fromSerial : '';
+  }
+  var s = String(v).trim();
+  if (!s) return '';
+  var iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  var d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
+  return dateSane_(d) ? d : '';
+}
+
 function webRescheduleRow_(row, params) {
   var sh = dataSheet_();
   var R = new RowAccessor_(sh, row);
   var changed = [];
+  var refused = [];
 
   ['Visit Date', 'Visit Time', 'Visit Status', 'Assigned Visitor', 'Assigned Owner',
     'Lead Source', 'Next Action', 'Next Action Due Date', 'REI BlackBook Link', 'Phone'
   ].forEach(function (h) {
     if (params[h] === undefined || params[h] === '') return;
-    var value = h === 'Visit Time' ? timeValue_(params[h])
-      : h.indexOf('Date') >= 0 ? new Date(params[h])
-      : params[h];
+    var value;
+    if (h === 'Visit Time') value = timeValue_(params[h]);
+    else if (h.indexOf('Date') >= 0) {
+      // A date we cannot vouch for is not written at all — see dateValue_. The one on the row stays.
+      value = dateValue_(params[h]);
+      if (value === '') { refused.push(h + '="' + params[h] + '"'); return; }
+    } else value = params[h];
     var before = R.get(h);
     R.set(h, value);
     if (String(before) !== String(value)) changed.push(h);
@@ -444,7 +504,15 @@ function webRescheduleRow_(row, params) {
   if (params['Visit Status']) runHandler_(onVisitStatus_, sh, row);
   else syncVisitCalendar_(sh, row);
   SpreadsheetApp.flush();
+  /*
+   * A refused date is reported, not swallowed. The row keeps the date it had — which is right — but a
+   * colleague who just typed a new one has to be told it did not take, or the form has lied to them in
+   * the same silent way everything else in this project has.
+   */
+  if (refused.length) logAuto_('INTAKE', R.get('Property ID'), 'Reschedule refused an unusable date: ' + refused.join(', '));
   return { ok: true, updated: true, row: row, changed: changed,
+    refusedDates: refused,
+    warning: refused.length ? ('Could not read ' + refused.join(', ') + ' — that date was NOT changed.') : '',
     id: R.get('Property ID'), seller: R.get('Seller Name'), data: webGetData() };
 }
 
@@ -549,10 +617,15 @@ function webAddRecordLocked_(params) {
   const map = ['Property Address','Seller Name','Phone','Email','Lead Source','Visit Date','Visit Time',
     'Visit Status','Assigned Visitor','Visit Notes','Seller Motivation','Current Stage','Assigned Owner',
     'Next Action','Next Action Due Date','REI BlackBook Link','Data Quality Status','Exception Reason'];
+  var refusedAdd = [];
   map.forEach(function(h){
     if (params[h] === undefined || params[h] === '') return;
     if (h === 'Visit Time') R.set(h, timeValue_(params[h]));
-    else if (h.indexOf('Date') >= 0) R.set(h, new Date(params[h]));
+    else if (h.indexOf('Date') >= 0) {
+      var dv = dateValue_(params[h]);                 // never invent a date — see dateValue_
+      if (dv === '') { refusedAdd.push(h + '="' + params[h] + '"'); return; }
+      R.set(h, dv);
+    }
     else R.set(h, params[h]);
   });
   R.set('Property ID', nextPropertyId_());
@@ -561,8 +634,21 @@ function webAddRecordLocked_(params) {
   stamp_(R);
   R.flush();
   if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
+  /*
+   * A booking whose date could not be read is flagged Incomplete rather than saved looking finished.
+   * Missing Required Fields already puts a dateless row on the work queue; this says WHY on the card.
+   */
+  if (refusedAdd.length) {
+    var RA = new RowAccessor_(sh, row);
+    RA.set('Data Quality Status', 'Incomplete');
+    RA.set('Exception Reason', 'Could not read the date: ' + refusedAdd.join(', ') + ' — add it by hand.');
+    RA.flush();
+    logAuto_('INTAKE', R.get('Property ID'), 'Add refused an unusable date: ' + refusedAdd.join(', '));
+  }
   SpreadsheetApp.flush();
   return { ok: true, created: true, ambiguous: Boolean(found.ambiguous), pending: true,
+    refusedDates: refusedAdd,
+    warning: refusedAdd.length ? ('Could not read ' + refusedAdd.join(', ') + ' — the record was saved WITHOUT it.') : '',
     data: webGetData(), newId: R.get('Property ID') };
 }
 
@@ -574,6 +660,7 @@ function webAction(action, id, params) {
   const rowNum = findRowById_(id);
   if (!rowNum) return { ok: false, error: 'Record not found: ' + id };
   const R = new RowAccessor_(sh, rowNum);
+  var refusedUpd = [];                 // dates this call would not vouch for — see dateValue_
   try {
     switch (action) {
       case 'visitCompleted':
@@ -593,20 +680,22 @@ function webAction(action, id, params) {
         if (params.amount) R.set('Counteroffer Amount', Number(params.amount));
         if (params.result) R.set('Last Contact Result', params.result);
         stamp_(R); R.flush(); runHandler_(onSellerCounter_, sh, rowNum); break;
+      // dateValue_ throughout, so an unreadable date falls back to today (or is left alone) instead of
+      // being turned into a real, valid, wrong one. See dateValue_ for what that looked like on screen.
       case 'contractSent':
-        R.set('Contract Sent Date', params.date ? new Date(params.date) : today_());
+        R.set('Contract Sent Date', dateValue_(params.date) || today_());
         stamp_(R); R.flush(); runHandler_(onContractSent_, sh, rowNum); break;
       case 'contractSigned':
-        R.set('Contract Signed Date', params.date ? new Date(params.date) : today_());
+        R.set('Contract Signed Date', dateValue_(params.date) || today_());
         stamp_(R); R.flush(); runHandler_(onContractSigned_, sh, rowNum); break;
       case 'nurture':
         R.set('Current Stage', 'Long-Term Nurture');
-        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        if (dateValue_(params.due)) R.set('Next Action Due Date', dateValue_(params.due));
         if (params.nextAction) R.set('Next Action', params.nextAction);
         stamp_(R); R.flush(); runHandler_(onStageManual_, sh, rowNum); break;
       case 'setNextAction':
         if (params.nextAction) R.set('Next Action', params.nextAction);
-        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        if (dateValue_(params.due)) R.set('Next Action Due Date', dateValue_(params.due));
         if (params.owner) R.set('Assigned Owner', params.owner);
         stamp_(R); R.flush(); break;
       case 'updateRecord': {
@@ -615,7 +704,17 @@ function webAction(action, id, params) {
         Object.keys(params).forEach(function(h){
           if (HEADERS.indexOf(h) < 0 || locked.indexOf(h) >= 0) return;
           var val = params[h];
-          if (h.indexOf('Date') >= 0) R.set(h, val ? new Date(val) : '');
+          /*
+           * An EMPTY value still clears the cell — a person editing the record is allowed to remove a
+           * date. A non-empty value we cannot read is skipped instead of invented, so a typo leaves the
+           * cell as it was rather than moving the visit to 1969.
+           */
+          if (h.indexOf('Date') >= 0) {
+            if (!val) { R.set(h, ''); return; }
+            var dvu = dateValue_(val);
+            if (dvu === '') { refusedUpd.push(h + '="' + val + '"'); return; }
+            R.set(h, dvu);
+          }
           else if (h === 'Approved Offer Amount' || h === 'Counteroffer Amount' || h === 'Asking Price' || h === 'Price Expectation') R.set(h, val === '' || val == null ? '' : Number(val));
           else R.set(h, val == null ? '' : val);
         });
@@ -639,7 +738,10 @@ function webAction(action, id, params) {
         return { ok: false, error: 'Unknown action: ' + action };
     }
     SpreadsheetApp.flush();
-    return { ok: true, data: webGetData() };
+    if (refusedUpd.length) logAuto_('INTAKE', id, 'Edit refused an unusable date: ' + refusedUpd.join(', '));
+    return { ok: true, data: webGetData(),
+      refusedDates: refusedUpd,
+      warning: refusedUpd.length ? ('Could not read ' + refusedUpd.join(', ') + ' — that field was left as it was.') : '' };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -1181,10 +1283,20 @@ function webIntake_(lead) {
   if (dup) {
     const U = new RowAccessor_(sh, dup.rowNum);
     var updated = [];
+    var badDates = [];
     var up = function(h, v){
       if (v === '' || v == null) return;
       if (h === 'Visit Time') U.set(h, timeValue_(v));
-      else if (h.indexOf('Date') >= 0) U.set(h, new Date(v));
+      else if (h.indexOf('Date') >= 0) {
+        /*
+         * A date this arrived with that nobody can vouch for is NOT written, and the row keeps the one it
+         * already has. Writing `new Date(v)` here is what put 1969-12-31 on a booking card; overwriting a
+         * good date with a blank would be worse still. See dateValue_.
+         */
+        var dv = dateValue_(v);
+        if (dv === '') { badDates.push(h + '="' + v + '"'); return; }
+        U.set(h, dv);
+      }
       else U.set(h, v);
       updated.push(h);
     };
@@ -1199,6 +1311,16 @@ function webIntake_(lead) {
     up('Assigned Visitor', g('Assigned Visitor', 'visitor'));
     U.set('Last Contact Date', today_());
     U.set('Updated By', 'Apps Script'); U.set('Last Updated Date', today_());
+    /*
+     * A rejected date has to be visible on the ROW, not only in the log. The row keeps whatever date it
+     * had, which is right — but if that was blank, the board would show a booking with no day on it and
+     * nothing saying why, which is the silent-success failure this project keeps running into.
+     */
+    if (badDates.length && !U.get('Visit Date')) {
+      U.set('Data Quality Status', 'Incomplete');
+      U.set('Exception Reason', 'The booking arrived with an unusable date (' + badDates.join(', ') +
+        ') — it was NOT saved. Put the real visit date on this row.');
+    }
     U.flush();
     /*
      * The calendar uses the address ON THE ROW, not the one that arrived with this message.
@@ -1232,8 +1354,11 @@ function webIntake_(lead) {
     }
     SpreadsheetApp.flush();
     logAuto_('INTAKE', dup.id, 'Lead updated from REI webhook · ' + addr +
-      (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') + ' · calendar: ' + calU);
-    return { ok: true, updated: true, id: dup.id, fields: updated, calendar: calU };
+      (updated.length ? ' · fields: ' + updated.join(', ') : ' · no field changes') +
+      (badDates.length ? ' · UNUSABLE date(s) rejected: ' + badDates.join(', ') : '') + ' · calendar: ' + calU);
+    return { ok: true, updated: true, id: dup.id, fields: updated, calendar: calU,
+      badDate: badDates.join(', '),
+      warning: badDates.length ? ('Could not read ' + badDates.join(', ') + ' — not saved.') : '' };
   }
   var row = 0;
   const addrs = sh.getRange(CFG.FIRST_DATA_ROW, col('Property Address'), CFG.MAX_ROWS - 1, 1).getValues();
@@ -1257,12 +1382,34 @@ function webIntake_(lead) {
     'Data Quality Status': g('Data Quality Status', 'dataQuality'),
     'Exception Reason': g('Exception Reason', 'exceptionReason')
   };
+  /*
+   * THE DATE IS SANITISED BEFORE ANYTHING SEES IT — the row, the calendar and the log all read from `map`.
+   *
+   * This is where "1969-12-31 · time not set" came from. `new Date(v)` stood in the loop below, the
+   * booking arrived with a Visit Date of 0 (or the "1970-01-01" an upstream `new Date(0).toISOString()`
+   * produces), and the epoch became a real date on the row — a Pacific sheet putting it on the evening
+   * before, hence 1969 rather than 1970. Nothing anywhere reported a problem: the row saved, the card
+   * posted, and the client was left reading a booking dated fifty-seven years ago.
+   *
+   * Cleared rather than corrected. There is no way to work out which day was meant, and the project rule
+   * is not to guess dates. A blank Visit Date is caught by Missing Required Fields, shows on the board as
+   * incomplete, and reads "no date" on the card — all of which send somebody to find out.
+   */
+  var badDate = '';
+  if (map['Visit Date'] !== '' && map['Visit Date'] != null && dateValue_(map['Visit Date']) === '') {
+    badDate = String(map['Visit Date']);
+    map['Visit Date'] = '';
+    map['Next Action Due Date'] = '';
+    map['Data Quality Status'] = 'Incomplete';
+    map['Exception Reason'] = 'The booking arrived with an unusable Visit Date ("' + badDate +
+      '") — it was NOT saved. Put the real visit date on this row.';
+  }
   const R = new RowAccessor_(sh, row);
   Object.keys(map).forEach(function(h){
     var v = map[h];
     if (v === '' || v == null) return;
     if (h === 'Visit Time') R.set(h, timeValue_(v));
-    else if (h.indexOf('Date') >= 0) R.set(h, new Date(v));
+    else if (h.indexOf('Date') >= 0) R.set(h, dateValue_(v));
     else R.set(h, v);
   });
   R.set('Property ID', nextPropertyId_());
@@ -1275,9 +1422,12 @@ function webIntake_(lead) {
   }
   SpreadsheetApp.flush();
   logAuto_('INTAKE', R.get('Property ID'), 'New lead created from REI webhook · ' + addr +
-    ' · visitor: ' + (map['Assigned Visitor'] || '(none)') + ' · visit: ' + (map['Visit Date'] ? fmt_(new Date(map['Visit Date'])) : '(none)') +
+    ' · visitor: ' + (map['Assigned Visitor'] || '(none)') + ' · visit: ' + (map['Visit Date'] ? fmt_(dateValue_(map['Visit Date'])) : '(none)') +
+    (badDate ? ' · UNUSABLE Visit Date rejected: "' + badDate + '"' : '') +
     ' · source: ' + (CFG.SANDBOX ? 'Intake-Sandbox' : 'Intake') + ' · calendar: ' + cal);
-  return { ok: true, created: true, id: R.get('Property ID'), sandbox: !!CFG.SANDBOX, calendar: cal };
+  return { ok: true, created: true, id: R.get('Property ID'), sandbox: !!CFG.SANDBOX, calendar: cal,
+    badDate: badDate,
+    warning: badDate ? ('Visit Date "' + badDate + '" could not be read and was not saved.') : '' };
 }
 
 /** Editor test: simulate an REI webhook end-to-end, then clean up. Run and read the log. */

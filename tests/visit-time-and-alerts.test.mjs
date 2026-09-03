@@ -42,8 +42,12 @@ for (const [label, src] of [['WebApp.gs', strip(WEB)], ['Code.combined.gs', stri
   // All four write sites, named individually: a blanket count would pass while one path still wrote a Date.
   check(`${label}: the booking form uses it`,
     /if \(h === 'Visit Time'\) R\.set\(h, timeValue_\(params\[h\]\)\);/.test(src), true);
+  /*
+   * The reschedule was a ternary and is now an if/else — dateValue_ needs a statement body, because a
+   * refused date SKIPS the write rather than producing a value to write. Same call, same position.
+   */
   check(`${label}: the reschedule uses it`,
-    /h === 'Visit Time' \? timeValue_\(params\[h\]\)/.test(src), true);
+    /if \(h === 'Visit Time'\) value = timeValue_\(params\[h\]\);/.test(src), true);
   check(`${label}: the intake upsert uses it`,
     /if \(h === 'Visit Time'\) U\.set\(h, timeValue_\(v\)\);/.test(src), true);
   check(`${label}: the intake create uses it`,

@@ -177,8 +177,14 @@ function processIntakeInbox_() {
     }
     var res;
     try { res = webIntake_(lead); } catch (e) { res = { ok: false, error: String(e) }; }
+    /*
+     * The warning is part of the Status, not a footnote in the log. webIntake_ now REFUSES a date it
+     * cannot read rather than turning it into 1969-12-31, and the person watching this tab is the one who
+     * can put the real date on the row — so the cell has to say the date did not go in.
+     */
     sh.getRange(rowNum, idx['Status'] + 1).setValue(
-      res.ok ? ((res.created ? 'Logged (new)' : 'Logged (updated)') + ' · cal: ' + (res.calendar || '-'))
+      res.ok ? ((res.created ? 'Logged (new)' : 'Logged (updated)') + ' · cal: ' + (res.calendar || '-') +
+                (res.warning ? ' · ⚠️ ' + res.warning : ''))
              : ('Error: ' + res.error));
     if (idx['Property ID'] != null) sh.getRange(rowNum, idx['Property ID'] + 1).setValue(res.ok ? (res.id || '') : '');
     if (idx['Processed At'] != null) sh.getRange(rowNum, idx['Processed At'] + 1).setValue(new Date());
