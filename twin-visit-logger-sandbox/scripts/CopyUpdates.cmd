@@ -50,6 +50,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  'sessionlog*.mjs'     = 'src\rei\session-log.mjs';" ^
   "  'browser*.mjs'        = 'src\rei\browser.mjs';" ^
   "  'priority*.mjs'       = 'src\utils\priority.mjs';" ^
+  "  'shutdown*.mjs'       = 'src\utils\shutdown.mjs';" ^
+  "  'lock*.mjs'           = 'src\utils\lock.mjs';" ^
   "  'FinishBookings*.cmd' = 'scripts\FinishBookings.cmd';" ^
   "  'SessionLog*.cmd'     = 'scripts\SessionLog.cmd';" ^
   "  'CopyUpdates*.cmd'    = 'scripts\CopyUpdates.cmd'" ^
