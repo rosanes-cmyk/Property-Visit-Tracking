@@ -275,7 +275,8 @@ for (const row of matches) {
     `*Visit briefing — ${who}*\n` +
     'Asked for by hand. Copy the block below into the visit group.\n\n' +
     `${fenced}\n\n━━\n📅 ${appointmentText}\n📍 ${address}`,
-    { kind: 'ok', keepContactDetails: true }
+    // requested: somebody asked for today's briefings, by timer or by hand. Not per-lead noise.
+    { kind: 'ok', keepContactDetails: true, requested: true }
   );
 
   if (posted) {

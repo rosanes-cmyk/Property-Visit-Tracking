@@ -330,6 +330,14 @@ async function main() {
   console.log(`Chat briefing: ${config.chatVisitBriefing
     ? 'ON — a new calendar event posts the visit briefing to Google Chat'
     : 'OFF — set CHAT_VISIT_BRIEFING=true in .env to have bookings post to Chat'}`);
+  /*
+   * The SECOND switch, named here because it is the one that was invisible. CHAT_ALERTS=off used to swallow
+   * the briefing without either switch being mentioned anywhere in the output.
+   */
+  if (!config.chatAlerts) {
+    console.log('               (CHAT_ALERTS=off — per-lead alerts are silenced, but the briefing'
+      + ' still goes out: it has its own switch.)');
+  }
   console.log('');
 
   const auth = await authorizeGoogle();
@@ -792,9 +800,17 @@ async function main() {
           'Copy the block below into the visit group.\n\n' +
           `${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
           // The seller's number survives here, as in the intake. Same team-only Chat space.
-          { kind: 'ok', keepContactDetails: true }
+          // requested: this is the briefing the client switched on by name, not per-lead noise, so
+          // CHAT_ALERTS=off must not swallow it. See notifyChat.
+          { kind: 'ok', keepContactDetails: true, requested: true }
         );
-        console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted — check CHAT_WEBHOOK_URL'}`);
+        /*
+         * notifyChat now prints the REASON on the line above when it declines, so this no longer guesses
+         * one. It used to say "check CHAT_WEBHOOK_URL" for every failure, including runs whose webhook was
+         * perfect and whose real problem was CHAT_ALERTS=off — sending somebody to check the one thing that
+         * was not wrong.
+         */
+        console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted (reason above)'}`);
       } else {
         /*
          * NEVER SKIP IN SILENCE. A booking that reaches the board and the calendar and then says nothing

@@ -107,7 +107,7 @@ check('...naming the switch when it is off',
 check('a booking with the briefing off SAYS so',
   /Chat briefing SKIPPED — CHAT_VISIT_BRIEFING is off in \.env\./.test(FILL), true);
 check('...and a booking with it on reports posted or not',
-  /Chat briefing \$\{posted \? 'posted' : 'NOT posted — check CHAT_WEBHOOK_URL'\}/.test(FILL), true);
+  /Chat briefing \$\{posted \? 'posted' : 'NOT posted \(reason above\)'\}/.test(FILL), true);
 // The default is ON, so nobody has to edit a config file to get the one channel the team actually has.
 check('the default is on', /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BRIEFING, true\)/.test(
   read('twin-visit-logger-sandbox/src/config.mjs')), true);
@@ -118,6 +118,56 @@ check('the default is on', /chatVisitBriefing: bool\(process\.env\.CHAT_VISIT_BR
  */
 check('the Chat message still hands the group to a person',
   /NEXT: create the WhatsApp group, add the team, and paste this briefing/.test(FILL), true);
+
+console.log('\n=== CHAT_ALERTS=off must not swallow the briefing ===');
+/*
+ * THE ACTUAL CAUSE of "the notif is not firing". The client had CHAT_VISIT_BRIEFING=true — they checked —
+ * and the briefing still never arrived, because notifyChat has a SECOND gate:
+ *
+ *     if (cfg && !cfg.chatAlerts && !critical) return false;
+ *
+ * CHAT_ALERTS=off was asked for to stop per-lead noise: "this visit moved", "that gift went out". The visit
+ * briefing is not that. It is the thing somebody reads before driving to a stranger's house, it has its own
+ * switch, and being silenced by a second switch that mentions neither it nor the first is how a message
+ * becomes impossible to explain. Two gates on one message and the output named neither.
+ *
+ * `requested` rather than `critical`, because those mean different things and CLAUDE.md is deliberate about
+ * keeping `critical` narrow: critical is "nothing works until a person acts"; requested is "a person
+ * switched this on by name, so the noise switch does not get a vote".
+ */
+const NOTIFY = read('twin-visit-logger-sandbox/src/utils/notify.mjs');
+check('notifyChat takes a `requested` flag', /requested = false\n?\} = \{\}\) \{/.test(NOTIFY), true);
+check('...which bypasses the alerts switch',
+  /if \(cfg && !cfg\.chatAlerts && !critical && !requested\) \{/.test(NOTIFY), true);
+check('critical stays a separate idea', /!critical && !requested/.test(NOTIFY), true);
+// Every path that sends the VISIT BRIEFING, named individually: one left out is one that silently vanishes.
+for (const f of [
+  'twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs',
+  'twin-visit-logger-sandbox/src/services/process.mjs',
+  'twin-visit-logger-sandbox/scripts/send-briefing.mjs'
+]) check(`${f.split('/').pop()} marks the briefing as requested`,
+  /keepContactDetails: true, requested: true/.test(read(f)), true);
+/*
+ * The WhatsApp watcher is deliberately NOT in that list: WhatsApp is off, and its message is about a group
+ * having been created, which is per-lead by nature and correctly silenced by CHAT_ALERTS.
+ */
+check('the WhatsApp group message is left as per-lead noise',
+  /keepContactDetails: true, requested: true/.test(read('twin-visit-logger-sandbox/src/whatsapp/watch.mjs')), false);
+
+console.log('\n=== A refusal to send says WHICH switch stopped it ===');
+/*
+ * notifyChat returned a bare false for three different reasons — alerts off, no webhook, HTTP refusal — so
+ * the caller guessed, and printed "NOT posted — check CHAT_WEBHOOK_URL" on a run whose webhook was perfect.
+ * That sent somebody to check the one thing that was not wrong.
+ */
+check('alerts-off says so, and says the webhook is fine',
+  /CHAT_ALERTS=off in \.env silences this\. The webhook is fine\./.test(NOTIFY), true);
+check('a missing webhook says that instead', /no CHAT_WEBHOOK_URL is set/.test(NOTIFY), true);
+check('the caller no longer guesses the reason',
+  /NOT posted — check CHAT_WEBHOOK_URL/.test(FILL), false);
+check('...it defers to the line above', /NOT posted \(reason above\)/.test(FILL), true);
+check('the startup banner names the second switch too',
+  /CHAT_ALERTS=off — per-lead alerts are silenced, but the briefing/.test(FILL), true);
 
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.

@@ -345,7 +345,8 @@ export async function processInbox(auth, logger) {
              * ring. Both destinations are the client's own team-only Workspace. Every other notification
              * is still scrubbed, and tests/notify.test.mjs names the call sites allowed to do this.
              */
-            { kind: 'ok', keepContactDetails: true }
+            // requested: the visit briefing has its own switch and must not be silenced by CHAT_ALERTS.
+            { kind: 'ok', keepContactDetails: true, requested: true }
           );
         }
       } catch (error) {

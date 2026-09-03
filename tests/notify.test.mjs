@@ -76,7 +76,22 @@ check('...defaulting to ON, so nobody loses alerts by upgrading',
 check("...and only the exact word 'off' turns it off",
   /!==\s*'off'/.test(CFG), true);
 check('it is validated like every other setting', /chatAlerts: z\.boolean\(\)/.test(CFG), true);
-check('notifyChat honours it', /if \(cfg && !cfg\.chatAlerts && !critical\) return false;/.test(NOTIFY), true);
+/*
+ * TWO exceptions now, not one. `requested` joined `critical` after the visit briefing turned out to be
+ * silenced by this switch: the client had CHAT_VISIT_BRIEFING=true and no briefing ever arrived, because a
+ * second gate that mentions neither the briefing nor the first switch was quietly discarding it.
+ *
+ * They are different arguments and both are needed. `critical` is "nothing works until a person acts" — REI
+ * is logged out, every card from here is stale. `requested` is "a person switched this on by name", which
+ * is a weaker claim and a different one; calling the briefing critical would blur a distinction this file
+ * and CLAUDE.md both keep deliberately narrow.
+ */
+check('notifyChat honours it',
+  /if \(cfg && !cfg\.chatAlerts && !critical && !requested\) \{/.test(NOTIFY), true);
+check('...and a message the user asked for by name is not per-lead noise',
+  /requested = false/.test(NOTIFY), true);
+check('a refusal says WHICH switch stopped it, not just false',
+  /CHAT_ALERTS=off in \.env silences this\. The webhook is fine\./.test(NOTIFY), true);
 
 /*
  * ...with ONE exception, and the line between them is what makes the switch safe to leave off.

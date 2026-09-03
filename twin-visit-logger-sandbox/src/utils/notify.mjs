@@ -66,7 +66,7 @@ export function scrubContactDetails(text) {
  * distinguishable from a success at a glance, without reading the sentence.
  */
 export async function notifyChat(text, {
-  kind = 'info', webhookUrl = null, keepContactDetails = false, critical = false
+  kind = 'info', webhookUrl = null, keepContactDetails = false, critical = false, requested = false
 } = {}) {
   const cfg = webhookUrl !== null ? null : (await import('../config.mjs')).config;
   /*
@@ -89,9 +89,34 @@ export async function notifyChat(text, {
    *
    * It is deliberately narrow. Use it only where the message means "nothing works until a person acts".
    */
-  if (cfg && !cfg.chatAlerts && !critical) return false;
+  /*
+   * `requested: true` ALSO bypasses it, and that is a different argument from `critical`.
+   *
+   * The client: "the notif is not firing once the calendar is created." It was not firing because the visit
+   * briefing was being treated as per-lead noise. It is not. It has its OWN switch — CHAT_VISIT_BRIEFING,
+   * which they had set to true — and being silently suppressed by a SECOND switch that mentions neither the
+   * briefing nor the first switch is how a message ends up impossible to explain. Two gates on one message,
+   * and the output named neither.
+   *
+   * So: `critical` means "nothing works until a person acts". `requested` means "a person switched this on
+   * by name, so the noise switch does not get a vote". The briefing is the second, not the first, and
+   * calling it critical would blur a distinction CLAUDE.md is deliberate about.
+   */
+  if (cfg && !cfg.chatAlerts && !critical && !requested) {
+    /*
+     * SAY WHY, rather than returning a bare false. Three different things returned false here — alerts off,
+     * no webhook, HTTP refusal — and the caller could not tell them apart, so fill-pending-rei printed
+     * "NOT posted — check CHAT_WEBHOOK_URL" for a run whose webhook was perfect. That sent somebody to
+     * check the one thing that was not wrong.
+     */
+    console.log('    (not sent: CHAT_ALERTS=off in .env silences this. The webhook is fine.)');
+    return false;
+  }
   const url = webhookUrl !== null ? webhookUrl : cfg.chatWebhookUrl;
-  if (!url) return false;
+  if (!url) {
+    console.log('    (not sent: no CHAT_WEBHOOK_URL is set.)');
+    return false;
+  }
 
   const prefix = { ok: '✅', warn: '⚠️', error: '❌', info: 'ℹ️' }[kind] || 'ℹ️';
   /*
