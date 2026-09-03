@@ -199,5 +199,73 @@ check('the completion page is always closed', /await page\.close\(\)\.catch/.tes
 check('the gate is consulted before the click',
   PROC.indexOf('shouldCompleteTask({') < PROC.indexOf('await completeTask('), true);
 
+console.log('\n=== "No task to close" is not a warning ===');
+/*
+ * Every booking printed:
+ *
+ *     ⚠️ REI task still open - no matching REI task was found on the contact
+ *
+ * and the client's answer settled it: "we need to close that because no one is adding a task." Nobody on
+ * this team creates REI tasks by hand, so for a booking typed on the board there is never one to find. The
+ * gate was working perfectly and reporting the normal case as a problem, on every single row.
+ *
+ * A ⚠️ that fires every time is a ⚠️ nobody reads, and the warnings in this project are load-bearing — the
+ * unconfirmed-click one especially, which exists precisely so nobody trusts a tick they should not.
+ */
+{
+  const fs2 = fs;
+  const FILL = fs2.readFileSync('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs', 'utf8');
+  const PROC = fs2.readFileSync('twin-visit-logger-sandbox/src/services/process.mjs', 'utf8');
+  const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+  check('the benign reasons are named, not guessed at by keyword',
+    /const NOTHING_TO_CLOSE = \[/.test(FILL), true);
+  for (const reason of [
+    'no matching REI task was found on the contact',
+    'task is already complete',
+    'REI task completion is switched off (REI_COMPLETE_TASKS)'
+  ]) check(`  "${reason}" is benign`, FILL.includes(`'${reason}'`), true);
+
+  /*
+   * RUN it, because the whole question is which reason gets a warning and which does not. Every string
+   * below is one shouldCompleteTask actually returns — asserted against the gate's own source, so a
+   * reworded reason cannot silently start warning again.
+   */
+  const src = FILL.slice(FILL.indexOf('const NOTHING_TO_CLOSE'));
+  const taskOutcome = new Function(`${src.slice(0, src.indexOf('\n}\n') + 3)}\nreturn taskOutcome;`)();
+
+  check('nothing-to-close is kept out of the Chat message',
+    taskOutcome('no matching REI task was found on the contact').chat, '');
+  check('...and says so plainly on the console instead',
+    /^REI task: nothing to close - /.test(taskOutcome('task is already complete').note), true);
+  // The ones that genuinely mean somebody must go and look keep their warning, in both places.
+  for (const bad of [
+    'the task found does not match this visit (phone + date)',
+    "calendar event not verified on Juan's calendar — leaving the task open"
+  ]) {
+    check(`a real failure still warns: ${bad.slice(0, 40)}...`,
+      taskOutcome(bad).chat.startsWith('⚠️ REI task still open'), true);
+  }
+  // The unconfirmed click is a different path and must be untouched: a tick nobody can trust is worse
+  // than a warning, because it stops anyone going to check.
+  check('an unconfirmed click still warns',
+    /the click was not confirmed, check it in REI/.test(FILL), true);
+  check('...and so does REI being unreachable',
+    /could not be reached, close it by hand/.test(FILL), true);
+
+  check('the console line is skipped when there is nothing to add',
+    /if \(taskLine\) console\.log\(`    \$\{taskLine\}`\);/.test(code(FILL)), true);
+  check('the email intake follows the same rule',
+    /'no matching REI task was found on the contact', 'task is already complete',/.test(PROC), true);
+  /*
+   * The strings must match the gate EXACTLY. A reason reworded in task-gate.mjs and not here would quietly
+   * start warning on every row again, which is the bug this fixes.
+   */
+  const GATE = fs2.readFileSync('twin-visit-logger-sandbox/src/rei/task-gate.mjs', 'utf8');
+  for (const reason of ['no matching REI task was found on the contact', 'task is already complete']) {
+    check(`  the gate still returns "${reason.slice(0, 30)}..." verbatim`, GATE.includes(`'${reason}'`), true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

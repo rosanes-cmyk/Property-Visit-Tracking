@@ -250,7 +250,14 @@ export async function processInbox(auth, logger) {
                 alreadyComplete: Boolean(task?.complete)
               });
               if (!verdict.complete) {
-                taskLine = `⚠️ REI task still open — ${verdict.reason}`;
+                /*
+                 * Same rule as the board path: REI having no task to close is the normal case for this
+                 * team, not a warning. See taskOutcome in scripts/fill-pending-rei.mjs for the reasoning.
+                 */
+                taskLine = ['no matching REI task was found on the contact', 'task is already complete',
+                  'REI task completion is switched off (REI_COMPLETE_TASKS)'].includes(verdict.reason)
+                  ? ''
+                  : `⚠️ REI task still open - ${verdict.reason}`;
                 logger.info('REI task left open.', { reason: verdict.reason, seller: partialVisit.sellerName });
               } else {
                 const result = await completeTask(page, reiSelectors, task);

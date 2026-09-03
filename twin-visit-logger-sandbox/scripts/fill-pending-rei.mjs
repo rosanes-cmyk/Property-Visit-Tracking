@@ -90,6 +90,31 @@ const PENDING_PREFIX = 'PENDING REI LOOKUP —';
  * that it stops — and forcing a page closed underneath a running scrape is how you turn a stall into a
  * crash that loses the leads already done.
  */
+
+/*
+ * "REI has no task to close" IS NOT A WARNING, and treating it as one cost the warning its meaning.
+ *
+ * Every booking printed ⚠️ REI task still open - no matching REI task was found on the contact, and the
+ * client's answer was the one that matters: "we need to close that because no one is adding a task."
+ * Nobody on this team creates REI tasks by hand, so for a booking typed on the board there is never a task
+ * to find. The gate was working perfectly and reporting the normal case as a problem, on every single row.
+ *
+ * A ⚠️ that fires every time is a ⚠️ nobody reads, and this project has spent a lot of effort making sure
+ * its warnings still mean something. So: nothing-to-close says so plainly on the console and is left OUT of
+ * the Chat message entirely, while a genuine failure - REI unreachable, a click that could not be confirmed,
+ * a task that does not match this visit - keeps its warning and its place in the message.
+ */
+const NOTHING_TO_CLOSE = [
+  'no matching REI task was found on the contact',
+  'task is already complete',
+  'REI task completion is switched off (REI_COMPLETE_TASKS)'
+];
+function taskOutcome(reason) {
+  return NOTHING_TO_CLOSE.includes(reason)
+    ? { note: `REI task: nothing to close - ${reason}`, chat: '' }
+    : { note: `⚠️ REI task still open - ${reason}`, chat: `⚠️ REI task still open - ${reason}` };
+}
+
 const LEAD_BUDGET_MS = 4 * 60 * 1000;
 
 function withLeadBudget(promise, who, ms = LEAD_BUDGET_MS) {
@@ -767,7 +792,9 @@ async function main() {
               alreadyComplete: Boolean(task?.complete)
             });
             if (!verdict.complete) {
-              taskLine = `⚠️ REI task still open — ${verdict.reason}`;
+              const outcome = taskOutcome(verdict.reason);
+              taskLine = outcome.chat;
+              console.log(`    ${outcome.note}`);
             } else {
               const result = await completeTask(taskPage, reiSelectors, task);
               // `confirmed` is the row re-read, not the click landing. An unconfirmed close reads as open.
@@ -781,7 +808,11 @@ async function main() {
         } catch (taskError) {
           taskLine = '⚠️ REI task still open — could not be reached, close it by hand';
         }
-        console.log(`    ${taskLine}`);
+        /*
+         * Only when there is something to say. The nothing-to-close case has already printed its own line
+         * above, and taskLine is empty there so the Chat message does not carry it either.
+         */
+        if (taskLine) console.log(`    ${taskLine}`);
       }
 
       if (config.chatVisitBriefing) {
