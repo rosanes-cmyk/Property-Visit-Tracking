@@ -33,6 +33,7 @@ import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { acquireLockWaiting } from '../src/utils/lock.mjs';
+import { appendAuditLog } from '../src/google/audit-log.mjs';
 import { claimBookingPriority, clearBookingPriority } from '../src/utils/priority.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { buildDescription } from '../src/google/calendar.mjs';
@@ -466,6 +467,18 @@ async function main() {
 
   const context = await launchReiContext();
   let filled = 0;
+  /*
+   * WHAT HAPPENED TO EACH BRIEFING, written into the workbook's Automation Log.
+   *
+   * The client asked three times over a day why the Chat notification was not firing, and every answer
+   * depended on catching a console line in a window that had already scrolled or been cropped out of a
+   * screenshot. Neither of us could say whether a given booking had posted or not — which is a poor place
+   * to be arguing from, and it is why two of my theories were wrong.
+   *
+   * The log tab is the one record both halves of this system already write to and that a person can open
+   * afterwards. Written once at the end rather than per row: it is one API call either way.
+   */
+  const briefingLog = [];
   let stuck = 0;
   // Counted apart from `stuck`: a link that could not be found is not a booking that did not happen.
   let linksFilled = 0;
@@ -811,6 +824,11 @@ async function main() {
          * was not wrong.
          */
         console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted (reason above)'}`);
+        briefingLog.push({ level: posted ? 'CHAT' : 'ERROR', id: text(row['Property ID']),
+          message: posted
+            ? `Visit briefing posted to Chat for ${visit.sellerName || who} · ${address}`
+            : `Visit briefing FAILED to post for ${visit.sellerName || who} · ${address}`
+              + ' — the booking, the row and the calendar event are all fine; only the message did not go.' });
       } else {
         /*
          * NEVER SKIP IN SILENCE. A booking that reaches the board and the calendar and then says nothing
@@ -819,6 +837,9 @@ async function main() {
          */
         console.log('    Chat briefing SKIPPED — CHAT_VISIT_BRIEFING is off in .env.'
           + ' Set CHAT_VISIT_BRIEFING=true to have this booking post to Chat.');
+        briefingLog.push({ level: 'WARN', id: text(row['Property ID']),
+          message: `Visit briefing SKIPPED for ${visit.sellerName || who}`
+            + ' — CHAT_VISIT_BRIEFING is off in .env on this PC.' });
       }
 
       if (mergingInto) {
@@ -844,6 +865,16 @@ async function main() {
         console.log('    It keeps its placeholder and the next run will try again.');
         stuck += 1;
       }
+    }
+
+    /*
+     * Written after PASS 1, before the link backfill, so a crash in the backfill cannot lose the record of
+     * what the bookings did. Never fatal: appendAuditLog swallows its own errors, and losing a note about a
+     * briefing must not fail the booking it describes.
+     */
+    if (APPLY && briefingLog.length) {
+      const n = await appendAuditLog(sheets, config.spreadsheetId, briefingLog);
+      if (n) console.log(`\nLogged ${n} briefing outcome(s) to the "Automation Log" tab.`);
     }
 
     /*

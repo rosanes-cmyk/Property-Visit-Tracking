@@ -217,6 +217,34 @@ const SENDCODE = SENDCMD.split('\n').filter((l) => !/^\s*rem\b/i.test(l)).join('
 check('every path forces, so an asked-for briefing is never de-duplicated away',
   (SENDCODE.match(/--force/g) || []).length, 3);
 
+console.log('\n=== Whether a briefing went out is RECORDED, not just printed ===');
+/*
+ * The client asked three times across one day why the Chat notification was not firing, and every answer
+ * depended on catching a console line in a window that had already scrolled or been cropped out of a
+ * screenshot. Neither of us could say whether a given booking had posted. That is a poor place to argue
+ * from, and it is why two of my theories were wrong: I was reasoning about which switch was to blame with
+ * no evidence that the message had failed at all.
+ *
+ * The Automation Log is the record both halves of this system already write to and that a person can open
+ * afterwards. One row per booking, saying posted / failed / skipped, with the reason.
+ */
+check('the outcome is written to the Automation Log',
+  /const n = await appendAuditLog\(sheets, config\.spreadsheetId, briefingLog\);/.test(FILL), true);
+check('...collected per row and written once, not one API call each',
+  /const briefingLog = \[\];/.test(FILL), true);
+check('a posted briefing is recorded', /Visit briefing posted to Chat for /.test(FILL), true);
+check('a failed one is recorded as an ERROR', /level: posted \? 'CHAT' : 'ERROR'/.test(FILL), true);
+check('...saying the booking itself is fine',
+  /only the message did not go/.test(FILL), true);
+check('a skipped one says which switch skipped it',
+  /CHAT_VISIT_BRIEFING is off in \.env on this PC/.test(FILL), true);
+/*
+ * Before the link backfill, so a crash in PASS 2 cannot lose the record of what PASS 1's bookings did —
+ * the backfill is the lower-value half and it runs against more leads.
+ */
+check('written before PASS 2, so a later crash cannot lose it',
+  FILL.indexOf('Logged ${n} briefing outcome(s)') < FILL.indexOf('PASS 2 — the link backfill'), true);
+
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.
 check('the office PC still owns the morning briefing',
