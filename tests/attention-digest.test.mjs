@@ -1480,5 +1480,50 @@ check('the pasted copy has the same scan', /var MAX_SCAN = 2000;/.test(CHAT_C), 
 check('...and the old fixed tail is gone from both',
   /last - 120/.test(CHAT) || /last - 120/.test(CHAT_C), false);
 
+console.log('\n=== Days of silence is not a "held queue" ===');
+/*
+ * The card the client got on a Monday:
+ *
+ *     ⚠️ Work queue held — REI not checked
+ *     REI has not been checked since 2:17 PM on Fri 4 Sep
+ *
+ * Both true, and together they badly understated it. The reader has to do the date arithmetic themselves
+ * to discover the automation had been dead all weekend, and "held" sounds like a short pause. They read it
+ * as "almost two days"; it was four.
+ *
+ * A stopped clock reported politely is a stopped clock nobody hurries to. So past a day the card stops
+ * calling itself a held queue, says the number of days in the HEADER where it cannot be skimmed past, and
+ * names the likely cause — which is different from the logout case and was not being distinguished.
+ */
+{
+  const CHAT2 = fs.readFileSync('apps-script/ChatNotify.gs', 'utf8');
+  const COMB2 = fs.readFileSync('apps-script/Code.combined.gs', 'utf8');
+  for (const [label, src] of [['ChatNotify.gs', CHAT2], ['Code.combined.gs', COMB2]]) {
+    check(`${label}: a day or more is treated as stale`,
+      /var stale = days !== null && days >= 1;/.test(src), true);
+    check(`${label}: the elapsed time is said in days, not left as a timestamp`,
+      /days === 1 \? '1 day' : days \+ ' days'/.test(src), true);
+    // In the HEADER, because that is the only line a skimmed card actually delivers.
+    check(`${label}: the header escalates`,
+      /stale \? '❌ The automation has not run for ' \+ elapsed\.replace\(' ago', ''\)/.test(src), true);
+    check(`${label}: ...and the body leads with it in capitals`,
+      /THE AUTOMATION HAS NOT RUN FOR ' \+ elapsed\.toUpperCase\(\)/.test(src), true);
+    /*
+     * THE DIAGNOSIS THE CARD WAS NOT DRAWING. Nothing at all from the PC is a different fault from REI
+     * signing out: a sweep that RAN would have reported the logout and produced the other card. Silence
+     * means the machine was not running — and the tasks only run while somebody is signed in to Windows.
+     */
+    check(`${label}: silence is attributed to the machine, not to REI`,
+      /Nothing has been reported from that PC at all — not even a failure/.test(src), true);
+    check(`${label}: ...and says why a signed-out PC runs nothing`,
+      /only run while somebody is signed in to Windows/.test(src), true);
+    check(`${label}: ...and that bookings in that window still need catching up`,
+      /they have not been processed/.test(src), true);
+    // The short-outage wording is kept: an hour late is genuinely a held queue and must not shout.
+    check(`${label}: a short hold still reads as a hold`,
+      /<b>The work queue is being held back\.<\/b>/.test(src), true);
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -5369,6 +5369,24 @@ function postQueueHeldNotice_(age) {
   var howOld = age === null ? 'never' : (age < 90 ? age + ' minutes ago' : hours + ' hours ago');
 
   /*
+   * HOW LONG, IN PLAIN WORDS, AND ESCALATED WHEN IT IS DAYS.
+   *
+   * The card said "REI has not been checked since 2:17 PM on Fri 4 Sep" on a Monday, under the heading
+   * "Work queue held". Both true, and together they badly understated it: the reader has to do the date
+   * arithmetic themselves to discover the automation had been dead all weekend, and "held" sounds like a
+   * short pause. The client read it as "almost two days"; it was four.
+   *
+   * A stopped clock reported politely is a stopped clock nobody hurries to. So past a day this stops
+   * calling itself a held queue and calls itself what it is — the automation has not run — and says the
+   * number of days out loud, in the header, where it cannot be skimmed past.
+   */
+  var days = age === null ? null : Math.floor(age / 1440);
+  var elapsed = age === null ? 'not once'
+    : days >= 1 ? (days === 1 ? '1 day' : days + ' days') + ' ago'
+      : howOld;
+  var stale = days !== null && days >= 1;
+
+  /*
    * WHEN WE KNOW WHY, SAY WHY — and drop the checklist.
    *
    * The generic version of this card asked "is it switched on and logged in to Windows?" while the PC's own
@@ -5398,13 +5416,27 @@ function postQueueHeldNotice_(age) {
       + 'The queue posts itself as soon as one sweep finishes. Nothing needs restarting.';
   } else {
     body =
-      '<b>The work queue is being held back.</b><br><br>'
-      + 'REI has not been checked ' + (age === null ? '<b>at all</b>' : '<b>since ' + (since || howOld) + '</b>')
-      + (who ? ' — the automation runs on <b>' + who + '</b>.' : '.')
+      (stale
+        ? '<b>THE AUTOMATION HAS NOT RUN FOR ' + elapsed.toUpperCase().replace(' AGO', '') + '.</b><br><br>'
+        : '<b>The work queue is being held back.</b><br><br>')
+      + 'REI has not been checked ' + (age === null ? '<b>at all</b>'
+        : '<b>' + elapsed + '</b>' + (since ? ' — last checked ' + since : ''))
+      + (who ? ', and the automation runs on <b>' + who + '</b>.' : '.')
       + '<br><br>'
-      + 'So today\'s list is <b>not being published</b>: it would be built from a tracker nobody has verified, '
-      + 'and a work queue you cannot trust is worse than none. <b>No lead has been left out — none has been '
-      + 'shown.</b><br><br>'
+      + (stale
+        /*
+         * The distinction that matters, and the one the card was not drawing. Nothing at all from the PC is
+         * a different fault from REI signing out: a sweep that RAN would have reported the logout, and
+         * would have got the other card. Silence means the machine itself was not running.
+         */
+        ? 'Nothing has been reported from that PC at all — not even a failure. That points at the machine '
+          + 'rather than at REI: the scheduled tasks only run while somebody is signed in to Windows, so '
+          + 'a PC that was switched off, signed out or asleep runs nothing and cannot report anything.'
+          + '<br><br><b>Bookings taken in that time are not lost</b>, but they have not been processed '
+          + 'either — expect a catch-up once it is running.<br><br>'
+        : 'So today\'s list is <b>not being published</b>: it would be built from a tracker nobody has verified, '
+          + 'and a work queue you cannot trust is worse than none. <b>No lead has been left out — none has been '
+          + 'shown.</b><br><br>')
       + '<b>What to check on that PC:</b><br>'
       + '• is it switched on and logged in to Windows?<br>'
       + '• is REI still signed in? — run <b>scripts\\login-rei.cmd</b><br>'
@@ -5418,7 +5450,8 @@ function postQueueHeldNotice_(age) {
 
   var err = chatPost_({ cardsV2: [{ cardId: 'queueHeld', card: {
     header: { title: loggedOutAt ? '⚠️ Work queue held — REI is signed out'
-                                 : '⚠️ Work queue held — REI not checked',
+                                 : stale ? '❌ The automation has not run for ' + elapsed.replace(' ago', '')
+                                   : '⚠️ Work queue held — REI not checked',
               subtitle: fmt_(today_()) + ' · nothing published' },
     sections: [{ widgets: widgets }]
   } }] });
