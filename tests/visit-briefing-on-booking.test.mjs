@@ -303,6 +303,68 @@ for (const [label, src] of [['WebApp.gs', WEB], ['Code.combined.gs', strip(COMBI
     src.indexOf("R.setNote('cancelAlert', tag)") < src.indexOf("R.setNote('briefed', '')"), true);
 }
 
+console.log('\n=== The FOURTH producer: the REI re-check ===');
+/*
+ * THE GAP, found from a card that said "Asked for by hand".
+ *
+ * Jennifer Blake's Wed 9/9 visit was on Juan's calendar with a full description, and no briefing had gone
+ * out — somebody ran send-briefing.mjs manually. The client, for the fourth time: "once i add to the
+ * calendar it should fire as well ... should be working alwasy."
+ *
+ * recheck-rei.mjs creates a calendar event for an upcoming visit that has none — the `missingEvent` branch,
+ * added because a lead ALREADY in the tracker whose appointment turns up in REI later never got one. It
+ * created the event and announced nothing; only a Visit STATUS change was announced. And that is the
+ * commonest way a visit reaches the calendar for an existing lead, which is why three producers were not
+ * enough.
+ */
+const RECHECK = read('twin-visit-logger-sandbox/scripts/recheck-rei.mjs');
+check('the re-check briefs a first-time event', /async function briefFirstEvent\(scraped, row\) \{/.test(RECHECK), true);
+/*
+ * `missingEvent` is the difference between a booking ARRIVING and one moving: the row held no event id
+ * before this run. A moved visit still says nothing, which is the standing instruction.
+ */
+check('...only when the row had no event id before',
+  /if \(eventId && !same && missingEvent && !cancelling\) \{/.test(RECHECK), true);
+check('...and not on a cancellation', /&& !cancelling\)/.test(RECHECK), true);
+check('it uses the same builder as the calendar event, so the two cannot drift',
+  /briefingFromDescription\(buildDescription\(scraped\)/.test(RECHECK), true);
+check('the seller\'s number survives, as in every other briefing',
+  /keepContactDetails: true, requested: true/.test(RECHECK), true);
+check('a briefing failure cannot fail the re-check',
+  /catch \(error\) \{\s*\n\s*console\.log\(`    briefing FAILED: \$\{error\.message\}`\);/.test(RECHECK), true);
+check('the outcome is recorded in the Automation Log',
+  /message: \(posted \? 'Visit briefing posted' : 'Visit briefing FAILED'\)/.test(RECHECK), true);
+
+console.log('\n=== ...capped, because this one runs over 386 leads ===');
+/*
+ * WHY THIS PRODUCER NEEDS A CAP AND THE OTHERS DO NOT. The intake handles one booking; this runs every
+ * twenty minutes across every lead with an REI link. If a change ever made many rows look like first-time
+ * bookings at once, an uncapped version would put dozens of briefings into the Space in one run — the
+ * "maintenance job becomes a flood" failure guarded against everywhere else in this project.
+ */
+check('there is a per-run cap', /const BRIEF_CAP_PER_RUN = \d+;/.test(RECHECK), true);
+check('...small enough to matter',
+  Number((RECHECK.match(/const BRIEF_CAP_PER_RUN = (\d+);/) || [])[1]) <= 6, true);
+check('the cap is checked before sending', /if \(briefedThisRun >= BRIEF_CAP_PER_RUN\) \{/.test(RECHECK), true);
+check('...and only a SENT briefing counts toward it', /if \(posted\) briefedThisRun \+= 1;/.test(RECHECK), true);
+/*
+ * A cap that hid what it swallowed would be the same silent failure in a smaller costume. The held-back
+ * count is printed AND written to the log, and the next run picks them up because their rows still have no
+ * event id.
+ */
+check('anything held back is counted', /briefsHeldBack \+= 1;/.test(RECHECK), true);
+check('...and reported at the end of the run',
+  /more visit briefing\(s\) were held back by the per-run cap/.test(RECHECK), true);
+check('...in the Automation Log too, not just on screen',
+  /auditRows\.push\(\{ level: 'WARN', id: '', message: msg \}\);/.test(RECHECK), true);
+check('...saying how to get one immediately',
+  /node scripts\/send-briefing\.mjs --tomorrow/.test(RECHECK), true);
+// The briefing switch still governs this path, and a skip still says so.
+check('CHAT_VISIT_BRIEFING still gates it',
+  /if \(!config\.chatVisitBriefing\) \{/.test(RECHECK), true);
+check('...and says so rather than skipping in silence',
+  /briefing SKIPPED - CHAT_VISIT_BRIEFING is off in \.env/.test(RECHECK), true);
+
 console.log('\n=== The 07:30 briefing is untouched ===');
 // This ADDS a moment; it does not replace the morning one, which is what a visitor reads before setting off.
 check('the office PC still owns the morning briefing',

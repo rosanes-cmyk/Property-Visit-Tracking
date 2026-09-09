@@ -36,6 +36,8 @@ import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
+import { buildDescription } from '../src/google/calendar.mjs';
+import { briefingFromDescription } from '../src/whatsapp/note.mjs';
 import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '../src/google/owner-map.mjs';
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
@@ -460,6 +462,88 @@ const deadFlagged = [];
  * be answered while looking at the lead rather than by opening a log file on one particular laptop.
  */
 const auditRows = [];
+
+/*
+ * BRIEFINGS FROM THE RE-CHECK, and the cap is the whole reason this is safe to add.
+ *
+ * THE GAP. This script creates a calendar event for an upcoming visit that has none — the `missingEvent`
+ * branch below, added because a lead already in the tracker whose appointment appears in REI later never
+ * got one. It creates the event and announces NOTHING. Only a Visit STATUS change is announced.
+ *
+ * That is the commonest way a visit reaches the calendar for a lead that already exists, and it is how
+ * Jennifer Blake's Wed 9/9 visit got onto Juan's calendar with nobody told. Somebody had to run
+ * send-briefing.mjs by hand, and the card said so: "Asked for by hand". The client, for the fourth time:
+ * "once i add to the calendar it should fire as well ... should be working alwasy."
+ *
+ * WHY IT NEEDS A CAP where the other producers do not. The intake handles one booking; this runs every
+ * twenty minutes across 386 leads with REI links. If a change ever makes many rows look like first-time
+ * bookings at once, an uncapped version would put dozens of briefings into the Space in one run — the
+ * "maintenance job becomes a flood" failure this project has guarded against everywhere else. So: at most
+ * four per run, and any beyond that are COUNTED and reported, never silently dropped.
+ */
+const BRIEF_CAP_PER_RUN = 4;
+let briefedThisRun = 0;
+let briefsHeldBack = 0;
+
+/*
+ * The same briefing the intake sends, from the same builder.
+ *
+ * buildDescription() is what goes onto the calendar event, so the briefing a visitor reads here is built
+ * from the identical text. Two builders would drift, and the one nobody checks would be the one being read
+ * in the car.
+ *
+ * Never fatal. The row and the event are already correct by the time this runs, and a message about them
+ * must not undo that - the same rule postVisitBriefing_ follows in the workbook.
+ *
+ * The appointment line is formatted with Intl rather than luxon: this file does not import DateTime, and
+ * adding a dependency to one log line is not worth it.
+ */
+function apptText(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: config.calendarTimezone,
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit'
+  }).format(d);
+}
+
+async function briefFirstEvent(scraped, row) {
+  if (!config.chatVisitBriefing) {
+    console.log('    briefing SKIPPED - CHAT_VISIT_BRIEFING is off in .env');
+    return;
+  }
+  if (briefedThisRun >= BRIEF_CAP_PER_RUN) {
+    briefsHeldBack += 1;
+    console.log(`    briefing held back - ${BRIEF_CAP_PER_RUN} already sent this run (reported at the end)`);
+    return;
+  }
+  try {
+    const briefing = briefingFromDescription(buildDescription(scraped), {
+      address: scraped.propertyAddress || '',
+      appointmentText: apptText(scraped.appointmentStartIso)
+    });
+    const FENCE = String.fromCharCode(96, 96, 96);
+    const QUOTES = String.fromCharCode(39, 39, 39);
+    const fenced = `${FENCE}\n${briefing.split(FENCE).join(QUOTES)}\n${FENCE}`;
+    const who = scraped.sellerName || row['Seller Name'] || 'seller';
+    const posted = await notifyChat(
+      `*Visit booked - ${who}*\n`
+      + 'Found in REI and just added to the calendar. Copy the block below into the visit group.\n\n'
+      + `${fenced}\n\n> NEXT: create the WhatsApp group, add the team, and paste this briefing`,
+      // The seller's number survives, as in every other briefing. requested: not per-lead noise.
+      { kind: 'ok', keepContactDetails: true, requested: true }
+    );
+    if (posted) briefedThisRun += 1;
+    console.log(`    briefing ${posted ? 'posted to Chat' : 'NOT posted (reason above)'}`);
+    auditRows.push({ level: posted ? 'CHAT' : 'ERROR', id: String(row['Property ID'] || ''),
+      message: (posted ? 'Visit briefing posted' : 'Visit briefing FAILED')
+        + ` for ${who} - REI appointment found and added to the calendar by the re-check.` });
+  } catch (error) {
+    console.log(`    briefing FAILED: ${error.message}`);
+  }
+}
 /*
  * Leads whose page could not be read at all. Tracked separately from `unanswered`, because a failed scrape
  * is not a lead REI declined to answer about — it is a lead nothing looked at, and the run must not be
@@ -733,6 +817,14 @@ try {
         const eventId = await syncCalendarEvent(auth, scraped, row['Calendar Event ID'] || '');
         const same = eventId && eventId === String(row['Calendar Event ID'] || '');
         console.log(`    calendar: ${eventId ? (same ? 'existing event moved' : `event ${eventId}`) : 'not updated'}`);
+        /*
+         * A visit reaching the calendar FOR THE FIRST TIME is announced. A moved one is not — that is the
+         * standing instruction, and `missingEvent` is exactly the difference: the row held no event id
+         * before this, so this is the booking arriving, not changing.
+         */
+        if (eventId && !same && missingEvent && !cancelling) {
+          await briefFirstEvent(scraped, row);
+        }
       } catch (error) {
         console.log(`    calendar NOT updated: ${error.message}`);
       }
@@ -1046,6 +1138,19 @@ if (APPLY && BUCKETS_ONLY && !yieldedToBooking) auditRows.push(sweepStamp(candid
 if (yieldedToBooking) {
   auditRows.push({ level: 'INFO',
     message: `Bucket sweep stood down for a booking after ${checkedSoFar} of ${candidates.length} lead(s) — not stamped as a completed sweep.` });
+}
+
+/*
+ * BRIEFINGS HELD BACK ARE COUNTED, never silently dropped. The cap exists so one odd run cannot flood the
+ * Space; a cap that hid what it swallowed would just be the same silent failure in a smaller costume.
+ * The next run picks them up, because their rows still have no event id.
+ */
+if (briefsHeldBack) {
+  const msg = `${briefsHeldBack} more visit briefing(s) were held back by the per-run cap of ${BRIEF_CAP_PER_RUN}`
+    + ` - the next run will send them. Ask for one now with: node scripts/send-briefing.mjs --tomorrow`;
+  console.log(`
+${msg}`);
+  auditRows.push({ level: 'WARN', id: '', message: msg });
 }
 
 if (APPLY && auditRows.length) {

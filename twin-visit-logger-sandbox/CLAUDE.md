@@ -372,11 +372,28 @@ The default changed rather than the documentation, because a setting somebody mu
 does its job is a bug with a workaround. The client's words when asked to edit it: *"why would i type that,
 it should be automated."* `CHAT_VISIT_BRIEFING=false` still turns it off.
 
-**It fires from BOTH producers, and only on a NEWLY CREATED event.** `postVisitBriefing_` in
-`apps-script/ChatNotify.gs` covers bookings that reach the calendar through `webIntake_`; the block at the
-end of the per-row loop in `scripts/fill-pending-rei.mjs` covers the ones the office PC finishes off a parked
-row. Having it on one side only is precisely the fault the client reported — *"the notif is not firing once
-the calendar is created"* — on a row the PC had filled. A visit that merely MOVES still posts nothing.
+**It fires from FOUR producers, and only on a NEWLY CREATED event.** Every door a visit can reach the
+calendar through has to announce it, and the client has now reported the same fault four separate times as
+each missing door was found:
+
+| producer | the door | reported as |
+|---|---|---|
+| `postVisitBriefing_` (ChatNotify.gs) | `webIntake_` — REI webhook, Intake Inbox | the original |
+| `postVisitBriefing_` via `syncVisitCalendar_` | a booking typed on the DASHBOARD, or a sheet edit | *"once i add to the calendar it should fire as well"* |
+| `scripts/fill-pending-rei.mjs` | the PC finishing a parked row | *"the notif is not firing once the calendar is created"* |
+| `scripts/recheck-rei.mjs` (`briefFirstEvent`) | REI gains an appointment for a lead already tracked | Jennifer Blake — a card reading *"Asked for by hand"* |
+
+The last one is the commonest door for an existing lead and was the last to be found: the re-check creates
+an event for an upcoming visit that has none, and used to announce only a Visit STATUS change.
+
+**A visit that merely MOVES still posts nothing.** In Apps Script that is enforced by a `briefed` note on the
+row, because `syncVisitCalendar_` deletes and recreates the event every time and so always reports "event
+created". On the re-check it is `missingEvent` — the row held no Calendar Event ID before.
+
+**Only the re-check is capped** (`BRIEF_CAP_PER_RUN`, four). The others handle one booking; that one runs
+every twenty minutes across every lead with an REI link, so a change that made many rows look like
+first-time bookings would flood the Space. Anything held back is counted, printed and logged, and the next
+run sends it — a cap that hid what it swallowed would be the same silent failure in a smaller costume.
 
 Neither path may skip in silence. A run with the briefing switched off SAYS so, on the row and in the
 startup banner, because an absent line is indistinguishable from a failure and a day was lost to that.
