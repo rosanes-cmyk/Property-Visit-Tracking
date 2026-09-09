@@ -77,37 +77,67 @@ P.claimBookingPriority('1 booking(s)');
 P.noteSweepCompleted();
 check('a sweep that just finished still yields', P.shouldStandDownForBooking().standDown, true);
 
-// Two hours: inside the window. Politeness still wins.
+/*
+ * standDowns is 0 in both fixtures ON PURPOSE, so these two exercise the TIME window alone. The first
+ * version set it to 40 and both cases then tripped the streak rule instead — passing the "does not yield"
+ * check for the wrong reason and failing on the wording. Two rules that can each produce the answer have
+ * to be tested one at a time or neither is really tested.
+ */
+// Two hours: inside the window, no streak. Politeness still wins.
 fs.writeFileSync(path.join(tmp, 'data/LAST-SWEEP'),
-  JSON.stringify({ completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), standDowns: 40 }));
+  JSON.stringify({ completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), standDowns: 0 }));
 check('two hours unswept: still yields', P.shouldStandDownForBooking().standDown, true);
 
-// Four hours: past it. The sweep finishes even with a booking queued.
+// Four hours: past it. The sweep finishes even with a booking queued, and on the clock alone.
 fs.writeFileSync(path.join(tmp, 'data/LAST-SWEEP'),
-  JSON.stringify({ completedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), standDowns: 40 }));
+  JSON.stringify({ completedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), standDowns: 0 }));
 const overdue = P.shouldStandDownForBooking();
 check('four hours unswept: does NOT yield', overdue.standDown, false);
 check('...and says why, on screen', /have not been swept for \d+ minutes/.test(overdue.reason || ''), true);
 check('...naming the consequence rather than just refusing',
   /work queue is not published blind/.test(overdue.reason || ''), true);
 
+console.log('\n=== A machine that has NEVER finished a sweep: the case that broke my first fix ===');
 /*
- * A machine that has NEVER swept is not overdue. "Never" and "a long time ago" look identical to a person
- * and must not to code: on a fresh install the first sweep should still get out of a booking's way.
+ * THE DEADLOCK I SHIPPED, and this test asserted the broken half as correct.
+ *
+ * The first version of shouldStandDownForBooking asked only "is the last COMPLETED sweep older than three
+ * hours?" — and the client's machine had never completed one, so there was no timestamp, so it was not
+ * overdue, so it yielded exactly as before. The fix could not engage until the thing it was fixing had
+ * already worked once. The client ran it and got the same line as always:
+ *
+ *     A booking is waiting for REI - standing down after 1 lead(s).
+ *
+ * My test said `check('never swept is not treated as overdue', ..., true)` — reasoning that a fresh
+ * install has nothing to catch up on. Backwards: a machine that has never got a sweep to the end is the
+ * MOST overdue state there is. So the streak decides, and it works with no prior success at all.
  */
 fs.rmSync(path.join(tmp, 'data/LAST-SWEEP'));
-check('never swept is not treated as overdue', P.shouldStandDownForBooking().standDown, true);
-check('...and reports null rather than a number', P.minutesSinceSweep(), null);
+check('never swept, no streak yet: still yields', P.shouldStandDownForBooking().standDown, true);
+check('...and minutesSinceSweep is null, not a number', P.minutesSinceSweep(), null);
+P.noteSweepStoodDown();
+check('never swept, stood down once: still yields', P.shouldStandDownForBooking().standDown, true);
+P.noteSweepStoodDown();
+check('twice: still yields — two is a busy afternoon', P.shouldStandDownForBooking().standDown, true);
+P.noteSweepStoodDown();
+const insists = P.shouldStandDownForBooking();
+check('THREE times with no sweep ever finishing: it insists', insists.standDown, false);
+check('...saying it has never finished here rather than quoting a fake age',
+  /none has ever finished on this machine/.test(insists.reason || ''), true);
+check('...and no longer claims a null age is fresh', insists.minutesSinceSweep, null);
 
 console.log('\n=== The streak is recorded, so 118 in a row cannot look like the first ===');
 P.noteSweepCompleted();
 check('a completed sweep resets the streak', P.standDownStreak(), 0);
+check('...and the next booking is yielded to again', P.shouldStandDownForBooking().standDown, true);
 check('first stand-down', P.noteSweepStoodDown(), 1);
 check('second', P.noteSweepStoodDown(), 2);
 check('third', P.noteSweepStoodDown(), 3);
 check('...and it persists across calls', P.standDownStreak(), 3);
+check('...and three is where politeness stops', P.shouldStandDownForBooking().standDown, false);
 P.noteSweepCompleted();
 check('finishing clears it again', P.standDownStreak(), 0);
+check('...and politeness resumes', P.shouldStandDownForBooking().standDown, true);
 
 console.log('\n=== Bookkeeping may never fail a run ===');
 /*

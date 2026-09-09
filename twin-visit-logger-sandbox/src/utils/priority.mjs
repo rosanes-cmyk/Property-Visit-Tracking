@@ -87,6 +87,12 @@ export function bookingIsWaiting() {
  * ====================================================================================================== */
 const SWEEP_PATH = path.resolve('./data/LAST-SWEEP');
 const SWEEP_MUST_FINISH_AFTER_MS = 3 * 60 * 60 * 1000;
+/*
+ * Stand down twice, then insist. Three because it must be unmistakably a pattern rather than a busy
+ * afternoon, and because the sweep is hourly — so this is roughly the same three hours as the window
+ * above, while needing no previously completed sweep to measure from.
+ */
+const YIELD_LIMIT = 3;
 
 function readSweepState() {
   try { return JSON.parse(fs.readFileSync(SWEEP_PATH, 'utf8')) || {}; } catch { return {}; }
@@ -140,14 +146,47 @@ export function standDownStreak() {
 export function shouldStandDownForBooking() {
   if (!bookingIsWaiting()) return { standDown: false };
   const since = minutesSinceSweep();
+  const streak = standDownStreak();
+
+  /*
+   * THE STREAK IS THE PRIMARY TEST, AND MY FIRST VERSION OF THIS FUNCTION DID NOT HAVE IT.
+   *
+   * That version asked one question: is the last COMPLETED sweep older than the window? Which cannot
+   * possibly fire on the machine it was written for, because that machine had never completed a sweep — so
+   * `minutesSinceSweep()` was null, null is not overdue, and it yielded exactly as before. The fix could
+   * not engage until the thing it was fixing had already worked once. A deadlock, shipped, and my test
+   * asserted the broken half as correct: "never swept is not treated as overdue", on the reasoning that a
+   * fresh install has nothing to catch up on.
+   *
+   * That reasoning is backwards. A machine that has NEVER got a sweep to the end is the most overdue state
+   * there is, not the least. The client's log said `last sweep 7057 min ago` — its stamp had scrolled out
+   * of the window this code reads, so as far as this code was concerned it had never happened at all.
+   *
+   * So the streak decides. Two stand-downs in a row are politeness; the third insists, whether or not a
+   * sweep has ever finished here. With an hourly sweep that is about three hours — the same intent as the
+   * time window, except it works from the very first run and needs no prior success.
+   */
+  if (streak >= YIELD_LIMIT) {
+    return {
+      standDown: false,
+      overdue: true,
+      standDowns: streak,
+      minutesSinceSweep: since,
+      reason: `a booking is waiting, but ${streak} sweeps in a row have already stood down`
+        + (since === null ? ' and none has ever finished on this machine' : ` (last completed ${since} min ago)`)
+        + ' — finishing this one so the work queue is not left blind'
+    };
+  }
+
   if (since !== null && since * 60000 > SWEEP_MUST_FINISH_AFTER_MS) {
     return {
       standDown: false,
       overdue: true,
+      standDowns: streak,
       minutesSinceSweep: since,
       reason: `a booking is waiting, but the buckets have not been swept for ${since} minutes`
         + ' — finishing this sweep first so the work queue is not published blind'
     };
   }
-  return { standDown: true, minutesSinceSweep: since };
+  return { standDown: true, minutesSinceSweep: since, standDowns: streak };
 }
