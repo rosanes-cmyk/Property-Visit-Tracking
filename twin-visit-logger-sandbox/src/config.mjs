@@ -2,9 +2,33 @@ import 'dotenv/config';
 import path from 'node:path';
 import { z } from 'zod';
 
+/*
+ * TRIMMED, and the missing .trim() cost days.
+ *
+ * The client's .env said `CHAT_VISIT_BRIEFING=true` — they checked it with findstr and showed me — and the
+ * run still printed "Chat briefing: OFF". A trailing space or a stray carriage return makes the value
+ * 'true ' or 'true\r', neither of which is in the list, so the flag reads false while the file plainly
+ * says true. On Windows, hand-editing a .env in Notepad is exactly how that happens.
+ *
+ * The tell was sitting in this same file: `chatAlerts` is the ONE setting that already called .trim(), and
+ * it read correctly (`on`) in the same run where CHAT_VISIT_BRIEFING did not. Same file, same edit, one
+ * parsed and one did not — that difference is the bug, and it was in the parser rather than the .env.
+ *
+ * This governs every boolean in the project: WHATSAPP_ENABLED, REI_COMPLETE_TASKS, AUTOMATION_PAUSED,
+ * ADD_MISSING_COLUMNS. Any of them could have been silently reading the opposite of what the file said.
+ *
+ * A value that is not recognised is now REPORTED rather than quietly falling back, because "off" and
+ * "I could not read what you wrote" are different answers and only one of them is the user's fault.
+ */
 const bool = (value, fallback = false) => {
-  if (value === undefined || value === '') return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+  if (value === undefined) return fallback;
+  const v = String(value).trim().toLowerCase();
+  if (v === '') return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  if (['0', 'false', 'no', 'off'].includes(v)) return false;
+  console.warn(`  .env: could not read "${String(value).trim()}" as yes/no — using ${fallback}.`
+    + ' Valid values are true/false, yes/no, on/off, 1/0.');
+  return fallback;
 };
 
 const int = (value, fallback) => {
