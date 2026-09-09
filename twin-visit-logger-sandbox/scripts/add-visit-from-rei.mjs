@@ -22,6 +22,9 @@ import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
 import { findExistingVisit, upsertVisit } from '../src/google/sheets.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
+import { buildDescription } from '../src/google/calendar.mjs';
+import { briefingFromDescription } from '../src/whatsapp/note.mjs';
+import { notifyChat } from '../src/utils/notify.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
 import { fieldFromDescription } from '../src/whatsapp/plan.mjs';
@@ -218,3 +221,42 @@ console.log(`  Row        ${written?.rowNumber ?? '(unknown)'} (${written?.appen
 console.log(`  Calendar   ${config.calendarName || config.calendarId}`);
 console.log(`  Event id   ${calendarEventId}`);
 console.log('\nThe dashboard reads from that tab, so it updates on its own.');
+
+/*
+ * AND TELL THE TEAM. This script exists for a booking whose Gmail notification never arrived, was
+ * already consumed, or errored — so by definition it is a FIRST-TIME visit reaching the calendar, and
+ * the client's rule is unambiguous: "if the calenadr was created that notif should fire in the gc as
+ * well". It was the fifth producer and the last one still silent.
+ *
+ * No cap and no de-duplication marker here, unlike the re-check: this is one lead, run by hand, by
+ * somebody who is chasing exactly this booking. There is nothing to flood and nothing to repeat.
+ */
+if (calendarEventId && config.chatVisitBriefing) {
+  try {
+    const when = visit.appointmentStartIso
+      ? new Intl.DateTimeFormat('en-US', {
+        timeZone: config.calendarTimezone,
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit'
+      }).format(new Date(visit.appointmentStartIso))
+      : '';
+    const briefing = briefingFromDescription(buildDescription(visit), {
+      address: visit.propertyAddress || '',
+      appointmentText: when
+    });
+    const FENCE = String.fromCharCode(96, 96, 96);
+    const QUOTES = String.fromCharCode(39, 39, 39);
+    const fenced = `${FENCE}\n${briefing.split(FENCE).join(QUOTES)}\n${FENCE}`;
+    const posted = await notifyChat(
+      `*Visit booked - ${visit.sellerName || 'seller'}*\n`
+      + 'Added from REI by hand. Copy the block below into the visit group.\n\n'
+      + `${fenced}\n\n> NEXT: create the WhatsApp group, add the team, and paste this briefing`,
+      { kind: 'ok', keepContactDetails: true, requested: true }
+    );
+    console.log(`  Chat       briefing ${posted ? 'posted' : 'NOT posted (reason above)'}`);
+  } catch (error) {
+    console.log(`  Chat       briefing FAILED: ${error.message}`);
+  }
+} else if (calendarEventId) {
+  console.log('  Chat       briefing SKIPPED - CHAT_VISIT_BRIEFING is off in .env');
+}

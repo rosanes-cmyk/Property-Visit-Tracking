@@ -3043,10 +3043,26 @@ function restoreFromTrash_(trashRow) {
   t.deleteRow(trashRow);
   var addr = row[col('Property Address') - 1];
   if (addr && row[col('Visit Date') - 1]) {   // put the calendar event back
-    maybeCreateVisitEvent_({ 'Property Address': addr, 'Seller Name': row[col('Seller Name') - 1],
+    var restored = maybeCreateVisitEvent_({ 'Property Address': addr, 'Seller Name': row[col('Seller Name') - 1],
       'Phone': row[col('Phone') - 1], 'REI BlackBook Link': row[col('REI BlackBook Link') - 1],
       'Lead Source': row[col('Lead Source') - 1], 'Visit Date': row[col('Visit Date') - 1],
       'Visit Time': row[col('Visit Time') - 1] }, addr, dest);
+    /*
+     * A restored record whose visit is back on the calendar is announced too.
+     *
+     * This was the last caller of maybeCreateVisitEvent_ still silent, and it was silent by oversight
+     * rather than by decision. The client's rule does not carve out an exception for restores: "if the
+     * calenadr was created that notif should fire in the gc as well." A visit that reappears on Juan's
+     * day is a visit somebody has to organise, and the trash restore is how a row deleted by mistake
+     * comes back — nobody else would know it had.
+     *
+     * postVisitBriefing_ decides whether it has already been announced (the 'briefed' note), and
+     * clearRecordRow_ wipes the row's notes on delete, so a genuine restore briefs once and a repeated
+     * restore of the same booking stays quiet.
+     */
+    if (String(restored).indexOf('event created') === 0 && typeof postVisitBriefing_ === 'function') {
+      postVisitBriefing_(dest);
+    }
   }
   SpreadsheetApp.flush();
   return { ok: true };

@@ -73,17 +73,29 @@ for (const [label, src] of [['WebApp.gs', WEB], ['Code.combined.gs', strip(COMBI
   check(`${label}: a reused or moved event posts nothing`,
     /indexOf\('event already/.test(src), false);
   /*
-   * THREE now, not two: the two webIntake_ paths plus syncVisitCalendar_, which is the door a booking takes
-   * when it is typed on the dashboard or edited in the sheet. That third one is the fix for "once i add to
-   * the calendar it should fire as well" — a booking the team entered themselves used to reach Juan's
-   * calendar and tell nobody.
+   * THE INVARIANT, rather than a number to keep bumping: EVERY caller of maybeCreateVisitEvent_ announces
+   * what it created. The client has reported this same fault five times as each silent door was found —
+   * "again if the calenadr was created that notif should fire in the gc as well" — so the test now checks
+   * the property they are actually asking for instead of a count I have to remember to update.
    *
-   * Counted rather than spot-checked, so a fourth producer appearing without this guard is caught: every
-   * one of them is inside a write path, and an undefined function there would fail the BOOKING to send a
-   * message about it.
+   * A new caller added without a briefing fails here, which is exactly how the last four were missed.
+   */
+  const callers = (src.match(/[^n] maybeCreateVisitEvent_\(|= maybeCreateVisitEvent_\(|const cal = maybeCreateVisitEvent_\(/g) || []).length;
+  /*
+   * CALLS, not the definition. Code.combined.gs concatenates ChatNotify.gs, so `function
+   * postVisitBriefing_(rowNum)` lives in it and counted as a fifth call — the assertion failed on correct
+   * code in the combined file while passing in WebApp.gs, which is the tell that the pattern was wrong
+   * rather than the code.
+   */
+  const briefings = (src.match(/(?<!function )postVisitBriefing_\(/g) || []).length;
+  check(`${label}: every event-creating path announces it`, callers > 0 && callers === briefings, true);
+  check(`${label}: ...and there are at least four such paths`, callers >= 4, true);
+  /*
+   * Each guarded by typeof, because every one sits inside a WRITE path: an undefined function there would
+   * fail the BOOKING in order to send a message about the booking.
    */
   check(`${label}: every call is guarded by typeof, so ChatNotify being absent cannot break a booking`,
-    (src.match(/typeof postVisitBriefing_ === 'function'/g) || []).length, 3);
+    (src.match(/typeof postVisitBriefing_ === 'function'/g) || []).length, briefings);
 }
 // The choke point itself must stay silent: it is shared with the import, the restore and the stage-fixer.
 // Bounded to the FUNCTION BODY. An unbounded [\s\S]*? runs straight past the closing brace and matches the
