@@ -28,7 +28,9 @@
  * anybody having to know which identical-looking folder is real.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -62,12 +64,18 @@ check('the staged run is handed the app folder, since %~dp0 is TEMP there',
 check('a failed staging falls back to running in place', /if errorlevel 1 \(/.test(BODY), true);
 check('...and says the trailing error is harmless if it happens',
   /everything\s*\r?\n\s*echo\s+above that line still copied correctly/.test(CMD), true);
-// The self-update is still in the map — that is the point of staging, not something to remove.
-check('it still updates itself', /'scripts\\CopyUpdates\.cmd'/.test(BODY), true);
+/*
+ * It still updates ITSELF — .cmd is one of the three extensions it carries, and CopyUpdates.cmd is a file in
+ * the app like any other, so it is indexed and replaced along with everything else. That is precisely why
+ * the staging above is not optional.
+ */
+check('.cmd files are carried, so it can still update itself',
+  /\$code = '\^\\\.\(mjs\|cmd\|ps1\)\$'/.test(BODY), true);
 
 console.log('\n=== The .env is the test, and only the .env ===');
 check('a missing .env is caught', /if not exist "%APP%\\\.env" set "NOENV=1"/.test(BODY), true);
-check('it stops before copying anything', BODY.indexOf('NOENV') < BODY.indexOf('$want = @('), true);
+check('it stops before copying anything',
+  BODY.indexOf('NOENV') < BODY.indexOf('Get-ChildItem $app -Recurse'), true);
 check('it names what is wrong, not just that something is',
   /\*\* WAIT - there is no \.env file here/.test(CMD), true);
 check('it says why copying here would be pointless',
@@ -186,63 +194,155 @@ check('...and only counts folders that hold the launcher too',
 check('a Downloads install is flagged as risky, not as wrong',
   /works, but Downloads is risky/.test(WHERE), true);
 
-console.log('\n=== A file the copier does not carry cannot be shipped, so it must carry them all ===');
+console.log('\n=== There is no list of files, because the list is what kept failing ===');
 /*
- * THE FAILURE THIS EXISTS FOR, and it took the client's whole automation down.
+ * TWICE IN ONE WEEK, and the second one is why the list is gone.
  *
- * src/utils/shutdown.mjs was a NEW file. CopyUpdates had no entry for it, because its list named only the
- * files being changed that day. browser.mjs — which the list DID carry — shipped importing it, so the PC
- * received a browser module pointing at a file that was not on disk:
+ * ONE — src/utils/shutdown.mjs was a NEW file, and the list named only the files changed that day.
+ * browser.mjs, which the list DID carry, shipped importing it, so the PC received a browser module pointing
+ * at a file that was not on disk:
  *
  *     Cannot find module '...\src\utils\shutdown.mjs' imported from '...\src\rei\browser.mjs'
  *
  * Every REI script died on startup. Not a wrong result — nothing ran at all.
  *
- * A NEW FILE IS THE ONE CHANGE THIS DELIVERY ROUTE CANNOT ABSORB, and nothing anywhere checked for it. So
- * the list now names every file in the two folders updates actually touch, whether or not today's change
- * needs them, and this fails the moment one appears that is not listed. MISSING costs a line of output;
- * a gap costs the automation.
+ * TWO — src\config.mjs was never in the list. Not in any version of it. The fix for a bug reported FIVE
+ * times lived in that one file; the client downloaded it, ran CopyUpdates, and the output said NOTHING
+ * about it — no COPIED line, and no MISSING line either, because a file the list does not name is never
+ * looked for. Three runs later they were still reading `briefing = undefined` with the correct file sitting
+ * in Downloads the whole time.
+ *
+ * My response to ONE was to widen the list to cover src\rei and src\utils entirely, and to assert exactly
+ * that here. Both the fix and this test were scoped to the folder the last failure happened in — so
+ * config.mjs, one level up in src\, was outside both, and the test passed while the file was undeliverable.
+ *
+ * A list has to be right about the future. This one has now been wrong twice, and a test asserting a list
+ * contains what I remembered to think of is not a check — it is the same assumption written down twice. So
+ * the mechanism changed: the copier walks the app and indexes what is THERE. Whether a given file can be
+ * delivered is now a question about behaviour, and the section below answers it by running the thing.
  */
-const carried = new Set([...BODY.matchAll(/"\s+'([^']+)'/g)].map((m) => m[1].replace(/\\/g, '/')));
-for (const dir of ['src/rei', 'src/utils']) {
-  const onDisk = fs.readdirSync(path.resolve('twin-visit-logger-sandbox', dir))
-    .filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
-  const missing = onDisk.filter((f) => !carried.has(f));
-  check(`every .mjs in ${dir} is carried`, missing, []);
-  check(`...and ${dir} was actually read`, onDisk.length > 0, true);
-}
-// The destination list is what the copier now works from — no globs to collide. See the .cmd for why.
-check('the copier derives the download name from the destination, not a glob',
-  /\$rx = '\^' \+ \[regex\]::Escape\(\$base\) \+ '\( \?\\\(\?\\d\+\\\)\?\)\?' \+ \[regex\]::Escape\(\$ext\) \+ '\$'/.test(BODY), true);
-check('...stripping the hyphens the browser strips', /\$flat = \$leaf -replace '-',''/.test(BODY), true);
-check('...anchored, so notestab.mjs cannot satisfy notes.mjs',
-  /both notes\.mjs and notes-tab\.mjs/.test(CMD), true);
-check('...and both are carried, which is what makes the collision reachable',
-  ['src/rei/notes.mjs', 'src/rei/notes-tab.mjs'].every((f) => carried.has(f)), true);
-
-console.log('\n=== The files this fix needs are named individually ===');
-/*
- * Named one by one rather than counted. A count passes while the one file that matters is absent, and the
- * file that matters here is the pair that stops REI logging out — the single most disruptive bug in the
- * project. lock.mjs carries the shutdown coordinator and browser.mjs registers the closer with it; either
- * one arriving alone is a broken app, which is exactly what happened.
- */
-for (const rel of [
-  'src/utils/lock.mjs',
-  'src/rei/browser.mjs',
-  'src/rei/session-log.mjs',
-  'scripts/recheck-rei.mjs',
-  'scripts/WhereIsTheApp.cmd',
-  // The launcher is useless without it, and "download them as a pair" is a step people skip.
-  'scripts/WhereIsTheApp.ps1'
-]) check(`carries ${rel}`, carried.has(rel), true);
-
+check('no hand-written list of destinations survives', /\$want = @\(/.test(BODY), false);
+check('it indexes the app folder instead', /Get-ChildItem \$app -Recurse -File/.test(BODY), true);
+check('...by filename, with the hyphens the browser strips removed',
+  /\$k = \(\$f\.Name -replace '-',''\)\.ToLower\(\)/.test(BODY), true);
+check('...and the repeat-download suffix removed from the download side',
+  /-replace ' \?\\\(\?\\d\+\\\)\?\$',''/.test(BODY), true);
 // CreationTime, because a downloaded file keeps the SOURCE file's write time — this already cost a file.
 check('newest by CreationTime, not LastWriteTime',
-  /Sort-Object CreationTime -Descending/.test(BODY), true);
-// Downloads is read ONCE and filtered in memory: 28 Get-ChildItem calls over the same folder is waste.
-check('Downloads is listed once, not once per file',
-  (BODY.match(/Get-ChildItem \$dl -File/g) || []).length, 1);
+  /\$d\.CreationTime -gt \$newest\[\$k\]\.CreationTime/.test(BODY), true);
+check('node_modules is excluded, or a vendored file could become a destination',
+  /node_modules/.test(BODY), true);
+/*
+ * .json is refused wholesale. token.json and credentials.json sit in the app root, and a copier that moves
+ * files by name must not be able to move a credential — including out of a Downloads folder where a copy of
+ * one may well be sitting.
+ */
+check('only code extensions are carried, so no .json can move',
+  /\$code = '\^\\\.\(mjs\|cmd\|ps1\)\$'/.test(BODY), true);
+check('an unmatched download is REPORTED, which is the line the list could never print',
+  /IGNORED - this app has no file by these names/.test(CMD), true);
+check('...and says a brand new file needs placing by hand once',
+  /BRAND NEW file, it has to be put in place by hand/.test(CMD), true);
+check('two files with one name is a refusal, not a guess',
+  /there is no way to tell which one you meant/.test(CMD), true);
+
+console.log('\n=== ...so the real question is answered by RUNNING it ===');
+/*
+ * A list with a gap in it is perfectly valid source code, which is why source-matching missed config.mjs.
+ * This builds a fake app and a fake Downloads — hyphens stripped, a repeat-download suffix, a vendored
+ * file under node_modules, a credential — runs the PowerShell block EXTRACTED FROM THE .cmd, and checks
+ * where the files actually went.
+ *
+ * The block is lifted, not retyped: each ^-continued line's quoted fragment joined with a space, which is
+ * what cmd.exe hands to powershell. A retyped copy would test my transcription.
+ *
+ * It needs a PowerShell, which a Linux CI box may not have. When there is none it says SKIPPED loudly and
+ * counts a fail — a silent skip is the exact failure mode this whole project keeps hitting.
+ */
+{
+  const ps = ['pwsh', '/opt/pwsh/pwsh', 'powershell'].find((p) => {
+    try { return execFileSync('sh', ['-c', `command -v ${p}`], { encoding: 'utf8' }).trim(); }
+    catch { return false; }
+  });
+
+  const lines = CMD.split('\n');
+  const from = lines.findIndex((l) => l.startsWith('powershell -NoProfile'));
+  const block = [];
+  for (let i = from + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*"(.*)"\s*\^?\s*$/);
+    if (!m) break;
+    block.push(m[1]);
+  }
+  check('the PowerShell block was lifted out of the .cmd', block.length > 20, true);
+
+  if (!ps) {
+    console.log('FAIL  the copier was RUN  (SKIPPED - no PowerShell on this machine)');
+    console.log('        a skipped check is not a passed one; install pwsh to run this section');
+    fail++;
+  } else {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'copyupdates-'));
+    const app = path.join(root, 'app');
+    const dl = path.join(root, 'home', 'Downloads');
+    const write = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };
+
+    // The app, including the file that could never be delivered and the pair that must not collide.
+    for (const rel of ['src/config.mjs', 'src/rei/notes.mjs', 'src/rei/notes-tab.mjs',
+      'src/utils/lock.mjs', 'scripts/fill-pending-rei.mjs', 'scripts/CopyUpdates.cmd']) {
+      write(path.join(app, rel), `OLD ${rel}`);
+    }
+    write(path.join(app, 'node_modules/zod/config.mjs'), 'VENDORED');   // must never be a destination
+    write(path.join(app, '.env'), 'SPREADSHEET_ID=x');                  // the "this is a real install" test
+
+    // Downloads, shaped the way this client's browser leaves it.
+    write(path.join(dl, 'config.mjs'), 'NEW config');
+    write(path.join(dl, 'fillpendingrei.mjs'), 'NEW fill');
+    write(path.join(dl, 'fillpendingrei (2).mjs'), 'OLDER fill');
+    write(path.join(dl, 'notestab.mjs'), 'NEW notestab');
+    write(path.join(dl, 'shutdown.mjs'), 'A NEW FILE');                 // matches nothing in the app
+    write(path.join(dl, 'token.json'), 'CREDENTIAL');                   // must never move
+    const old = new Date('2026-09-01T09:00:00Z');
+    fs.utimesSync(path.join(dl, 'fillpendingrei (2).mjs'), old, old);
+
+    const script = block.join(' ').replace("'%APP%'", '$__app');
+    const out = execFileSync(ps, ['-NoProfile', '-Command',
+      `$env:USERPROFILE='${path.join(root, 'home')}'; $__app='${app}'; ${script}`],
+    { encoding: 'utf8', cwd: app });
+
+    const landed = (rel) => fs.readFileSync(path.join(app, rel), 'utf8');
+    // THE ONE THAT MATTERS. This is the assertion the old list-based test could not express.
+    check('src/config.mjs is deliverable', landed('src/config.mjs'), 'NEW config');
+    check('a hyphenated name is restored from the flattened download',
+      landed('scripts/fill-pending-rei.mjs'), 'NEW fill');
+    check('...taking the NEWEST download, not the repeat-suffixed older one',
+      landed('scripts/fill-pending-rei.mjs') !== 'OLDER fill', true);
+    check('notestab.mjs lands on notes-tab.mjs', landed('src/rei/notes-tab.mjs'), 'NEW notestab');
+    check('...and notes.mjs is left alone', landed('src/rei/notes.mjs'), 'OLD src/rei/notes.mjs');
+    check('a vendored file of the same name is not a destination',
+      landed('node_modules/zod/config.mjs'), 'VENDORED');
+    check('no .json is moved, credential or otherwise',
+      fs.existsSync(path.join(app, 'token.json')), false);
+    check('a download matching nothing is named on screen',
+      /IGNORED[^\n]*shutdown\.mjs/.test(out), true);
+    check('...and is not silently dropped into the app',
+      fs.existsSync(path.join(app, 'src/utils/shutdown.mjs')), false);
+    // Three matching downloads: config.mjs, fillpendingrei.mjs, notestab.mjs. token.json and shutdown.mjs
+    // are not copies of anything in the app, and the repeat-suffixed file is the same one as fillpendingrei.
+    check('it reports how many it updated', /3 file\(s\) updated/.test(out), true);
+    check('no folder was invented on the way', fs.existsSync(path.join(app, 'src/rei/notes')), false);
+
+    // A second file of the same name INSIDE the app: refuse, name both, copy neither, carry on.
+    write(path.join(app, 'backup/config.mjs'), 'A BACKUP');
+    const out2 = execFileSync(ps, ['-NoProfile', '-Command',
+      `$env:USERPROFILE='${path.join(root, 'home')}'; $__app='${app}'; ${script}`],
+    { encoding: 'utf8', cwd: app });
+    check('an ambiguous name is refused', /REFUSED[^\n]*config\.mjs/.test(out2), true);
+    check('...naming both candidates', (out2.match(/config\.mjs/g) || []).length >= 3, true);
+    check('...and overwriting neither', landed('backup/config.mjs'), 'A BACKUP');
+    check('...while the unambiguous files still copy', /COPIED[^\n]*notes-tab\.mjs/.test(out2), true);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

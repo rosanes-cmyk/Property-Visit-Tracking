@@ -93,9 +93,21 @@ console.log('\n=== CopyUpdates picks the file that ARRIVED last ===');
  * when it landed. Sorting by it installed a 6 August copy of rei-login.mjs over the correct one saved
  * minutes earlier — and reported success doing it.
  */
-check('sorted by CreationTime', /Sort-Object CreationTime -Descending/.test(COPY), true);
-check('LastWriteTime is not used for the choice', /Sort-Object LastWriteTime/.test(COPY), false);
-check('and the time it reports is the one it sorted by', /\$src\.CreationTime\.ToString/.test(COPY), true);
+/*
+ * The comparison, not a Sort-Object, since the copier stopped working from a list of destinations and now
+ * keeps the newest download per filename as it walks Downloads once. Same rule, same field.
+ */
+check('the newest download wins on CreationTime',
+  /\$d\.CreationTime -gt \$newest\[\$k\]\.CreationTime/.test(COPY), true);
+/*
+ * Against the CODE, not the file. My first version of this checked the whole file for 'LastWriteTime' and
+ * failed on correct code, because the rem block above the fix explains at length why LastWriteTime is the
+ * wrong field. That is the ninth time an assertion in this project has been decided by a comment rather
+ * than by what runs, so: cmd comments are `rem`, and they are stripped before asking.
+ */
+check('LastWriteTime is not used for the choice',
+  /LastWriteTime/.test(COPY.split('\n').filter((l) => !/^\s*rem\b/i.test(l)).join('\n')), false);
+check('and the time it reports is the one it chose by', /\$src\.CreationTime\.ToString/.test(COPY), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

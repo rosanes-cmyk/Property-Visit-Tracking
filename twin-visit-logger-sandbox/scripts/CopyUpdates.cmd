@@ -129,78 +129,106 @@ if defined NOENV (
 )
 
 rem ======================================================================================================
-rem  NO PATTERN GUESSING. The wanted filename is DERIVED from the destination.
+rem  THERE IS NO LIST OF FILES ANY MORE. THE APP FOLDER IS THE LIST.
 rem
-rem  This used to carry a glob per file -- 'notes*.mjs', 'browser*.mjs' -- and globs collide. src\rei\ holds
-rem  both notes.mjs and notes-tab.mjs, and the browser strips hyphens on download, so notes-tab.mjs arrives
-rem  as notestab.mjs and 'notes*.mjs' matches it. The newest match would then be installed OVER notes.mjs:
-rem  a wrong file, under a right name, reported as COPIED. This project has already lost a file to a subtler
-rem  version of that (reilogin.mjs when the newest was reilogin3.mjs).
+rem  It used to carry a hand-written list of destinations, and the list is what kept failing:
 rem
-rem  So the list is now just destinations, and the download name is worked out from each one: strip the
-rem  hyphens the browser strips, then allow the suffix a browser adds for a repeat download -- "2", " (2)",
-rem  "(2)". Anchored at both ends, so notestab.mjs cannot satisfy notes.mjs.
+rem    * src\utils\shutdown.mjs was a NEW file with no entry. browser.mjs shipped importing it, so the PC
+rem      got a browser module pointing at a file that was not there, and every REI script died with
+rem      "Cannot find module ...\src\utils\shutdown.mjs". Nothing ran at all.
 rem
-rem  EVERY FILE IN src\rei AND src\utils IS LISTED, not only the ones being changed today. A file that is
-rem  not in this list cannot be delivered at all, and that is not theoretical: src\utils\shutdown.mjs was a
-rem  NEW file, the list had no entry for it, browser.mjs shipped importing it, and the whole automation died
-rem  with "Cannot find module ...\src\utils\shutdown.mjs". MISSING costs nothing; a gap costs everything.
-rem  tests/copy-updates-lands-in-the-app.test.mjs fails if a file appears in those folders and not here.
+rem    * src\config.mjs was never in the list -- not once, in any version. The fix for a bug the client
+rem      reported FIVE times (the Chat briefing not firing when a calendar event is created) lives in that
+rem      one file. They downloaded it, ran this, and the run said nothing about it: no COPIED line, and no
+rem      MISSING line either, because a file the list does not name is not even looked for. Then:
+rem
+rem          briefing = undefined
+rem
+rem      three runs in a row, with the correct file sitting in Downloads the whole time. The list did not
+rem      report a gap. It cannot: a list only knows what is on it.
+rem
+rem  A hand-written list has to be right about the future -- every file a later fix might touch -- and it
+rem  has now been wrong twice in one week. So it is gone. This walks the app folder, indexes every .mjs,
+rem  .cmd and .ps1 already there, and works out what each download in Downloads is a new copy of. Every
+rem  file the app contains is deliverable, permanently, with nothing to maintain.
+rem
+rem  THE MATCH IS BY FILENAME, both sides flattened the way the browser flattens them: this client's
+rem  browser STRIPS HYPHENS on download, so fill-pending-rei.mjs arrives as fillpendingrei.mjs. A repeat
+rem  download also gains a suffix -- "2", " (2)", "(2)" -- which is stripped before matching. Newest by
+rem  CreationTime wins, because a download keeps the SOURCE file's write time and sorting on
+rem  LastWriteTime once installed a 6-August login script over a good one.
+rem
+rem  TWO THINGS IT REFUSES TO GUESS AT, because a wrong copy is worse than no copy:
+rem
+rem    * TWO FILES IN THE APP WITH THE SAME NAME. Then a download called notes.mjs could belong to either,
+rem      so it says so and copies neither. (The app has no such pair today; a stray backup folder inside
+rem      the app would create one.)
+rem
+rem    * A DOWNLOAD MATCHING NOTHING. Reported as IGNORED, by name. That line is the thing the old list
+rem      could never print, and it is what would have caught both failures above on the first run.
+rem
+rem  .json is deliberately NOT carried. token.json and credentials.json are credentials that live in the
+rem  app root, and a copier that moves files by name must never be able to move one of those.
+rem
+rem  A genuinely NEW file still has to be placed by hand once -- it cannot be indexed before it exists.
+rem  Every update of it after that is automatic. The IGNORED line says this on screen.
 rem ======================================================================================================
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$dl = Join-Path $env:USERPROFILE 'Downloads';" ^
   "$app = '%APP%';" ^
-  "$want = @(" ^
-  "  'scripts\fill-pending-rei.mjs'," ^
-  "  'scripts\recheck-rei.mjs'," ^
-  "  'scripts\rei-login.mjs'," ^
-  "  'scripts\sweep-parked.mjs'," ^
-  "  'scripts\FinishBookings.cmd'," ^
-  "  'scripts\SessionLog.cmd'," ^
-  "  'scripts\WhereIsTheApp.cmd'," ^
-  "  'scripts\WhereIsTheApp.ps1'," ^
-  "  'scripts\CopyUpdates.cmd'," ^
-  "  'src\rei\attention-rules.mjs'," ^
-  "  'src\rei\browser.mjs'," ^
-  "  'src\rei\cancel-signal.mjs'," ^
-  "  'src\rei\expand.mjs'," ^
-  "  'src\rei\gift.mjs'," ^
-  "  'src\rei\notes-tab.mjs'," ^
-  "  'src\rei\notes.mjs'," ^
-  "  'src\rei\recheck.mjs'," ^
-  "  'src\rei\scraper.mjs'," ^
-  "  'src\rei\session-log.mjs'," ^
-  "  'src\rei\stage-map.mjs'," ^
-  "  'src\rei\task-gate.mjs'," ^
-  "  'src\rei\tasks.mjs'," ^
-  "  'src\utils\heartbeat.mjs'," ^
-  "  'src\utils\lock.mjs'," ^
-  "  'src\utils\logger.mjs'," ^
-  "  'src\utils\notify.mjs'," ^
-  "  'src\utils\paused.mjs'," ^
-  "  'src\utils\priority.mjs'" ^
-  ");" ^
-  "$have = @(Get-ChildItem $dl -File -ErrorAction SilentlyContinue);" ^
-  "foreach ($rel in $want) {" ^
-  "  $leaf = Split-Path $rel -Leaf;" ^
-  "  $flat = $leaf -replace '-','';" ^
-  "  $base = [IO.Path]::GetFileNameWithoutExtension($flat);" ^
-  "  $ext  = [IO.Path]::GetExtension($flat);" ^
-  "  $rx = '^' + [regex]::Escape($base) + '( ?\(?\d+\)?)?' + [regex]::Escape($ext) + '$';" ^
-  "  $src = $have | Where-Object { $_.Name -match $rx } | Sort-Object CreationTime -Descending | Select-Object -First 1;" ^
-  "  if (-not $src) { Write-Host ('  MISSING  ' + $leaf + '  (not downloaded - skipped)'); continue }" ^
-  "  $dest = Join-Path $app $rel;" ^
-  "  New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null;" ^
+  "$code = '^\.(mjs|cmd|ps1)$';" ^
+  "$skip = '[\\/](node_modules|browser-data|debug|data|\.git)[\\/]';" ^
+  "$index = @{};" ^
+  "foreach ($f in @(Get-ChildItem $app -Recurse -File -ErrorAction SilentlyContinue)) {" ^
+  "  if ($f.Extension -notmatch $code) { continue }" ^
+  "  if ($f.FullName -match $skip) { continue }" ^
+  "  $k = ($f.Name -replace '-','').ToLower();" ^
+  "  if ($index.ContainsKey($k)) { $index[$k] = @($index[$k]) + $f.FullName } else { $index[$k] = @($f.FullName) }" ^
+  "};" ^
+  "$newest = @{};" ^
+  "foreach ($d in @(Get-ChildItem $dl -File -ErrorAction SilentlyContinue)) {" ^
+  "  if ($d.Extension -notmatch $code) { continue }" ^
+  "  $b = [IO.Path]::GetFileNameWithoutExtension($d.Name) -replace ' ?\(?\d+\)?$','';" ^
+  "  $k = (($b + $d.Extension) -replace '-','').ToLower();" ^
+  "  if (-not $newest.ContainsKey($k) -or $d.CreationTime -gt $newest[$k].CreationTime) { $newest[$k] = $d }" ^
+  "};" ^
+  "$done = 0; $unknown = @();" ^
+  "foreach ($k in @($newest.Keys | Sort-Object)) {" ^
+  "  $src = $newest[$k];" ^
+  "  if (-not $index.ContainsKey($k)) { $unknown += $src.Name; continue }" ^
+  "  $dests = @($index[$k]);" ^
+  "  if ($dests.Count -gt 1) {" ^
+  "    Write-Host ('  REFUSED  ' + $src.Name + '  -- this app holds ' + $dests.Count + ' files with that name,');" ^
+  "    Write-Host '             so there is no way to tell which one you meant:';" ^
+  "    foreach ($d2 in $dests) { Write-Host ('               ' + $d2) };" ^
+  "    continue" ^
+  "  }" ^
+  "  $dest = $dests[0];" ^
   "  Copy-Item $src.FullName $dest -Force;" ^
-  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $rel + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')')" ^
+  "  $rel = $dest.Substring($app.Length).TrimStart('\','/');" ^
+  "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $rel + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')');" ^
+  "  $done = $done + 1" ^
+  "};" ^
+  "Write-Host '';" ^
+  "if ($done -eq 0) { Write-Host '  NOTHING WAS COPIED - no file in Downloads matches a file in this app.' }" ^
+  "else { Write-Host ('  ' + $done + ' file(s) updated.') };" ^
+  "if ($unknown.Count) {" ^
+  "  Write-Host '';" ^
+  "  Write-Host ('  IGNORED - this app has no file by these names: ' + ($unknown -join ', '));" ^
+  "  Write-Host '  If one of those is a BRAND NEW file, it has to be put in place by hand this one';" ^
+  "  Write-Host '  time. Every update to it after that will be picked up automatically.'" ^
   "}"
 
 echo.
 echo   ----------------------------------------------------------------------
-echo   MISSING just means you did not download that one this time. Not a problem.
+echo   Every .mjs, .cmd and .ps1 already in this app can be updated this way -- there
+echo   is no list of files to keep up to date, so nothing can be left off it.
 echo.
 echo   It always takes the NEWEST matching download, so an older copy of the same
 echo   file sitting in Downloads cannot overwrite the new one.
+echo.
+echo   A file you did not download is simply not mentioned. IGNORED means the opposite:
+echo   you downloaded something this app has no file by that name for.
 echo.
 pause
 endlocal
