@@ -127,16 +127,52 @@ const HOLDERS = [
 for (const [file, what] of HOLDERS) {
   const src = fs.readFileSync(path.resolve(`twin-visit-logger-sandbox/${file}`), 'utf8');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  check(`${what} imports the check`, /import \{ bookingIsWaiting \}/.test(code), true);
-  check(`${what} checks it INSIDE its per-lead loop`, /if \(bookingIsWaiting\(\)\) \{/.test(code), true);
+  /*
+   * EITHER check counts, and the difference matters.
+   *
+   * `bookingIsWaiting()` is the raw claim. `shouldStandDownForBooking()` is the raw claim plus a floor: it
+   * refuses to yield once the buckets have gone unswept for hours. The bucket sweep uses the policy because
+   * its stamp is what releases the work-queue card, and yielding forever held that card for 4.9 days on the
+   * client's machine. The parked sweep still uses the raw check: its work is short and nothing waits on it.
+   *
+   * What this assertion is actually for is unchanged — a long job that takes the 'run' lock and loops over
+   * leads without asking about bookings at all reintroduces the six-hour delay, and this is the only thing
+   * that would notice.
+   */
+  check(`${what} imports a booking check`,
+    /import \{ bookingIsWaiting \}/.test(code) || /shouldStandDownForBooking/.test(code), true);
+  check(`${what} checks it INSIDE its per-lead loop`,
+    /if \(bookingIsWaiting\(\)\) \{/.test(code) || /shouldStandDownForBooking\(\)/.test(code), true);
   // Before the work, not after: checking at the end of a lead is a whole page too late on a slow one.
   const loopAt = code.search(/for \(const row of (candidates|batch)\) \{/);
-  check(`${what} checks before doing the lead`,
-    loopAt >= 0 && code.indexOf('bookingIsWaiting()', loopAt) - loopAt < 400, true);
+  const asks = Math.min(
+    ...['bookingIsWaiting()', 'shouldStandDownForBooking()']
+      .map((call) => code.indexOf(call, loopAt))
+      .filter((at) => at >= 0)
+      .concat(Number.POSITIVE_INFINITY)
+  );
+  check(`${what} checks before doing the lead`, loopAt >= 0 && asks - loopAt < 600, true);
 }
-// And the booking job is the one that CLAIMS, never yields to itself.
+/*
+ * And the booking job CLAIMS, never yields to itself — a job that stood down for its own claim would be a
+ * deadlock with a polite name.
+ *
+ * Comment-stripped, unlike the first version of this line. The claim is now explained by a long comment
+ * that quotes the old code and the client's log, and a negative assertion against the raw file would fail
+ * on the explanation of the fix. That mistake has been made nine times in this project.
+ */
 const FILLSRC = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/fill-pending-rei.mjs'), 'utf8');
-check('the booking job claims and never yields', /claimBookingPriority\(/.test(FILLSRC) && !/bookingIsWaiting\(\)/.test(FILLSRC), true);
+const FILLCODE = FILLSRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+check('the booking job claims and never yields',
+  /claimBookingPriority\(/.test(FILLCODE) && !/bookingIsWaiting\(\)/.test(FILLCODE)
+  && !/shouldStandDownForBooking\(\)/.test(FILLCODE), true);
+/*
+ * ...and it claims ONLY for a real booking. This is the line that was wrong for five days: the claim also
+ * counted REI-link backfill rows, which are housekeeping nobody waits on, and an unmatchable row is
+ * re-selected every run for thirty days — so the sweep was made to stand down every two minutes, forever.
+ */
+check('housekeeping does not get to claim priority',
+  /if \(pending\.length\) claimBookingPriority\(/.test(FILLCODE), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -42,7 +42,9 @@ import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
-import { bookingIsWaiting } from '../src/utils/priority.mjs';
+import {
+  shouldStandDownForBooking, noteSweepCompleted, noteSweepStoodDown, minutesSinceSweep
+} from '../src/utils/priority.mjs';
 import { haltForPause } from '../src/utils/paused.mjs';
 import { haltIfNotActiveMachine } from '../src/google/agent-settings.mjs';
 import { beginJob, updateJob, endJob, recordActivity } from '../src/utils/heartbeat.mjs';
@@ -576,7 +578,16 @@ try {
      * instruction: "the booking should be prio at always." A bulk re-check has no audience and its next
      * run is minutes away; a booking has a person waiting and a visitor who needs to know where to drive.
      */
-    if (bookingIsWaiting()) {
+    /*
+     * ...but not forever. `shouldStandDownForBooking` refuses to yield once the buckets have gone unswept
+     * for hours, because a sweep that always stands down is a sweep that never stamps, and the work-queue
+     * card is held on that stamp. On the client's machine that meant 4.9 days of a held card.
+     */
+    const yieldCheck = shouldStandDownForBooking();
+    if (yieldCheck.overdue) {
+      console.log(`\n  ${yieldCheck.reason}.`);
+    }
+    if (yieldCheck.standDown) {
       console.log(`\n  A booking is waiting for REI — standing down after ${checkedSoFar} lead(s).`);
       console.log('  The remaining leads are picked up by the next sweep; nothing is lost.');
       yieldedToBooking = true;
@@ -1134,10 +1145,30 @@ function sweepStamp(checked, updated) {
  * tell the 9am/11am/4pm card its data is fresh when it is partial — and that card going out wrong is more
  * damaging than it arriving late, because it trains the team to trust a number that is not true.
  */
-if (APPLY && BUCKETS_ONLY && !yieldedToBooking) auditRows.push(sweepStamp(candidates.length, changedRows.length));
+if (APPLY && BUCKETS_ONLY && !yieldedToBooking) {
+  auditRows.push(sweepStamp(candidates.length, changedRows.length));
+  noteSweepCompleted();
+}
 if (yieldedToBooking) {
-  auditRows.push({ level: 'INFO',
-    message: `Bucket sweep stood down for a booking after ${checkedSoFar} of ${candidates.length} lead(s) — not stamped as a completed sweep.` });
+  /*
+   * THE STREAK IS IN THE LINE, and it is the whole reason this was invisible for five days.
+   *
+   * "Stood down for a booking" reads as the system working as designed — polite, deliberate, nothing to
+   * see. One hundred and eighteen of them in a row is a broken sweep, and the old line said the same words
+   * on the first occurrence and the hundredth. Nobody reads an hourly log entry looking for a pattern;
+   * the line has to carry the pattern itself.
+   */
+  const streak = BUCKETS_ONLY ? noteSweepStoodDown() : 0;
+  const since = minutesSinceSweep();
+  auditRows.push({ level: streak >= 3 ? 'WARN' : 'INFO',
+    message: `Bucket sweep stood down for a booking after ${checkedSoFar} of ${candidates.length} lead(s)`
+      + ' — not stamped as a completed sweep.'
+      + (streak >= 2 ? ` ${streak} sweeps in a row have now stood down without finishing` : '')
+      + (since === null ? '' : `; last completed sweep ${since} minutes ago`)
+      + (streak >= 3
+        ? '. The work-queue card is held on that stamp, so this needs looking at — a booking claim that'
+          + ' never clears will hold the queue indefinitely.'
+        : '.') });
 }
 
 /*

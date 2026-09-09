@@ -1675,7 +1675,7 @@ console.log('\n=== the sweep stamp the Chat card now depends on ===');
  */
 {
   const R = fs.readFileSync(new URL('../twin-visit-logger-sandbox/scripts/recheck-rei.mjs', import.meta.url), 'utf8');
-  const stampAt = R.indexOf("if (APPLY && BUCKETS_ONLY && !yieldedToBooking) auditRows.push(sweepStamp(");
+  const stampAt = R.indexOf("if (APPLY && BUCKETS_ONLY && !yieldedToBooking) {");
   check('the sweep stamps when it finishes', stampAt > 0, true);
   /*
    * ...but NOT when it stood aside for a booking. Same rule as the lock exits: the stamp means "the
@@ -1684,7 +1684,15 @@ console.log('\n=== the sweep stamp the Chat card now depends on ===');
    * going out wrong is worse than one arriving late, because it teaches the team to trust a number that
    * is not true.
    */
-  check('...but not when it yielded to a booking', /&& !yieldedToBooking\) auditRows\.push\(sweepStamp\(/.test(R), true);
+  check('...but not when it yielded to a booking',
+    /&& !yieldedToBooking\) \{\s*\n\s*auditRows\.push\(sweepStamp\(/.test(R), true);
+  /*
+   * The completion is ALSO recorded locally, next to the stamp, and that pairing is load-bearing. The local
+   * marker is what lets the sweep know it has gone hours without finishing and stop yielding — the fix for
+   * 4.9 days of a held card. A stamp without the marker would leave the sweep starvable again.
+   */
+  check('...and records the completion locally in the same breath',
+    /auditRows\.push\(sweepStamp\([^\n]*\n\s*noteSweepCompleted\(\);/.test(R), true);
   check('a yield is still recorded, so the gap is explainable',
     /Bucket sweep stood down for a booking after/.test(R), true);
   check('the yield flag can only be set by the booking check',

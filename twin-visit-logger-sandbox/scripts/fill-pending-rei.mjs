@@ -460,10 +460,29 @@ async function main() {
    */
   /*
    * Say a booking is queueing BEFORE waiting for the lock, so a sweep already holding the browser can
-   * finish its current lead and stand down instead of making this wait out the whole run. Claimed only
-   * when there is real work: an empty run must never make sweeps yield to nothing.
+   * finish its current lead and stand down instead of making this wait out the whole run.
+   *
+   * ONLY FOR A REAL BOOKING, AND THAT WORD IS THE BUG FIX.
+   *
+   * This used to claim whenever there was anything to do at all — `pending.length` OR `backfill.rows.length`
+   * — and the guard above it, "claimed only when there is real work", read as though that were careful. It
+   * was not. The REI-LINK BACKFILL is not a booking. It is housekeeping with nobody watching it, which is
+   * precisely the distinction src/utils/priority.mjs draws to justify yielding in the first place.
+   *
+   * And it is not occasional. `rowsNeedingReiLink` re-selects any row with a phone and no REI link for
+   * THIRTY DAYS, and nothing marks a row whose phone REI simply cannot match — so one unmatchable row
+   * makes this job claim priority on every run, and this job runs every two minutes.
+   *
+   * The bucket sweep needs five to eight minutes and checks for a claim between leads. The client's log,
+   * one line an hour for five days:
+   *
+   *     Bucket sweep stood down for a booking after 1 of 20 lead(s) - not stamped as a completed sweep.
+   *     Work queue HELD - buckets not swept yet (last sweep 7057 min ago).
+   *
+   * The sweep never finished, so it never stamped, so the work-queue card was held for 4.9 days. There was
+   * no booking. There was a row REI has never heard of.
    */
-  claimBookingPriority(`${pending.length} booking(s), ${backfill.rows.length} link(s)`);
+  if (pending.length) claimBookingPriority(`${pending.length} booking(s)`);
 
   let lastSaid = 0;
   const release = await acquireLockWaiting('run', {
