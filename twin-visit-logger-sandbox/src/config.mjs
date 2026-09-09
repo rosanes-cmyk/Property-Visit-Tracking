@@ -240,10 +240,22 @@ const schema = z.object({
   whatsappSeedOnly: z.boolean(),
   whatsappUseSystemChrome: z.boolean(),
   phoneDefaultCountry: z.string().min(1),
-  // Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
-  // to `raw` alone silently arrives as undefined.
+  /*
+   * Must be declared here: z.object().parse STRIPS keys the schema does not name, so a field added
+   * to `raw` alone silently arrives as undefined.
+   *
+   * chatVisitBriefing is the proof, and it cost the client days. It was added to `raw` (with a default of
+   * true, and a long comment explaining why) and never added here — so `config.chatVisitBriefing` was
+   * `undefined`, every run, on every machine. Falsy. The booking briefing never posted to Chat from Node,
+   * not once, and every diagnostic agreed with the .env: the file said true, `bool()` returned true, and
+   * the value was then thrown away eight lines from the comment warning that it would be.
+   *
+   * `tests/env-flags-are-read.test.mjs` now compares the two key lists directly, so the next field added to
+   * one and not the other fails a test instead of failing silently for days.
+   */
   chatWebhookUrl: z.string(),
   chatAlerts: z.boolean(),
+  chatVisitBriefing: z.boolean(),
   whatsappEnabled: z.boolean(),
   whatsappSkipWarmup: z.boolean(),
   whatsappMinMinutesBetween: z.number().int().nonnegative().max(1440),

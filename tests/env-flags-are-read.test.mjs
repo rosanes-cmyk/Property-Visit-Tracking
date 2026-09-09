@@ -115,5 +115,60 @@ for (const [env, key] of [
     new RegExp(`${key}: bool\\(process\\.env\\.${env}`).test(CFG), true);
 }
 
+console.log('\n=== ...and every setting survives the schema ===');
+/*
+ * THE SECOND BUG, found while proving the first one was not the whole story, and the one that actually cost
+ * the days.
+ *
+ * `bool('true\r')` returning false was real. It was not why the briefing never posted. The client ran the
+ * fixed config and asked the module directly:
+ *
+ *     OK. briefing = undefined
+ *
+ * `undefined`, not `false`. Not a parse of a bad value — no value at all. `chatVisitBriefing` was set in
+ * `raw` and never declared in the zod schema, and `z.object().parse()` DROPS every key the schema does not
+ * name. So the .env said true, `bool()` said true, and the schema silently threw the answer away. Every
+ * diagnostic that read the .env agreed with the client, which is precisely why it took five reports to find.
+ *
+ * The trap was documented eight lines above the schema that had the hole in it. A comment cannot enforce
+ * anything, so this compares the two lists instead: one key in one and not the other, and this fails.
+ */
+{
+  // Comment-stripped: a key named in prose is not a key that is declared. Eight of these have bitten this
+  // project already, including negative assertions tripped by the comment explaining the removal.
+  const code = CFG
+    .replace(/\/\*[\s\S]*?\*\//g, '')     // block comments
+    .replace(/^[ \t]*\/\/.*$/gm, '');     // whole-line // comments (never mid-line: URLs contain //)
+
+  const keysOfBlock = (opener, closer) => {
+    const start = code.indexOf(opener);
+    if (start < 0) return null;
+    const end = code.indexOf(closer, start);
+    if (end < 0) return null;
+    return code.slice(start, end)
+      .split('\n')
+      .map((l) => (l.match(/^ {2}([A-Za-z_$][\w$]*):/) || [])[1])
+      .filter(Boolean)
+      .sort();
+  };
+
+  const rawKeys = keysOfBlock('const raw = {', '\n};');
+  const schemaKeys = keysOfBlock('const schema = z.object({', '\n});');
+
+  check('the raw settings block was found', Array.isArray(rawKeys) && rawKeys.length > 30, true);
+  check('the schema block was found', Array.isArray(schemaKeys) && schemaKeys.length > 30, true);
+
+  // Both directions. A key in the schema and not in raw is the mirror mistake: parse() then demands a value
+  // nothing supplies, and the app refuses to start.
+  const stripped = (rawKeys || []).filter((k) => !(schemaKeys || []).includes(k));
+  const orphaned = (schemaKeys || []).filter((k) => !(rawKeys || []).includes(k));
+  check('no setting is silently dropped by the schema', stripped, []);
+  check('the schema demands nothing raw does not set', orphaned, []);
+
+  // Named on its own, because this is the one that was missing and the client asked for it five times.
+  check('chatVisitBriefing is declared in the schema', (schemaKeys || []).includes('chatVisitBriefing'), true);
+  check('chatVisitBriefing is set in raw', (rawKeys || []).includes('chatVisitBriefing'), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
