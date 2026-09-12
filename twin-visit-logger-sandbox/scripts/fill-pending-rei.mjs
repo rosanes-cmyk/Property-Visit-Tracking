@@ -29,7 +29,7 @@ import { google } from 'googleapis';
 import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
 import {
-  findExistingVisit, upsertVisit, getRowNote, setRowNoteKey, noteValue
+  findExistingVisit, upsertVisit, getRowNote, setRowNoteKey, alreadyAnnounced
 } from '../src/google/sheets.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
@@ -875,10 +875,7 @@ async function main() {
       const visitDay = visit.appointmentStartIso
         ? DateTime.fromISO(visit.appointmentStartIso).setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
         : '';
-      const briefedFor = noteValue(rowNote, 'briefedFor');
-      const alreadyBriefed = briefedFor
-        ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
-        : noteValue(rowNote, 'briefed');
+      const alreadyBriefed = alreadyAnnounced(rowNote, visitDay);
 
       if (config.chatVisitBriefing && alreadyBriefed) {
         console.log(`    Chat briefing already sent for this booking (${alreadyBriefed}) — not sending again.`);

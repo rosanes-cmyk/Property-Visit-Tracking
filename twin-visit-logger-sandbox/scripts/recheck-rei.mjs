@@ -41,7 +41,7 @@ import { briefingFromDescription } from '../src/whatsapp/note.mjs';
 import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '../src/google/owner-map.mjs';
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
-import { getRowNote, setRowNoteKey, noteValue } from '../src/google/sheets.mjs';
+import { getRowNote, setRowNoteKey, alreadyAnnounced } from '../src/google/sheets.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
   shouldStandDownForBooking, noteSweepCompleted, noteSweepStoodDown, minutesSinceSweep
@@ -539,10 +539,7 @@ async function briefFirstEvent(scraped, row) {
    * delete a note from a cell by hand. See fill-pending-rei.mjs for the full reasoning.
    */
   const visitDay = scraped.appointmentStartIso ? dayKeyOf(new Date(scraped.appointmentStartIso)) : '';
-  const briefedFor = noteValue(rowNote, 'briefedFor');
-  const already = briefedFor
-    ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
-    : noteValue(rowNote, 'briefed');
+  const already = alreadyAnnounced(rowNote, visitDay);
   if (already) {
     console.log(`    briefing skipped - already announced for ${already}`);
     return;

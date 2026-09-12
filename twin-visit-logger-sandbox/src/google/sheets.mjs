@@ -365,6 +365,60 @@ export function noteValue(note, key) {
   return m ? m[1] : '';
 }
 
+/**
+ * A marker reduced to a plain yyyy-MM-dd, or '' when it cannot be read as a day at all.
+ *
+ * Three different writers have put three different things in this note: Apps Script writes a display date
+ * ("Sat, Sep 12, 2026"), the first version of the PC guard wrote the date it SENT on, and the current one
+ * writes the visit day. Comparing them as strings would say they all disagree.
+ */
+export function markerDay(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s) return '';
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Has THIS booking already been announced? Returns the marker when yes, '' when it should be announced.
+ *
+ * THE RULE THAT MATTERS: a marker nobody can make sense of never buys silence.
+ *
+ * The previous version failed that. It treated a bare `briefed` as "Apps Script announced this" and stayed
+ * quiet — and because it then never wrote `briefedFor`, every row the FIRST version of the guard had
+ * touched was muted for ever. The client, about real bookings: "that notifications didin fire in those has
+ * booked already in the gc". A duplicate card is a nuisance; a booking nobody is told about is the thing
+ * this whole feature exists to prevent, and silence must never be the default answer to confusion.
+ */
+export function alreadyAnnounced(note, visitDay) {
+  const day = markerDay(visitDay);
+
+  /* Ours. It holds the visit day, so a different day is a different booking and gets announced. */
+  const mine = noteValue(note, 'briefedFor');
+  if (mine) {
+    const was = markerDay(mine);
+    if (!was || !day) return mine;              // 'yes', or nothing to compare against: it was announced
+    return was === day ? mine : '';
+  }
+
+  /*
+   * Apps Script's, or the first PC version's. Compared the same way, and when it cannot be read as a day
+   * this ANNOUNCES rather than staying quiet — at most one extra card, after which `briefedFor` takes over
+   * and the row is governed properly for good.
+   */
+  const theirs = noteValue(note, 'briefed');
+  if (!theirs) return '';
+  const was = markerDay(theirs);
+  if (!was) return '';                          // unreadable: announce once rather than mute for ever
+  if (!day) return theirs;                      // no visit day to judge by: it was announced
+  return was === day ? theirs : '';
+}
+
 /** Set or clear one key in a `key=value;` note, leaving the others alone. Mirrors Automation.gs setNote. */
 export function noteWith(note, key, value) {
   let n = String(note == null ? '' : note).replace(new RegExp(`${key}=[^;]*;?`), '');

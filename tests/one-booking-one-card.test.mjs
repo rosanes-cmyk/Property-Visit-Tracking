@@ -51,14 +51,17 @@ console.log('=== The two sides read and write the SAME note format ===');
  * and that question IS the fix: a Node parser that is merely similar to the Apps Script one would look
  * right in review and re-announce every booking in production.
  */
-const noteValue = new Function(
-  SHEETS.slice(SHEETS.indexOf('export function noteValue'), SHEETS.indexOf('export function noteWith'))
-    .replace('export function', 'function') + '; return noteValue;'
-)();
-const noteWith = new Function(
-  SHEETS.slice(SHEETS.indexOf('export function noteWith'), SHEETS.indexOf('/**\n * The note on column A'))
-    .replace('export function', 'function') + '; return noteWith;'
-)();
+/*
+ * The whole helper block is lifted at once and the functions picked out by NAME, not by slicing between two
+ * of them. The first version sliced from noteValue to noteWith, and adding a function between them put an
+ * `export` inside the slice and broke every test in this file at once — the lift has to survive the file
+ * being edited, which is the only reason it exists.
+ */
+const HELPERS = SHEETS.slice(SHEETS.indexOf('export function noteValue'),
+  SHEETS.indexOf('export async function getRowNote')).replace(/export function/g, 'function');
+const lift = (name) => new Function(`${HELPERS}; return ${name};`)();
+const noteValue = lift('noteValue');
+const noteWith = lift('noteWith');
 
 // The shapes Automation.gs actually leaves behind on column A.
 check('reads a lone marker', noteValue('briefed=2026-09-12;', 'briefed'), '2026-09-12');
@@ -123,29 +126,43 @@ console.log('\n=== A RE-BOOKING IS A NEW BOOKING, and the first version of this 
  * So the marker records WHICH booking was announced — the visit day — and a different day announces itself.
  * Run, not matched: the whole question is what a given pair of values DOES.
  */
-const decide = (note, visitDay) => {
-  const briefedFor = noteValue(note, 'briefedFor');
-  return briefedFor
-    ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
-    : noteValue(note, 'briefed');
-};
+const decide = lift('alreadyAnnounced');
+
 check('same visit day: stays quiet', decide('briefedFor=2026-09-12;', '2026-09-12'), '2026-09-12');
 check('MOVED to a new day: announces', decide('briefedFor=2026-09-12;', '2026-09-19'), '');
 check('never announced: announces', decide('', '2026-09-12'), '');
-check('a visit with no day yet falls back to the marker',
-  decide('briefedFor=2026-09-12;', ''), '2026-09-12');
+check("a marker of 'yes' counts as announced", decide('briefedFor=yes;', '2026-09-12'), 'yes');
+
 /*
- * Apps Script writes `briefed` in its own display format. Comparing two formats would be a guess, so its
- * marker is honoured as "this booking was announced" and never re-interpreted. That is why briefedFor is a
- * second key rather than a rewrite of the first.
+ * THE PERMANENT MUTE, and the reason this is a function rather than three lines at the call site.
+ *
+ * The first PC version wrote `briefed=<the date it SENT on>`. The version after it read a bare `briefed` as
+ * "Apps Script announced this booking", stayed quiet, and then never wrote `briefedFor` - so every row the
+ * first version had touched was silenced for ever. The client, about real bookings: "that notifications
+ * didin fire in those has booked already in the gc".
+ *
+ * A marker that cannot be read as a day now ANNOUNCES. At most one extra card, after which briefedFor
+ * governs the row properly. Silence is never the answer to not understanding something.
  */
-check("Apps Script's own marker still silences us", decide('briefed=Sat, Sep 12, 2026;', '2026-09-12'), 'Sat, Sep 12, 2026');
-check('...and ours wins when both are present', decide('briefed=Sat, Sep 12, 2026;briefedFor=2026-09-12;', '2026-09-19'), '');
+check('a send-date marker for a LATER visit announces', decide('briefed=2026-09-12;', '2026-09-19'), '');
+check('an unreadable marker announces rather than muting for ever', decide('briefed=yes;', '2026-09-19'), '');
+check('...and briefedFor then takes over', decide('briefed=yes;briefedFor=2026-09-19;', '2026-09-19'), '2026-09-19');
+
+/*
+ * Apps Script writes a display date. Compared as a DAY, not as a string, or three writers' formats would
+ * all read as disagreement.
+ */
+check("Apps Script's display date, same day: quiet", decide('briefed=Sat, Sep 12, 2026;', '2026-09-12'), 'Sat, Sep 12, 2026');
+check('...different day: announces', decide('briefed=Sat, Sep 12, 2026;', '2026-09-19'), '');
+check('...and ours still wins when both are present', decide('briefed=Sat, Sep 12, 2026;briefedFor=2026-09-12;', '2026-09-19'), '');
+check('no visit day to judge by: treats it as announced', decide('briefed=2026-09-12;', ''), '2026-09-12');
 
 check('the board intake records the VISIT day, not today',
   /setRowNoteKey\(auth, briefRow, 'briefedFor', visitDay \|\| 'yes'\)/.test(F), true);
 check('the re-check does the same', /setRowNoteKey\(auth, briefRow, 'briefedFor', visitDay \|\| 'yes'\)/.test(R), true);
 check('neither stores the date it happened to send on', /'briefed',\s*\n?\s*DateTime\.now\(\)/.test(F), false);
+check('both ask the shared decision, not their own copy of it',
+  /alreadyAnnounced\(rowNote, visitDay\)/.test(F) && /alreadyAnnounced\(rowNote, visitDay\)/.test(R), true);
 
 /*
  * add-visit-from-rei is TYPED BY A PERSON, and is deliberately exempt — the same rule send-briefing already
