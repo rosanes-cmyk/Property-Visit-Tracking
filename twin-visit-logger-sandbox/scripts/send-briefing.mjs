@@ -41,10 +41,32 @@ import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
 import { briefingFromDescription } from '../src/whatsapp/note.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
+import { getRowNote, setRowNoteKey, alreadyAnnounced } from '../src/google/sheets.mjs';
 
 const args = process.argv.slice(2);
 const TODAY = args.includes('--today');
 const TOMORROW = args.includes('--tomorrow');
+/*
+ * --unbriefed: every UPCOMING visit that has a calendar event and has never had its briefing sent.
+ *
+ * WHY IT EXISTS. A booking typed on the dashboard is handled by Apps Script, which creates the event and
+ * posts a compact card — seller, time, drive time, three buttons. Useful, but there is nothing on it to
+ * paste into the visit group, and pasting that block is the whole job. The client, pointing at one of those
+ * cards: "THISSSSS".
+ *
+ * The block could not simply be added to that card: the builder lives here, in JavaScript on the PC, and
+ * porting it into Apps Script would make a second copy of it. This project already has the scar from two
+ * builders drifting — "the one nobody looks at would be the one the visitor is reading in the car".
+ *
+ * So instead, one producer covers every door. It does not care how a visit got booked — dashboard, Intake
+ * Inbox, a booking email, the PC finishing a parked row, or REI gaining an appointment. The question it
+ * asks is only: is this visit booked, and has anybody sent the briefing for it? The event description is
+ * the source, so it needs no browser and works while REI is logged out.
+ *
+ * The row marker is what makes it safe to run every few minutes: `briefedFor` holds the visit day, so each
+ * booking is briefed once, and a visit MOVED to a new date is briefed again as the new booking it is.
+ */
+const UNBRIEFED = args.includes('--unbriefed');
 /*
  * --force re-sends something already sent today. Without it, a lead briefed this morning is skipped.
  *
@@ -71,7 +93,7 @@ async function writeSent(state) {
   } catch { /* bookkeeping must never fail the send it is recording */ }
 }
 
-if (!NEEDLE && !TODAY && !TOMORROW) {
+if (!NEEDLE && !TODAY && !TOMORROW && !UNBRIEFED) {
   /*
    * SAY THAT NOTHING WAS SENT, first and plainly.
    *
@@ -165,6 +187,7 @@ function dayKeyFromCell(raw) {
 const wanted = TODAY ? dayKey(DateTime.now())
   : TOMORROW ? dayKey(DateTime.now().plus({ days: 1 }))
     : '';
+const todayKey = dayKey(DateTime.now());
 
 /*
  * Matching, in tiers, most specific first — the same shape --only uses in the re-check, and for the same
@@ -172,7 +195,31 @@ const wanted = TODAY ? dayKey(DateTime.now())
  * seller once returned five.
  */
 let matches;
-if (wanted) {
+if (UNBRIEFED) {
+  /*
+   * Booked, still to come, and never briefed. All three conditions matter:
+   *
+   *   - a Calendar Event ID, because the briefing is built FROM that event. No event means the booking is
+   *     not finished, and there is nothing to describe.
+   *   - not in the past, because announcing a visit that has already happened helps nobody and would fire
+   *     once for every historical row the first time this ran.
+   *   - no `briefedFor` marker for THIS visit day — the same marker the board intake and the re-check use,
+   *     so whichever of them got there first, this one stays quiet.
+   */
+  const upcoming = rows.filter((r) => {
+    const day = dayKeyFromCell(r['Visit Date']);
+    return text(r['Calendar Event ID']) && day && day >= todayKey;
+  });
+  matches = [];
+  for (const r of upcoming) {
+    const note = await getRowNote(auth, r.__rowNumber);
+    if (!alreadyAnnounced(note, dayKeyFromCell(r['Visit Date']))) matches.push(r);
+  }
+  if (!matches.length) {
+    console.log('\nEvery booked visit still to come has already been briefed. Nothing to send.');
+    process.exit(0);
+  }
+} else if (wanted) {
   matches = rows.filter((r) => dayKeyFromCell(r['Visit Date']) === wanted);
   /*
    * Say when a date could not be read at all, rather than counting it as "no visit that day". An unreadable
@@ -303,6 +350,18 @@ for (const row of matches) {
      */
     already[sentKey] = DateTime.now().setZone(zone).toFormat('h:mm a');
     await writeSent(already);
+    /*
+     * Mark the ROW too, with the visit day, using the same marker the board intake and the re-check read.
+     *
+     * Without this, --unbriefed would send the same booking every few minutes for ever: the local
+     * briefed.json is keyed by DAY, so it stops a repeat today and permits one again tomorrow, which is
+     * right for a daily reminder and wrong for "announce this booking once". The row marker is the one that
+     * says WHICH booking has been announced, and it is what the other producers check before they post.
+     */
+    if (row.__rowNumber) {
+      const day = dayKeyFromCell(row['Visit Date']);
+      if (day) await setRowNoteKey(auth, row.__rowNumber, 'briefedFor', day);
+    }
   } else {
     skipped += 1;
     console.log(`  ${who} — COULD NOT POST. Check the Chat webhook.`);

@@ -216,6 +216,38 @@ check('the options are a separate argument, not concatenated',
   /`,\s*\n(\s*\/\/[^\n]*\n)*\s*\{ kind: 'ok', keepContactDetails: true, requested: true \}/.test(call), true);
 check('nothing is concatenated onto an object literal', /\+\s*\n(\s*\/\/[^\n]*\n)*\s*\{ kind:/.test(FILL), false);
 
+console.log('\n=== One producer covers every door: --unbriefed ===');
+/*
+ * A booking typed on the DASHBOARD is handled by Apps Script, which creates the event and posts a compact
+ * card with three buttons and nothing to paste into the visit group. The client, pointing at one: "THISSSSS".
+ *
+ * The pasteable block is built on the PC, from the calendar event. Porting that builder into Apps Script
+ * would make a second copy of it, and this project already has the scar from two builders drifting. So one
+ * producer asks a question no door can dodge: is this visit booked, still to come, and has nobody sent its
+ * briefing? That covers the dashboard, the Intake Inbox, a booking email, a parked row and REI alike.
+ */
+const SEND = read('twin-visit-logger-sandbox/scripts/send-briefing.mjs');
+const S = code(SEND);
+check('the mode exists', /const UNBRIEFED = args\.includes\('--unbriefed'\)/.test(S), true);
+check('...and counts as asking for something', /!NEEDLE && !TODAY && !TOMORROW && !UNBRIEFED/.test(S), true);
+// All three conditions matter: see the comment in the script for what each one is guarding against.
+check('it requires a calendar event', /text\(r\['Calendar Event ID'\]\)/.test(S), true);
+check('...and refuses visits already in the past', /day >= todayKey/.test(S), true);
+check('...and asks the shared marker, so producers cannot double-post',
+  /alreadyAnnounced\(note, dayKeyFromCell\(r\['Visit Date'\]\)\)/.test(S), true);
+check('it marks the row after sending, or it would resend for ever',
+  /setRowNoteKey\(auth, row\.__rowNumber, 'briefedFor', day\)/.test(S), true);
+check('...with the VISIT day', /const day = dayKeyFromCell\(row\['Visit Date'\]\)/.test(S), true);
+check('nothing to send says so and exits cleanly',
+  /has already been briefed\. Nothing to send/.test(SEND) && /process\.exit\(0\)/.test(S), true);
+/*
+ * The local briefed.json stays as a SECOND net. It is keyed by day, so even if the row marker were wrong
+ * the worst case is one card per lead per day rather than one every two minutes. Two independent guards,
+ * because this producer runs on the two-minute timer.
+ */
+check('the per-day file is still consulted', /if \(!FORCE && already\[sentKey\]\)/.test(S), true);
+check('the two-minute job runs it', /send-briefing\.mjs --unbriefed/.test(read('twin-visit-logger-sandbox/scripts/fill-pending.cmd')), true);
+
 console.log('\n=== Reading the marker can never cost a booking ===');
 /*
  * Fail OPEN. The cost of an unreadable note is one duplicate card; the cost of treating a failed read as

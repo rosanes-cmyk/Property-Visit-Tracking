@@ -51,6 +51,22 @@ set "LOG=logs\fill-pending.log"
 )
 echo ==== %DATE% %TIME% ==== >> "%LOG%"
 "%NODE%" scripts\fill-pending-rei.mjs --yes --scheduled >> "%LOG%" 2>&1
+
+rem ======================================================================================================
+rem  AND THE PASTEABLE BRIEFING, for a booking that came through ANY door.
+rem
+rem  A visit typed on the dashboard is handled by Apps Script, which makes the calendar event and posts a
+rem  compact card - seller, time, drive time, three buttons. There is nothing on it to paste into the visit
+rem  group, and pasting that block is the whole job. The client, pointing at one: "THISSSSS".
+rem
+rem  The block is built here on the PC, from the calendar event, so this is where it has to be sent from.
+rem  --unbriefed asks one question - is this visit booked, still to come, and has nobody sent its briefing? -
+rem  so it covers the dashboard, the Intake Inbox, a booking email, a parked row and REI alike.
+rem
+rem  Safe to run every two minutes: the row marker records WHICH booking was announced, so each is sent once,
+rem  and it needs no browser, so it cannot queue behind REI.
+rem ======================================================================================================
+"%NODE%" scripts\send-briefing.mjs --unbriefed >> "%LOG%" 2>&1
 rem The exit code, so a person running this by hand knows whether it did anything.
 if errorlevel 1 (
   echo.
