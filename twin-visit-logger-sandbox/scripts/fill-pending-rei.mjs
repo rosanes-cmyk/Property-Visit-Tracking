@@ -852,11 +852,36 @@ async function main() {
        * It fails OPEN: a note that cannot be read counts as not briefed. One duplicate card is a nuisance;
        * a booking the team never hears about is the failure this whole feature exists to prevent.
        */
+      /*
+       * ...AND A RE-BOOKING IS A NEW BOOKING, which the first version of this guard got wrong.
+       *
+       * It stored the date the card was SENT and refused to send again while any marker existed. So a lead
+       * booked for the 12th, then moved to the 19th, was silently never announced — the client, on being
+       * told to go and delete a note out of a cell: "wht would i do that?". Quite right. A guard that needs
+       * hand-clearing is not automatic, it is a chore with a bug attached.
+       *
+       * So the marker records WHICH BOOKING was announced - the visit day - and a different day announces
+       * itself. That also matches what the workbook stores (`R.setNote('briefed', day)` in ChatNotify.gs,
+       * where `day` is the Visit Date), so the two sides mean the same thing by the same word.
+       *
+       * `briefedFor` is a SECOND key rather than a rewrite of `briefed`, because Apps Script writes `briefed`
+       * in its own display format and comparing two formats would be a guess. The rule is unambiguous:
+       *   - `briefedFor` matches this visit day  -> already announced, stay quiet
+       *   - `briefedFor` holds a different day   -> this is a new booking, announce it
+       *   - only `briefed` (Apps Script's)       -> it announced this booking, stay quiet
+       */
       const briefRow = written?.rowNumber;
-      const alreadyBriefed = briefRow ? noteValue(await getRowNote(auth, briefRow), 'briefed') : '';
+      const rowNote = briefRow ? await getRowNote(auth, briefRow) : '';
+      const visitDay = visit.appointmentStartIso
+        ? DateTime.fromISO(visit.appointmentStartIso).setZone(config.calendarTimezone).toFormat('yyyy-MM-dd')
+        : '';
+      const briefedFor = noteValue(rowNote, 'briefedFor');
+      const alreadyBriefed = briefedFor
+        ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
+        : noteValue(rowNote, 'briefed');
 
       if (config.chatVisitBriefing && alreadyBriefed) {
-        console.log(`    Chat briefing already sent for this booking on ${alreadyBriefed} — not sending again.`);
+        console.log(`    Chat briefing already sent for this booking (${alreadyBriefed}) — not sending again.`);
         briefingLog.push({ level: 'INFO', id: text(row['Property ID']),
           message: `Visit briefing skipped for ${visit.sellerName || who} — already announced on ${alreadyBriefed}.` });
       } else if (config.chatVisitBriefing) {
@@ -922,8 +947,8 @@ async function main() {
          * an actual booking, and that one deserves its announcement.
          */
         if (posted && booked && briefRow) {
-          await setRowNoteKey(auth, briefRow, 'briefed',
-            DateTime.now().setZone(config.calendarTimezone).toFormat('yyyy-MM-dd'));
+          // The VISIT day, not today: this records which booking was announced, so the next one is not muted.
+          await setRowNoteKey(auth, briefRow, 'briefedFor', visitDay || 'yes');
         }
         briefingLog.push({ level: posted ? 'CHAT' : 'ERROR', id: text(row['Property ID']),
           message: posted

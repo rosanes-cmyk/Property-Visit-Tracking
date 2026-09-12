@@ -103,16 +103,49 @@ console.log('\n=== Both automatic producers check it, and set it only on success
 const F = code(FILL);
 const R = code(RECHECK);
 
-check('the board intake reads the marker before posting', /noteValue\(await getRowNote\(auth, briefRow\), 'briefed'\)/.test(F), true);
-check('...and says so instead of going silent', /already sent for this booking on/.test(FILL), true);
-check('...and sets it after posting', /setRowNoteKey\(auth, briefRow, 'briefed'/.test(F), true);
+check('the board intake reads the row note before posting', /const rowNote = briefRow \? await getRowNote\(auth, briefRow\)/.test(F), true);
+check('...and says so instead of going silent', /already sent for this booking/.test(FILL), true);
+check('...and marks it after posting', /setRowNoteKey\(auth, briefRow, 'briefedFor'/.test(F), true);
 check('...only when the post actually succeeded', /if \(posted && booked && briefRow\)/.test(F), true);
 
-check('the re-check reads the marker too', /noteValue\(await getRowNote\(auth, briefRow\), 'briefed'\)/.test(R), true);
-check('...and sets it after posting', /if \(posted && briefRow\) await setRowNoteKey\(auth, briefRow, 'briefed'/.test(R), true);
-check('...using its own date helper, not luxon it does not import',
-  /setRowNoteKey\(auth, briefRow, 'briefed', dayKeyOf\(new Date\(\)\)\)/.test(R), true);
+check('the re-check reads the row note too', /const rowNote = briefRow \? await getRowNote\(auth, briefRow\)/.test(R), true);
+check('...and marks it after posting', /if \(posted && briefRow\) await setRowNoteKey\(auth, briefRow, 'briefedFor'/.test(R), true);
 check('...and the re-check still does not import DateTime', /import \{ DateTime \}/.test(R), false);
+
+console.log('\n=== A RE-BOOKING IS A NEW BOOKING, and the first version of this got it wrong ===');
+/*
+ * The guard shipped storing the date the card was SENT, and refusing while any marker existed. A lead booked
+ * for the 12th and then moved to the 19th was therefore silenced for ever, and the only way out was to open
+ * the sheet and delete a note from a cell by hand. The client, told to do exactly that: "wht would i do
+ * that?" — and then "its sutomate right?". Both fair. A guard that needs hand-clearing is a chore with a bug
+ * attached.
+ *
+ * So the marker records WHICH booking was announced — the visit day — and a different day announces itself.
+ * Run, not matched: the whole question is what a given pair of values DOES.
+ */
+const decide = (note, visitDay) => {
+  const briefedFor = noteValue(note, 'briefedFor');
+  return briefedFor
+    ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
+    : noteValue(note, 'briefed');
+};
+check('same visit day: stays quiet', decide('briefedFor=2026-09-12;', '2026-09-12'), '2026-09-12');
+check('MOVED to a new day: announces', decide('briefedFor=2026-09-12;', '2026-09-19'), '');
+check('never announced: announces', decide('', '2026-09-12'), '');
+check('a visit with no day yet falls back to the marker',
+  decide('briefedFor=2026-09-12;', ''), '2026-09-12');
+/*
+ * Apps Script writes `briefed` in its own display format. Comparing two formats would be a guess, so its
+ * marker is honoured as "this booking was announced" and never re-interpreted. That is why briefedFor is a
+ * second key rather than a rewrite of the first.
+ */
+check("Apps Script's own marker still silences us", decide('briefed=Sat, Sep 12, 2026;', '2026-09-12'), 'Sat, Sep 12, 2026');
+check('...and ours wins when both are present', decide('briefed=Sat, Sep 12, 2026;briefedFor=2026-09-12;', '2026-09-19'), '');
+
+check('the board intake records the VISIT day, not today',
+  /setRowNoteKey\(auth, briefRow, 'briefedFor', visitDay \|\| 'yes'\)/.test(F), true);
+check('the re-check does the same', /setRowNoteKey\(auth, briefRow, 'briefedFor', visitDay \|\| 'yes'\)/.test(R), true);
+check('neither stores the date it happened to send on', /'briefed',\s*\n?\s*DateTime\.now\(\)/.test(F), false);
 
 /*
  * add-visit-from-rei is TYPED BY A PERSON, and is deliberately exempt — the same rule send-briefing already

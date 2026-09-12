@@ -532,9 +532,19 @@ async function briefFirstEvent(scraped, row) {
    * board intake and two more from elsewhere for the same lead.
    */
   const briefRow = row.__rowNumber;
-  const already = briefRow ? noteValue(await getRowNote(auth, briefRow), 'briefed') : '';
+  const rowNote = briefRow ? await getRowNote(auth, briefRow) : '';
+  /*
+   * WHICH booking was announced, not merely that one was. A visit moved to a new date is a new booking and
+   * must announce itself - the first version of this suppressed it for ever and the only way out was to
+   * delete a note from a cell by hand. See fill-pending-rei.mjs for the full reasoning.
+   */
+  const visitDay = scraped.appointmentStartIso ? dayKeyOf(new Date(scraped.appointmentStartIso)) : '';
+  const briefedFor = noteValue(rowNote, 'briefedFor');
+  const already = briefedFor
+    ? (visitDay && briefedFor !== visitDay ? '' : briefedFor)
+    : noteValue(rowNote, 'briefed');
   if (already) {
-    console.log(`    briefing skipped - already announced on ${already}`);
+    console.log(`    briefing skipped - already announced for ${already}`);
     return;
   }
   try {
@@ -555,8 +565,8 @@ async function briefFirstEvent(scraped, row) {
     );
     if (posted) briefedThisRun += 1;
     // Marked only on success: a failed post must leave the next run free to try again.
-    // dayKeyOf, not luxon: this file deliberately does not import DateTime (see apptText below).
-    if (posted && briefRow) await setRowNoteKey(auth, briefRow, 'briefed', dayKeyOf(new Date()));
+    // The VISIT day, so a later re-booking is not muted. dayKeyOf, not luxon: this file has no DateTime.
+    if (posted && briefRow) await setRowNoteKey(auth, briefRow, 'briefedFor', visitDay || 'yes');
     console.log(`    briefing ${posted ? 'posted to Chat' : 'NOT posted (reason above)'}`);
     auditRows.push({ level: posted ? 'CHAT' : 'ERROR', id: String(row['Property ID'] || ''),
       message: (posted ? 'Visit briefing posted' : 'Visit briefing FAILED')
