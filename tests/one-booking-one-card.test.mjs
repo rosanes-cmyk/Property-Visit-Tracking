@@ -234,7 +234,7 @@ check('...and counts as asking for something', /!NEEDLE && !TODAY && !TOMORROW &
 check('it requires a calendar event', /text\(r\['Calendar Event ID'\]\)/.test(S), true);
 check('...and refuses visits already in the past', /day >= todayKey/.test(S), true);
 check('...and asks the shared marker, so producers cannot double-post',
-  /alreadyAnnounced\(note, dayKeyFromCell\(r\['Visit Date'\]\)\)/.test(S), true);
+  /const needsBriefing = !alreadyAnnounced\(note, day\)/.test(S), true);
 check('it marks the row after sending, or it would resend for ever',
   /setRowNoteKey\(auth, row\.__rowNumber, 'briefedFor', day\)/.test(S), true);
 check('...with the VISIT day', /const day = dayKeyFromCell\(row\['Visit Date'\]\)/.test(S), true);
@@ -276,6 +276,23 @@ check('the card has its OWN marker, separate from the briefing',
 check('...and Apps Script having carded it counts too',
   /sameDay\(noteValue\(note, 'cardFor'\)\) \|\| sameDay\(noteValue\(note, 'briefed'\)\)/.test(code(SEND)), true);
 check('...marked only when it actually posted', /if \(carded && cardDay\)/.test(code(SEND)), true);
+/*
+ * THE CARD IS DECIDED BEFORE ANY BRIEFING GATE, and its absence is reason enough to look at a row.
+ *
+ * The first version failed both ways at once. The card send sat below the once-a-day briefing check, which
+ * `continue`s — so a lead briefed earlier today was skipped before the card code ran. And the row selection
+ * asked only whether a BRIEFING was owed, so a lead already briefed was never even considered. The client's
+ * run: "Kathleen Tostanoski - already briefed today at 1:47 PM ... 0 briefing(s) sent, 1 skipped" — and no
+ * card. Two messages cannot share one gate.
+ */
+const SENDCODE = code(SEND);
+check('the card is sent before the once-a-day briefing check',
+  SENDCODE.indexOf("card: bookedCard(row") < SENDCODE.indexOf('already[sentKey]'), true);
+check('a row needing only a CARD is still selected', /if \(needsBriefing \|\| needsCard\)/.test(SENDCODE), true);
+check('...and "needs a card" is its own question', /const needsCard = !carded\(noteValue\(note, 'cardFor'\)\)/.test(SENDCODE), true);
+// It needs no calendar event: everything on the card is already on the row.
+check('the card is built from the row, not the event',
+  /const whenText = `\$\{text\(row\['Visit Date'\]\)\} \$\{text\(row\['Visit Time'\]\)\}`/.test(SENDCODE), true);
 check('a repeat says so rather than going quiet', /booking card already sent, not repeating it/.test(SEND), true);
 
 console.log('\n=== Reading the marker can never cost a booking ===');

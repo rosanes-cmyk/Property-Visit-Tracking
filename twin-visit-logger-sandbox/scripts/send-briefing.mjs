@@ -214,8 +214,20 @@ if (UNBRIEFED) {
   });
   matches = [];
   for (const r of upcoming) {
+    const day = dayKeyFromCell(r['Visit Date']);
     const note = await getRowNote(auth, r.__rowNumber);
-    if (!alreadyAnnounced(note, dayKeyFromCell(r['Visit Date']))) matches.push(r);
+    /*
+     * EITHER message missing is reason enough to look at the row. Selecting only on the briefing marker
+     * meant a lead already briefed was never considered for a card -- and the card is the one the client
+     * was asking for. Which of the two actually goes out is decided inside the loop, separately.
+     */
+    const needsBriefing = !alreadyAnnounced(note, day);
+    const carded = (marker) => {
+      const a = markerDay(marker); const b = markerDay(day);
+      return Boolean(a && b && a === b);
+    };
+    const needsCard = !carded(noteValue(note, 'cardFor')) && !carded(noteValue(note, 'briefed'));
+    if (needsBriefing || needsCard) matches.push(r);
   }
   if (!matches.length) {
     console.log('\nEvery booked visit still to come has already been briefed. Nothing to send.');
@@ -316,6 +328,37 @@ for (const row of matches) {
   const eventId = text(row['Calendar Event ID']);
 
   /*
+   * THE SHORT CARD, BEFORE ANY BRIEFING GATE. Two messages, two jobs, two separate decisions.
+   *
+   * The first version of this sat lower down, after the once-a-day briefing check -- which `continue`s. So a
+   * lead briefed earlier today was skipped entirely and never got a card, even though it had never had one.
+   * The client's run said it plainly: "Kathleen Tostanoski - already briefed today at 1:47 PM ... 0
+   * briefing(s) sent, 1 skipped", and no card either.
+   *
+   * It also needs no calendar event: the row already holds the address, the day, the time and the visitor,
+   * which is everything on the card. Fewer dependencies, and it still works when the event cannot be read.
+   */
+  if (UNBRIEFED) {
+    const cardDay = dayKeyFromCell(row['Visit Date']);
+    const note = await getRowNote(auth, row.__rowNumber);
+    const sameDay = (marker) => {
+      const a = markerDay(marker); const b = markerDay(cardDay);
+      return Boolean(a && b && a === b);
+    };
+    /* Apps Script's `briefed` counts: that is IT saying this card is already in the Space. */
+    if (sameDay(noteValue(note, 'cardFor')) || sameDay(noteValue(note, 'briefed'))) {
+      console.log(`  ${who} - booking card already sent, not repeating it`);
+    } else {
+      const whenText = `${text(row['Visit Date'])} ${text(row['Visit Time'])}`.trim() || 'date not set';
+      const carded = await notifyChat('', {
+        kind: 'ok', requested: true, card: bookedCard(row, whenText)
+      });
+      console.log(`  ${who} - booking card ${carded ? 'posted' : 'NOT posted (reason above)'}`);
+      if (carded && cardDay) await setRowNoteKey(auth, row.__rowNumber, 'cardFor', cardDay);
+    }
+  }
+
+  /*
    * Keyed on the ROW plus the day, so the same lead can legitimately be briefed again tomorrow (a visit that
    * moved) but not twice this morning. A typed request with --force always goes: somebody asking by hand has
    * a reason, and refusing them because a timer already sent one would be maddening.
@@ -359,36 +402,6 @@ for (const row of matches) {
   const appointmentText = startIso
     ? DateTime.fromISO(startIso).setZone(zone).toFormat('ccc, LLL d, yyyy, h:mm a')
     : `${text(row['Visit Date'])} ${text(row['Visit Time'])}`.trim();
-
-  /*
-   * THE SHORT CARD FIRST, then the briefing. Two messages, two jobs.
-   *
-   * The client, pointing at Apps Script's compact card: "THISSSSS ... YESSSS". That card is the team's first
-   * sight of a new visit, and it only ever fired when Apps Script itself created the event -- so a booking
-   * the PC handled never produced one. This sends the same card for any booking that has not had one.
-   *
-   * Its own marker, `cardFor`, separate from the briefing's. They are different messages and must be tracked
-   * separately, or sending one would silence the other -- which is exactly the mistake that muted real
-   * bookings earlier today. Apps Script's `briefed` marker counts too: that is IT saying it has already put
-   * this card in the Space, and a second identical one is the spam this week started with.
-   */
-  if (UNBRIEFED) {
-    const cardDay = dayKeyFromCell(row['Visit Date']);
-    const note = await getRowNote(auth, row.__rowNumber);
-    const sameDay = (marker) => {
-      const a = markerDay(marker); const b = markerDay(cardDay);
-      return Boolean(a && b && a === b);
-    };
-    if (sameDay(noteValue(note, 'cardFor')) || sameDay(noteValue(note, 'briefed'))) {
-      console.log(`  ${who} - booking card already sent, not repeating it`);
-    } else {
-      const carded = await notifyChat('', {
-        kind: 'ok', requested: true, card: bookedCard(row, appointmentText)
-      });
-      console.log(`  ${who} - booking card ${carded ? 'posted' : 'NOT posted (reason above)'}`);
-      if (carded && cardDay) await setRowNoteKey(auth, row.__rowNumber, 'cardFor', cardDay);
-    }
-  }
 
   const briefing = briefingFromDescription(description, { address, appointmentText });
 
