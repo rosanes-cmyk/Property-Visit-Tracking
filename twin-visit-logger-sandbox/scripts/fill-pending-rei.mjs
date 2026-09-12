@@ -926,7 +926,16 @@ async function main() {
             + 'No visit date and time, so there is no calendar event and nobody is going yet.'
             + ' Add the date on the board and it will book itself.\n\n';
         const posted = await notifyChat(
-          headline +
+          /*
+           * THE BODY. Deleting this line is what put "[object Object]" in the client's Space: with it gone
+           * the call read `notifyChat(headline + { kind: 'ok', ... })`, so the OPTIONS object was
+           * string-concatenated onto the message and notifyChat received no options at all. The card lost
+           * its entire briefing and turned from ✅ into ℹ️, which is the tell.
+           *
+           * Every test passed. They checked the headline and never that the briefing was still in the
+           * message — so the one thing the card exists to carry was the one thing nothing asserted.
+           */
+          `${headline}${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
           // The seller's number survives here, as in the intake. Same team-only Chat space.
           // requested: this is the briefing the client switched on by name, not per-lead noise, so
           // CHAT_ALERTS=off must not swallow it. See notifyChat.

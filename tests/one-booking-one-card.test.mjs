@@ -173,6 +173,32 @@ check('...and what to do about it', /Add the date on the board and it will book 
  */
 check('an unbooked row is never marked as briefed', /posted && booked && briefRow/.test(F), true);
 
+console.log('\n=== ...and the card still CARRIES the briefing ===');
+/*
+ * "[object Object]" reached the client's Space, on a card headed "Visit booked on the dashboard — Angela
+ * Ip" with nothing under it.
+ *
+ * Changing the headline above deleted the line holding the body, so the call became
+ * `notifyChat(headline + { kind: 'ok', ... })` — the OPTIONS object was string-concatenated onto the
+ * message and notifyChat received no options at all. Hence the empty card and the ℹ️ where a ✅ belongs.
+ *
+ * EVERY TEST PASSED. The section above checks the headline five ways and never once checked that the
+ * briefing was still in the message — so the only thing the card exists to carry was the only thing
+ * nothing asserted. A test suite that watches the wrapper and not the contents is how a one-line edit
+ * ships an empty notification.
+ */
+const call = FILL.slice(FILL.indexOf('const posted = await notifyChat('), FILL.indexOf('Chat briefing ${posted'));
+check('the message includes the fenced briefing', /\$\{fenced\}/.test(call), true);
+check('...and the DONE FOR YOU block', /\$\{done\}/.test(call), true);
+check('...and the headline', /\$\{headline\}/.test(call), true);
+/*
+ * The options object must be the SECOND argument, never part of the first. That is the exact shape of the
+ * fault, so it is asserted as a shape: a comma has to separate the message from the options.
+ */
+check('the options are a separate argument, not concatenated',
+  /`,\s*\n(\s*\/\/[^\n]*\n)*\s*\{ kind: 'ok', keepContactDetails: true, requested: true \}/.test(call), true);
+check('nothing is concatenated onto an object literal', /\+\s*\n(\s*\/\/[^\n]*\n)*\s*\{ kind:/.test(FILL), false);
+
 console.log('\n=== Reading the marker can never cost a booking ===');
 /*
  * Fail OPEN. The cost of an unreadable note is one duplicate card; the cost of treating a failed read as
