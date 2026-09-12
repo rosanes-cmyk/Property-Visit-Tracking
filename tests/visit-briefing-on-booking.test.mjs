@@ -158,7 +158,13 @@ console.log('\n=== CHAT_ALERTS=off must not swallow the briefing ===');
  * switched this on by name, so the noise switch does not get a vote".
  */
 const NOTIFY = read('twin-visit-logger-sandbox/src/utils/notify.mjs');
-check('notifyChat takes a `requested` flag', /requested = false\n?\} = \{\}\) \{/.test(NOTIFY), true);
+/*
+ * That the flag EXISTS in the options, not that it happens to be the last one. The first version matched
+ * `requested = false` immediately followed by the closing `} = {}) {`, so adding any later option — `card`,
+ * when the PC learned to post the booking card — failed a check about something it had not touched.
+ */
+check('notifyChat takes a `requested` flag',
+  /requested = false[\s\S]{0,60}\} = \{\}\) \{/.test(NOTIFY), true);
 check('...which bypasses the alerts switch',
   /if \(cfg && !cfg\.chatAlerts && !critical && !requested\) \{/.test(NOTIFY), true);
 check('critical stays a separate idea', /!critical && !requested/.test(NOTIFY), true);

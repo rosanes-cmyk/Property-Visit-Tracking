@@ -66,7 +66,8 @@ export function scrubContactDetails(text) {
  * distinguishable from a success at a glance, without reading the sentence.
  */
 export async function notifyChat(text, {
-  kind = 'info', webhookUrl = null, keepContactDetails = false, critical = false, requested = false
+  kind = 'info', webhookUrl = null, keepContactDetails = false, critical = false, requested = false,
+  card = null
 } = {}) {
   const cfg = webhookUrl !== null ? null : (await import('../config.mjs')).config;
   /*
@@ -130,7 +131,22 @@ export async function notifyChat(text, {
    *
    * The audience is the same either way: the Chat space and the visit group are both team-only.
    */
-  const body = { text: `${prefix} ${keepContactDetails ? String(text || '') : scrubContactDetails(text)}` };
+  /*
+   * A CARD, when one is given, instead of a line of text.
+   *
+   * The client pointed at the compact "Visit booked" card Apps Script posts — seller, time, and three
+   * buttons — and said "THISSSSS". That card only ever fires when Apps Script itself creates the event, so
+   * a booking the PC handles never gets one. This is how the PC sends the same thing.
+   *
+   * NO CONTACT DETAILS GO IN A CARD, and that is not an oversight. `scrubContactDetails` works on text, and
+   * a structured card would walk straight past it — so rather than write a second scrubber that could drift
+   * from the first, the card carries no phone and no email. The briefing that follows it carries both, at
+   * the one call site allowed to, and that arrangement leaves tests/notify.test.mjs's "exactly one" rule
+   * exactly as it was.
+   */
+  const body = card
+    ? { cardsV2: [{ cardId: 'visit-booked', card }] }
+    : { text: `${prefix} ${keepContactDetails ? String(text || '') : scrubContactDetails(text)}` };
 
   try {
     const response = await fetch(url, {

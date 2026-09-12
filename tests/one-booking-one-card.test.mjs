@@ -248,6 +248,36 @@ check('nothing to send says so and exits cleanly',
 check('the per-day file is still consulted', /if \(!FORCE && already\[sentKey\]\)/.test(S), true);
 check('the two-minute job runs it', /send-briefing\.mjs --unbriefed/.test(read('twin-visit-logger-sandbox/scripts/fill-pending.cmd')), true);
 
+console.log('\n=== ...and the short "Visit booked" card, for bookings the PC handles ===');
+/*
+ * The client, pointing at Apps Script's compact card with the three buttons: "THISSSSS" ... "YESSSS".
+ *
+ * That card is the team's first sight of a new visit, and it only ever fired when Apps Script ITSELF created
+ * the event — so a booking the PC handled produced no card at all. Both messages now go out for every
+ * booking: the card to see it happened, the block to paste into the group.
+ */
+const NOTIFY = read('twin-visit-logger-sandbox/src/utils/notify.mjs');
+check('notifyChat can post a card', /card = null/.test(NOTIFY), true);
+check('...as cardsV2, not as text', /cardsV2: \[\{ cardId: 'visit-booked', card \}\]/.test(NOTIFY), true);
+check('...and plain text still goes out as text when no card is given',
+  /card\s*\?\s*\{ cardsV2[\s\S]{0,120}: \{ text:/.test(NOTIFY), true);
+/*
+ * NO CONTACT DETAILS ON A CARD. scrubContactDetails works on text and would walk straight past a structured
+ * card, so rather than a second scrubber that could drift from the first, the card carries neither phone nor
+ * email — and tests/notify.test.mjs's "exactly one call site keeps the number" rule is untouched.
+ */
+check('the card carries no phone', /Phone|phone/.test(code(SEND).slice(code(SEND).indexOf('function bookedCard'), code(SEND).indexOf('function bookedCard') + 1200)), false);
+check('the card has the buttons', /text: 'Directions'/.test(SEND) && /text: 'Open in REI'/.test(SEND), true);
+check('...and the same header the client pointed at', /title: `Visit booked — \$\{seller\}`/.test(SEND), true);
+check('...and the unassigned warning Apps Script carries', /Needs a visitor assigned/.test(SEND), true);
+
+check('the card has its OWN marker, separate from the briefing',
+  /setRowNoteKey\(auth, row\.__rowNumber, 'cardFor', cardDay\)/.test(code(SEND)), true);
+check('...and Apps Script having carded it counts too',
+  /sameDay\(noteValue\(note, 'cardFor'\)\) \|\| sameDay\(noteValue\(note, 'briefed'\)\)/.test(code(SEND)), true);
+check('...marked only when it actually posted', /if \(carded && cardDay\)/.test(code(SEND)), true);
+check('a repeat says so rather than going quiet', /booking card already sent, not repeating it/.test(SEND), true);
+
 console.log('\n=== Reading the marker can never cost a booking ===');
 /*
  * Fail OPEN. The cost of an unreadable note is one duplicate card; the cost of treating a failed read as

@@ -41,7 +41,9 @@ import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
 import { briefingFromDescription } from '../src/whatsapp/note.mjs';
 import { notifyChat } from '../src/utils/notify.mjs';
-import { getRowNote, setRowNoteKey, alreadyAnnounced } from '../src/google/sheets.mjs';
+import {
+  getRowNote, setRowNoteKey, alreadyAnnounced, noteValue, markerDay
+} from '../src/google/sheets.mjs';
 
 const args = process.argv.slice(2);
 const TODAY = args.includes('--today');
@@ -246,6 +248,41 @@ if (!matches.length) {
   process.exit(1);
 }
 
+/**
+ * The compact "Visit booked" card, the one the client pointed at: "THISSSSS".
+ *
+ * Apps Script has posted this since the beginning, but ONLY when Apps Script itself creates the event - so a
+ * booking the PC handles, or one whose card was swallowed by a guard, never got one. The team's first sight
+ * of a new visit is this card, so a booking without one is a booking nobody noticed.
+ *
+ * It is deliberately NOT the briefing. Two messages, two jobs: this one says a visit exists and gives the
+ * buttons to act on it; the briefing that follows is the block somebody pastes into the visit group.
+ *
+ * No phone and no email on it. A card would walk straight past scrubContactDetails, and the briefing that
+ * follows carries the number anyway.
+ */
+function bookedCard(row, whenText) {
+  const addr = text(row['Property Address']);
+  const seller = text(row['Seller Name']) || '(no name)';
+  const visitor = text(row['Assigned Visitor']) || text(row['Assigned Owner']) || 'UNASSIGNED';
+  const source = text(row['Lead Source']);
+  const rei = text(row['REI BlackBook Link']);
+  const maps = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
+
+  const lines = [`<b>${addr}</b>`, `📅 ${whenText}`, `🧑 ${seller}`,
+    `👤 ${visitor}${source ? ` · ${source}` : ''}`];
+  /* The same warning Apps Script's card carries: a visit with nobody assigned is the one to chase. */
+  if (visitor === 'UNASSIGNED') lines.push('⚠️ <b>Needs a visitor assigned</b>');
+
+  const buttons = [{ text: 'Directions', onClick: { openLink: { url: maps } } }];
+  if (rei) buttons.push({ text: 'Open in REI', onClick: { openLink: { url: rei } } });
+
+  return {
+    header: { title: `Visit booked — ${seller}`, subtitle: `${whenText} · on the calendar now` },
+    sections: [{ widgets: [{ textParagraph: { text: lines.join('<br>') } }, { buttonList: { buttons } }] }]
+  };
+}
+
 console.log(`\n${matches.length} lead(s) matched:\n`);
 for (const r of matches) {
   console.log(`  row ${r.__rowNumber}  ${text(r['Seller Name']) || '(no name)'} · ${text(r['Property Address'])}`);
@@ -322,6 +359,36 @@ for (const row of matches) {
   const appointmentText = startIso
     ? DateTime.fromISO(startIso).setZone(zone).toFormat('ccc, LLL d, yyyy, h:mm a')
     : `${text(row['Visit Date'])} ${text(row['Visit Time'])}`.trim();
+
+  /*
+   * THE SHORT CARD FIRST, then the briefing. Two messages, two jobs.
+   *
+   * The client, pointing at Apps Script's compact card: "THISSSSS ... YESSSS". That card is the team's first
+   * sight of a new visit, and it only ever fired when Apps Script itself created the event -- so a booking
+   * the PC handled never produced one. This sends the same card for any booking that has not had one.
+   *
+   * Its own marker, `cardFor`, separate from the briefing's. They are different messages and must be tracked
+   * separately, or sending one would silence the other -- which is exactly the mistake that muted real
+   * bookings earlier today. Apps Script's `briefed` marker counts too: that is IT saying it has already put
+   * this card in the Space, and a second identical one is the spam this week started with.
+   */
+  if (UNBRIEFED) {
+    const cardDay = dayKeyFromCell(row['Visit Date']);
+    const note = await getRowNote(auth, row.__rowNumber);
+    const sameDay = (marker) => {
+      const a = markerDay(marker); const b = markerDay(cardDay);
+      return Boolean(a && b && a === b);
+    };
+    if (sameDay(noteValue(note, 'cardFor')) || sameDay(noteValue(note, 'briefed'))) {
+      console.log(`  ${who} - booking card already sent, not repeating it`);
+    } else {
+      const carded = await notifyChat('', {
+        kind: 'ok', requested: true, card: bookedCard(row, appointmentText)
+      });
+      console.log(`  ${who} - booking card ${carded ? 'posted' : 'NOT posted (reason above)'}`);
+      if (carded && cardDay) await setRowNoteKey(auth, row.__rowNumber, 'cardFor', cardDay);
+    }
+  }
 
   const briefing = briefingFromDescription(description, { address, appointmentText });
 
