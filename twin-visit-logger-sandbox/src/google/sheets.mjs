@@ -338,6 +338,95 @@ const ALLOW_EMPTY_UPDATE_HEADERS = new Set([
   'Automation Error'
 ]);
 
+/* ======================================================================================================
+ * THE ROW MARKER THE WORKBOOK ALREADY USES, READABLE AND WRITABLE FROM HERE.
+ *
+ * WHY. One booking was announced to the team FIVE times: three cards from this PC six minutes apart, then
+ * two more from Apps Script. The client: "the system spaming the of that notif".
+ *
+ * Apps Script has had a guard for this since Tuesday — a `briefed` marker kept in the NOTE on column A of
+ * the row (Automation.gs: `R.getNote('briefed')`). It works, and it stopped the duplicates on that side. It
+ * did nothing for the PC, because nothing on this side could see it. Two producers, one booking, one of
+ * them blind to the other's bookkeeping.
+ *
+ * So this reads and writes the SAME note, in the SAME format, so the guard is one guard rather than two
+ * that agree by luck.
+ *
+ * THE FORMAT IS COPIED, DELIBERATELY, INCLUDING ITS FLAW. Automation.gs stores `key=value;` pairs and reads
+ * them with an UNANCHORED regex, so a key that is a suffix of another would collide. Fixing that here and
+ * not there would be worse than the flaw: the two sides would silently disagree about what "briefed" means,
+ * which is precisely the bug being fixed. If it is ever tightened it has to be tightened in both files, and
+ * tests/visit-briefing-on-booking.test.mjs holds them to the same shape.
+ * ====================================================================================================== */
+
+/** Read one key out of a `key=value;` note. Mirrors Automation.gs getNote. */
+export function noteValue(note, key) {
+  const m = String(note == null ? '' : note).match(new RegExp(`${key}=([^;]*)`));
+  return m ? m[1] : '';
+}
+
+/** Set or clear one key in a `key=value;` note, leaving the others alone. Mirrors Automation.gs setNote. */
+export function noteWith(note, key, value) {
+  let n = String(note == null ? '' : note).replace(new RegExp(`${key}=[^;]*;?`), '');
+  if (value !== '') n += `${key}=${value};`;
+  return n;
+}
+
+/**
+ * The note on column A of one row, or '' — never throws.
+ *
+ * A marker that cannot be read must not stop a booking being processed. The cost of failing open is one
+ * duplicate card; the cost of failing closed is a booking that never reaches the team at all, and that
+ * trade is not close.
+ */
+export async function getRowNote(auth, rowNumber) {
+  if (!rowNumber) return '';
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const res = await sheets.spreadsheets.get({
+      spreadsheetId: config.spreadsheetId,
+      ranges: [`${config.trackerSheet}!A${rowNumber}`],
+      includeGridData: true,
+      fields: 'sheets/data/rowData/values/note'
+    });
+    return res.data?.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values?.[0]?.note || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Write one key into that note. Returns true when it landed. Never throws, for the same reason. */
+export async function setRowNoteKey(auth, rowNumber, key, value) {
+  if (!rowNumber) return false;
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const sheetId = await getSheetId(sheets);
+    if (sheetId === null) return false;
+    const next = noteWith(await getRowNote(auth, rowNumber), key, value);
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: config.spreadsheetId,
+      requestBody: {
+        requests: [{
+          updateCells: {
+            range: {
+              sheetId,
+              startRowIndex: rowNumber - 1,
+              endRowIndex: rowNumber,
+              startColumnIndex: 0,
+              endColumnIndex: 1
+            },
+            rows: [{ values: [{ note: next }] }],
+            fields: 'note'
+          }
+        }]
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let cachedSheetId;
 
 async function getSheetId(sheets) {

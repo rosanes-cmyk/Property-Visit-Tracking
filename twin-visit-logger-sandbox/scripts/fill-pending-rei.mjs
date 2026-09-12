@@ -28,7 +28,9 @@
 import { google } from 'googleapis';
 import { authorizeGoogle } from '../src/google/auth.mjs';
 import { config } from '../src/config.mjs';
-import { findExistingVisit, upsertVisit } from '../src/google/sheets.mjs';
+import {
+  findExistingVisit, upsertVisit, getRowNote, setRowNoteKey, noteValue
+} from '../src/google/sheets.mjs';
 import { syncCalendarEvent } from '../src/google/calendar.mjs';
 import { launchReiContext } from '../src/rei/browser.mjs';
 import { scrapeReiVisit } from '../src/rei/scraper.mjs';
@@ -834,7 +836,30 @@ async function main() {
         if (taskLine) console.log(`    ${taskLine}`);
       }
 
-      if (config.chatVisitBriefing) {
+      /*
+       * ANNOUNCED ONCE, WHICHEVER PART OF THE SYSTEM GOT THERE FIRST.
+       *
+       * Luis Ocon was announced three times from here (2:06, 2:12, 2:18) and twice more from Apps Script.
+       * Shan Richards twice. Richard Garcia three times. The client: "the system spaming the of that notif".
+       *
+       * Apps Script has guarded this since Tuesday with a `briefed` marker in the note on column A, and the
+       * duplicates carried on because nothing on THIS side could see that marker. Now both read and write
+       * the same one, so the guard is one guard rather than two that happen to agree.
+       *
+       * The marker goes on the row the booking ENDS UP on — the merge target when a parked row is folded
+       * into an existing lead — because that is the row Apps Script checks too.
+       *
+       * It fails OPEN: a note that cannot be read counts as not briefed. One duplicate card is a nuisance;
+       * a booking the team never hears about is the failure this whole feature exists to prevent.
+       */
+      const briefRow = written?.rowNumber;
+      const alreadyBriefed = briefRow ? noteValue(await getRowNote(auth, briefRow), 'briefed') : '';
+
+      if (config.chatVisitBriefing && alreadyBriefed) {
+        console.log(`    Chat briefing already sent for this booking on ${alreadyBriefed} — not sending again.`);
+        briefingLog.push({ level: 'INFO', id: text(row['Property ID']),
+          message: `Visit briefing skipped for ${visit.sellerName || who} — already announced on ${alreadyBriefed}.` });
+      } else if (config.chatVisitBriefing) {
         /*
          * The SAME builder and the SAME source text as the email path — buildDescription() is what goes on
          * the calendar event. Two builders would drift, and the one nobody looks at would be the one the
@@ -858,10 +883,25 @@ async function main() {
 
         const FENCE = String.fromCharCode(96, 96, 96);
         const fenced = `${FENCE}\n${briefing.split(FENCE).join("'''")}\n${FENCE}`;
+        /*
+         * DO NOT CALL IT BOOKED WHEN IT IS NOT.
+         *
+         * Shan Richards went out twice headed "Visit booked on the dashboard" with no date anywhere in the
+         * card and, at the bottom, "❌ Calendar — NOT created, this visit is on nobody's day". Richard
+         * Garcia the same. The team reads the headline; the contradiction is eleven lines further down.
+         *
+         * A row with no usable start is not a booking, it is a lead waiting for a date — and saying so is
+         * the difference between somebody chasing the date today and everybody assuming it is handled.
+         */
+        const booked = Boolean(calendarEventId);
+        const headline = booked
+          ? `*Visit booked on the dashboard — ${visit.sellerName || 'seller'}*\n`
+            + 'Copy the block below into the visit group.\n\n'
+          : `*⚠️ Added to the dashboard, NOT booked — ${visit.sellerName || 'seller'}*\n`
+            + 'No visit date and time, so there is no calendar event and nobody is going yet.'
+            + ' Add the date on the board and it will book itself.\n\n';
         const posted = await notifyChat(
-          `*Visit booked on the dashboard — ${visit.sellerName || 'seller'}*\n` +
-          'Copy the block below into the visit group.\n\n' +
-          `${fenced}\n\n━━ DONE FOR YOU ━━\n${done}`,
+          headline +
           // The seller's number survives here, as in the intake. Same team-only Chat space.
           // requested: this is the briefing the client switched on by name, not per-lead noise, so
           // CHAT_ALERTS=off must not swallow it. See notifyChat.
@@ -874,6 +914,17 @@ async function main() {
          * was not wrong.
          */
         console.log(`    Chat briefing ${posted ? 'posted' : 'NOT posted (reason above)'}`);
+        /*
+         * Marked only on SUCCESS, and only for a real booking.
+         *
+         * A failed post must leave the row unmarked or the next run would decide the team had already been
+         * told. And an incomplete row must stay unmarked too: once somebody adds the missing date it becomes
+         * an actual booking, and that one deserves its announcement.
+         */
+        if (posted && booked && briefRow) {
+          await setRowNoteKey(auth, briefRow, 'briefed',
+            DateTime.now().setZone(config.calendarTimezone).toFormat('yyyy-MM-dd'));
+        }
         briefingLog.push({ level: posted ? 'CHAT' : 'ERROR', id: text(row['Property ID']),
           message: posted
             ? `Visit briefing posted to Chat for ${visit.sellerName || who} · ${address}`

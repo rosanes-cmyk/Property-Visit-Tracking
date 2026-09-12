@@ -233,7 +233,7 @@ if (-not $SkipBuckets) {
   & schtasks.exe /Create /SC DAILY /ST $briefAt /TN $briefName /TR $briefCmd /F | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Creating scheduled task '$briefName' failed with exit code $LASTEXITCODE." }
   Set-VisitTaskSettings -Name $briefName
-  Write-Host ("  {0,-38} daily at {1}   today's visit briefings to Chat" -f $briefName, $briefAt)
+  Write-Host ("  {0,-38} daily at {1}   today's AND tomorrow's visit briefings" -f $briefName, $briefAt)
 
   foreach ($at in @("08:45", "10:45", "15:45")) {
     $name = "Twin Visit Logger Sweep Before $($at -replace ':', '')"

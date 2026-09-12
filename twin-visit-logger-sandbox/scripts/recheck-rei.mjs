@@ -41,6 +41,7 @@ import { briefingFromDescription } from '../src/whatsapp/note.mjs';
 import { OWNER_VALUES, VISITOR_VALUES, STAGE_VALUES, DISPOSITION_VALUES } from '../src/google/owner-map.mjs';
 import { closeOutRefusal, stageBehindTracker } from '../src/rei/stage-map.mjs';
 import { appendAuditLog, auditLine } from '../src/google/audit-log.mjs';
+import { getRowNote, setRowNoteKey, noteValue } from '../src/google/sheets.mjs';
 import { acquireLock, acquireLockWaiting } from '../src/utils/lock.mjs';
 import {
   shouldStandDownForBooking, noteSweepCompleted, noteSweepStoodDown, minutesSinceSweep
@@ -521,6 +522,21 @@ async function briefFirstEvent(scraped, row) {
     console.log(`    briefing held back - ${BRIEF_CAP_PER_RUN} already sent this run (reported at the end)`);
     return;
   }
+  /*
+   * THE SAME MARKER THE BOARD INTAKE AND APPS SCRIPT USE, so one booking is announced once whichever of the
+   * three noticed it first. This runs every twenty minutes across every lead with an REI link, so it is the
+   * producer most able to repeat itself.
+   *
+   * `missingEvent` already stops a visit that merely MOVED from announcing, but it cannot stop a SECOND
+   * producer announcing the same first booking - and that is what the client saw: three cards from the
+   * board intake and two more from elsewhere for the same lead.
+   */
+  const briefRow = row.__rowNumber;
+  const already = briefRow ? noteValue(await getRowNote(auth, briefRow), 'briefed') : '';
+  if (already) {
+    console.log(`    briefing skipped - already announced on ${already}`);
+    return;
+  }
   try {
     const briefing = briefingFromDescription(buildDescription(scraped), {
       address: scraped.propertyAddress || '',
@@ -538,6 +554,9 @@ async function briefFirstEvent(scraped, row) {
       { kind: 'ok', keepContactDetails: true, requested: true }
     );
     if (posted) briefedThisRun += 1;
+    // Marked only on success: a failed post must leave the next run free to try again.
+    // dayKeyOf, not luxon: this file deliberately does not import DateTime (see apptText below).
+    if (posted && briefRow) await setRowNoteKey(auth, briefRow, 'briefed', dayKeyOf(new Date()));
     console.log(`    briefing ${posted ? 'posted to Chat' : 'NOT posted (reason above)'}`);
     auditRows.push({ level: posted ? 'CHAT' : 'ERROR', id: String(row['Property ID'] || ''),
       message: (posted ? 'Visit briefing posted' : 'Visit briefing FAILED')
