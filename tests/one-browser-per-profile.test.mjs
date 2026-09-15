@@ -33,6 +33,7 @@
  * script that forgets is the same bug again, and nothing else would notice.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 let pass = 0, fail = 0;
@@ -108,6 +109,69 @@ for (const file of ['scripts/add-visit-from-rei.mjs', 'scripts/rei-task-doctor.m
   check(`${path.basename(file)} releases on exit`,
     /process\.on\('exit', \(\) => \{ releaseRei\(\); \}\)/.test(code(read(file))), true);
 }
+
+console.log('\n=== A lock is stale when its OWNER IS GONE, not when the file is old ===');
+/*
+ * THE REST OF THE LOGOUT, caught in the act by the client's session log — two pids, the same seconds, the
+ * same profile:
+ *
+ *   21:19:55  pid 3384   AUTH  REI accepted the session
+ *   21:20:21  pid 39700  AUTH  REI showed a login page
+ *   21:20:59  pid 3384   AUTH  REI accepted the session
+ *
+ * One process with a good session, one without, both alive, both in the same browser-data directory. The
+ * lock DID hold — for thirty minutes. Then removeStaleLock deleted it because the FILE was old, while the
+ * process that owned it was still running with the browser open. A sign-in window left open, or any run
+ * over half an hour, had its lock taken and a second Chromium launched on top of it.
+ *
+ * Run, not read: "does a live owner keep its lock past the window" is a question about behaviour.
+ */
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lockage-'));
+  const cwd = process.cwd();
+  process.chdir(dir);
+  const L = await import(path.join(ROOT, 'src/utils/lock.mjs'));
+  const lockFile = path.join(dir, 'data/run.lock');
+
+  // A lock held by THIS process, backdated well past the staleness window.
+  const release = await L.acquireLock('run');
+  check('the lock was taken', typeof release, 'function');
+  const old = new Date(Date.now() - 90 * 60 * 1000);
+  fs.utimesSync(lockFile, old, old);
+  fs.writeFileSync(lockFile, JSON.stringify({ pid: process.pid, startedAt: old.toISOString() }));
+  fs.utimesSync(lockFile, old, old);
+
+  const stolen = await L.acquireLock('run');
+  check('a LIVE owner keeps its lock, however old the file is', stolen, null);
+  check('...and the lock file is still there', fs.existsSync(lockFile), true);
+
+  /*
+   * The case the age rule exists for: a run that died holding it. That must still self-heal, or one crash
+   * blocks every later run for ever.
+   */
+  const deadPid = 2 ** 22;   // above any real pid on Windows or Linux; nothing is running as this
+  fs.writeFileSync(lockFile, JSON.stringify({ pid: deadPid, startedAt: old.toISOString() }));
+  fs.utimesSync(lockFile, old, old);
+  const afterDead = await L.acquireLock('run');
+  check('a DEAD owner past the window is cleared', typeof afterDead, 'function');
+  if (afterDead) await afterDead();
+
+  // An unreadable lock falls back to the age rule rather than blocking for ever.
+  fs.writeFileSync(lockFile, 'not json');
+  fs.utimesSync(lockFile, old, old);
+  const afterJunk = await L.acquireLock('run');
+  check('an unreadable lock past the window is cleared', typeof afterJunk, 'function');
+  if (afterJunk) await afterJunk();
+
+  process.chdir(cwd);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+const LOCKSRC = code(read('src/utils/lock.mjs'));
+check('both conditions, not either', /Date\.now\(\) - stat\.mtimeMs <= STALE_AFTER_MS\) return;/.test(LOCKSRC), true);
+check('...the owner is read back from the lock file', /JSON\.parse\(await fs\.readFile\(LOCK_PATH, 'utf8'\)\)\?\.pid/.test(LOCKSRC), true);
+check('...using heartbeat\'s pidAlive rather than a second copy',
+  /import \{ pidAlive \} from '\.\/heartbeat\.mjs'/.test(LOCKSRC), true);
+check('a run that stands down says why', /still held by process/.test(read('src/utils/lock.mjs')), true);
 
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

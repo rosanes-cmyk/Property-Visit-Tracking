@@ -1,6 +1,12 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
+/*
+ * pidAlive is heartbeat's, not a second copy of it. It handles the case a naive version gets wrong: signal 0
+ * throws EPERM when the process exists but belongs to somebody else, and EPERM means ALIVE. A duplicate here
+ * would eventually drift from that and start evicting live owners again.
+ */
+import { pidAlive } from './heartbeat.mjs';
 
 /*
  * ======================================================================================================
@@ -159,12 +165,52 @@ function lockPath(name) {
   return path.resolve(`./data/${name}.lock`);
 }
 
+/**
+ * A lock is stale when its OWNER IS GONE — not merely when it is old.
+ *
+ * THIS IS THE REST OF THE REI LOGOUT, and the client's session log caught it in the act. Two pids, the same
+ * seconds, the same profile:
+ *
+ *   21:19:55  pid 3384   AUTH  REI accepted the session
+ *   21:20:21  pid 39700  AUTH  REI showed a login page
+ *   21:20:59  pid 3384   AUTH  REI accepted the session
+ *   21:21:36  pid 39700  AUTH  REI showed a login page
+ *
+ * One process with a good session, one without, both alive, both driving the same browser-data directory.
+ * Whichever closes last writes its cookies over the other's, and the good session is gone.
+ *
+ * The lock was supposed to make that impossible, and it did hold — for thirty minutes. Then this function
+ * deleted it purely because the FILE was old, while the process that owned it was still running and still
+ * had the browser open. A sign-in window left open, or any run longer than half an hour, therefore had its
+ * lock taken away and a second Chromium launched on top of it.
+ *
+ * The age rule exists for a real case: a run that died holding the lock must not block every later run for
+ * ever. That case is "the owner is gone", which is what is now actually checked. The pid is already written
+ * into the lock file; nothing ever read it back.
+ *
+ * BOTH conditions, not either. A pid can be reused by an unrelated process, so age still has to pass too —
+ * and a live owner is never evicted no matter how long it has held on.
+ */
 async function removeStaleLock(LOCK_PATH) {
   try {
     const stat = await fs.stat(LOCK_PATH);
-    if (Date.now() - stat.mtimeMs > STALE_AFTER_MS) {
-      await fs.unlink(LOCK_PATH);
+    if (Date.now() - stat.mtimeMs <= STALE_AFTER_MS) return;
+
+    let owner = 0;
+    try {
+      owner = Number(JSON.parse(await fs.readFile(LOCK_PATH, 'utf8'))?.pid) || 0;
+    } catch { owner = 0; }   // unreadable: treat as ownerless, the old behaviour
+
+    if (owner && pidAlive(owner)) {
+      /*
+       * Said out loud. A run that stands down because another is genuinely still working is correct
+       * behaviour, but silence here is indistinguishable from the bug this replaced.
+       */
+      console.log(`  the REI browser is still held by process ${owner}, which is running — waiting rather`);
+      console.log('  than taking the lock from it. Two browsers on one profile is what signs REI out.');
+      return;
     }
+    await fs.unlink(LOCK_PATH);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
