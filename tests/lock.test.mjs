@@ -83,17 +83,35 @@ try {
 
   console.log('\n=== a stale lock is cleared automatically ===');
   /*
-   * A crashed run leaves the file behind. Anything older than 30 minutes is treated as abandoned, or one
-   * crash would stop every scheduled run until somebody deleted a file by hand.
+   * A crashed run leaves the file behind. Anything older than 30 minutes AND owned by a process that is gone
+   * is treated as abandoned, or one crash would stop every scheduled run until somebody deleted a file.
+   *
+   * THE PID MATTERS, and the first version of this test did not set one. It backdated the file and expected
+   * a reclaim -- but the owner it recorded was this very test process, which is alive. That passed only
+   * because nothing read the pid back, and the same hole let a live run's lock be stolen on the client's
+   * machine: two Chromiums, one profile, and the REI session gone. A crashed run is simulated properly now.
    */
   const crashed = await acquireLock('t5');
   const lockFile = path.resolve('./data/t5.lock');
   check('the lock file exists where the code says', !!(await fs.stat(lockFile).catch(() => null)), true);
   const old = new Date(Date.now() - 31 * 60 * 1000);
+  const DEAD_PID = 2 ** 22;     // above any real pid; nothing is running as this
+  await fs.writeFile(lockFile, JSON.stringify({ pid: DEAD_PID, startedAt: old.toISOString() }));
   await fs.utimes(lockFile, old, old);
   const reclaimed = await acquireLock('t5');
-  check('a 31-minute-old lock is reclaimed', typeof reclaimed, 'function');
+  check('a 31-minute-old lock whose owner is GONE is reclaimed', typeof reclaimed, 'function');
   await reclaimed(); await crashed().catch(() => {});
+
+  /*
+   * ...and the case that was actually costing the REI session: old, but the owner is still working. A
+   * sign-in window left open, or any run over half an hour, used to have its lock taken here.
+   */
+  const working = await acquireLock('t5b');
+  const workingFile = path.resolve('./data/t5b.lock');
+  await fs.writeFile(workingFile, JSON.stringify({ pid: process.pid, startedAt: old.toISOString() }));
+  await fs.utimes(workingFile, old, old);
+  check('a 31-minute-old lock whose owner is ALIVE is NOT taken', await acquireLock('t5b'), null);
+  await working();
 
   console.log('\n--- a fresh lock is NOT reclaimed ---');
   const fresh = await acquireLock('t6');
