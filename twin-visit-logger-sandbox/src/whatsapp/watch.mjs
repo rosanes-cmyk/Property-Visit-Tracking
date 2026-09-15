@@ -27,7 +27,7 @@ import { eventsFinished, MAX_TASK_ATTEMPTS } from './post-gate.mjs';
 import { launchReiContext, assertAuthenticated } from '../rei/browser.mjs';
 import { readTasks, pickTaskForVisit, completeTask } from '../rei/tasks.mjs';
 import { shouldCompleteTask } from '../rei/task-gate.mjs';
-import { acquireLock } from '../utils/lock.mjs';
+import { acquireLock, acquireLockWaiting } from '../utils/lock.mjs';
 import { haltForPause } from '../utils/paused.mjs';
 import { notifyChat } from '../utils/notify.mjs';
 // fieldFromDescription/blockFromDescription moved with the briefing builder into note.mjs.
@@ -676,6 +676,27 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
 
   console.log(`\n=== Clearing ${done.length} REI task(s) ===`);
   const selectors = JSON.parse(await fs.readFile(config.reiSelectorConfig, 'utf8'));
+
+  /*
+   * THE 'run' LOCK, not just the 'whatsapp' one it already holds.
+   *
+   * Two locks, one profile. The watcher takes 'whatsapp' for the WhatsApp browser and then opens the REI
+   * profile here -- which every scheduled job guards with 'run'. Different lock names do not exclude each
+   * other, so this could put a second Chromium into browser-data/rei-* while a sweep was working, and that
+   * is precisely what empties the cookie jar: whichever instance closes last writes its own state over the
+   * other's. It cost the client a week of daily REI logouts from the hand-run tools.
+   *
+   * WhatsApp is off, so this has not been the live cause. It is the same defect regardless, and a disabled
+   * feature is a bad place to leave one.
+   */
+  const releaseRei = await acquireLockWaiting('run', {
+    onWait: (left) => console.log(`  REI is busy - waiting, up to ${Math.ceil(left / 60)} more minute(s)`)
+  });
+  if (!releaseRei) {
+    console.log('  REI stayed busy, so no task was closed. They stay open and the next run tries again.');
+    return;
+  }
+
   const rei = await launchReiContext({ headless: false });
   try {
     const page = rei.pages()[0] || (await rei.newPage());
@@ -751,6 +772,8 @@ async function clearReiTasks(plans, state, calendar, calendarId) {
     }
   } finally {
     await rei.close();
+    /* Released only after the REI browser is shut, or the next run could open the profile alongside it. */
+    await releaseRei();
   }
 }
 
