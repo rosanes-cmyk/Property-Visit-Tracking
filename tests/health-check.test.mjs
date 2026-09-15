@@ -125,6 +125,34 @@ console.log('\n=== REI signed out, read from the session log\'s own words ===');
   check('an older refusal is not an alarm', /REI is signed out/.test(out), false);
 }
 {
+  /*
+   * THE FALSE ALARM IT GAVE THE CLIENT, thirty seconds after they had signed in.
+   *
+   * A sign-in writes no AUTH line -- only a scheduled run does, because only a run asks REI for a page and
+   * sees what comes back. So the newest AUTH was still the refusal from before the login, and the check
+   * announced "REI is signed out" at somebody who had just fixed it. Their reply: "why you are saying
+   * tommorwo it should be worked his job for now as well".
+   *
+   * A profile OPENED with cookies since the last refusal is the evidence a login leaves behind.
+   */
+  const out = run({
+    ...healthy,
+    sessionLog: `${ago(2 * DAY)} pid 1 AUTH   REI accepted the session\n`
+      + `${ago(35 * 60 * 1000)} pid 2 AUTH   REI showed a login page\n`
+      + `${ago(3 * 60 * 1000)} pid 3 OPEN   profile=C:\\app\\browser-data\\rei-fresh reiCookies=19\n`
+  });
+  check('a fresh sign-in is not reported as signed out', /REI is signed out/.test(out), false);
+}
+{
+  // ...but an OPEN with NO cookies is not a login, and must not silence a real refusal.
+  const out = run({
+    ...healthy,
+    sessionLog: `${ago(35 * 60 * 1000)} pid 2 AUTH   REI showed a login page\n`
+      + `${ago(3 * 60 * 1000)} pid 3 OPEN   profile=C:\\app\\browser-data\\rei-fresh reiCookies=0\n`
+  });
+  check('an empty profile does not count as a sign-in', /REI is signed out/.test(out), true);
+}
+{
   // A machine that has never run REI has nothing to say about REI. Absence of a log is not a fault.
   const out = run({ ...healthy, sessionLog: null });
   check('no session log at all is not an alarm', /POSTED\|/.test(out), false);

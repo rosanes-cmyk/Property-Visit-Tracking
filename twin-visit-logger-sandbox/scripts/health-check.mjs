@@ -99,13 +99,27 @@ try {
   const lines = fs.readFileSync(path.resolve('./logs/rei-session.log'), 'utf8').split('\n');
   let accepted = 0;
   let refused = 0;
+  let openedWithCookies = 0;
   for (const line of lines) {
     const at = Date.parse((line.match(/^(\S+)/) || [])[1] || '');
     if (!Number.isFinite(at)) continue;
     if (line.includes('REI accepted the session')) accepted = Math.max(accepted, at);
     if (line.includes('REI showed a login page')) refused = Math.max(refused, at);
+    /*
+     * A SIGN-IN WRITES NO 'AUTH' LINE — only a scheduled run does, because only a run asks REI for a page
+     * and sees what comes back. So a login that has just happened is invisible to the two counters above,
+     * and the first version of this check told the client "REI is signed out" thirty seconds after they had
+     * signed in. The evidence it needs is the OPEN: a profile opened with cookies since the last refusal
+     * means the session was restored, whatever the older AUTH lines say.
+     *
+     * It does not claim the opposite either. An OPEN with cookies is not proof REI will accept them — that
+     * is what the next run finds out. It is only enough to stop asserting a signed-out state that has
+     * already been dealt with.
+     */
+    const cookies = /reiCookies=(\d+)/.exec(line);
+    if (cookies && Number(cookies[1]) > 0) openedWithCookies = Math.max(openedWithCookies, at);
   }
-  if (refused && refused > accepted) {
+  if (refused && refused > accepted && refused > openedWithCookies) {
     problems.push(`*REI is signed out* - last refused ${ago(now - refused)} ago`
       + (accepted ? `, last accepted ${ago(now - accepted)} ago.` : '.')
       + ' Run scripts\\login-rei.cmd on that PC.');
