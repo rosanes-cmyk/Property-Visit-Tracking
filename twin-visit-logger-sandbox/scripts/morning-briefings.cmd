@@ -42,4 +42,17 @@ echo ==== %DATE% %TIME% ==== >> "logs\briefings.log"
 echo. >> "logs\briefings.log"
 echo ---- tomorrow's visits, a day's notice ---- >> "logs\briefings.log"
 "%NODE%" scripts\send-briefing.mjs --tomorrow >> "logs\briefings.log" 2>&1
+
+rem ======================================================================================================
+rem  AND THE ONE CHECK THAT SPEAKS UP WHEN NOTHING IS HAPPENING.
+rem
+rem  Every failure this month was found because the client noticed and asked, days late: a sweep that had
+rem  not finished in 4.9 days, a briefing that had never fired, REI signed out, a PC that had not run since
+rem  Friday. Every check they had said things were fine - ten green scheduled tasks, all Last Result 0.
+rem
+rem  This reports the ABSENCE of work instead, which is what all of those had in common. It posts NOTHING on
+rem  a good day, and on a bad one it says how long, because "REI not checked" reads the same on day one and
+rem  day five.
+rem ======================================================================================================
+"%NODE%" scripts\health-check.mjs >> "logs\briefings.log" 2>&1
 endlocal
