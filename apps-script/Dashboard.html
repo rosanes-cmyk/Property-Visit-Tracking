@@ -200,7 +200,21 @@ a.rei:hover{color:var(--brand)}
  * not carry the stage actions, so hiding them would have cost real work to save space.
  */
 .rows{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)}
-.rowhead,.qrow{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 74px minmax(0,1.5fr) auto;
+/*
+ * EVERY TRACK IS FIXED OR FRACTIONAL. NONE IS `auto`, AND THAT IS THE WHOLE RULE.
+ *
+ * The action column was `auto`, so it sized to its own buttons - and the number of buttons depends on the
+ * lead's stage. A row offering "Mark visit completed / Move to nurture / Set next action" made a wider
+ * action track than a row offering only "Set next action", which pushed that row's OTHER four columns to
+ * different x positions. Every row was internally consistent and no two rows agreed, so AGE and WHY
+ * wandered down the page and the header - which has no buttons at all, so `auto` collapsed to zero -
+ * matched none of them. The widest rows then ran REI off the right edge.
+ *
+ * A grid only lines up when the tracks do not depend on the contents of the row. So: 92px for the age
+ * (fits "2026-08-20", the widest thing that goes there), 300px for the actions with the buttons wrapping
+ * inside it, and fractions for the three that should absorb the remaining width.
+ */
+.rowhead,.qrow{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,0.9fr) 92px minmax(0,1.6fr) 300px;
   gap:10px 14px;align-items:center;padding:10px 15px}
 .rowhead{background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;font-weight:650;
   letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
@@ -211,20 +225,21 @@ a.rei:hover{color:var(--brand)}
 .qwhere{font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qown{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* One number, right-aligned, tabular: the whole point of a column. */
-.qage{font-variant-numeric:tabular-nums;font-weight:600;font-size:12.5px;text-align:right;white-space:nowrap}
+.qage{font-variant-numeric:tabular-nums;font-weight:600;font-size:12.5px;text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qage.hot{color:var(--crit)} .qage.warm{color:var(--warn)} .qage.cool{color:var(--muted)}
 .qwhy{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
 .qwhy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qwhy .d{width:5px;height:5px;border-radius:50%;background:var(--border-2);flex:0 0 auto}
 .qwhy.crit{color:#fca5a5} .qwhy.crit .d{background:var(--crit)}
 .qwhy.warn{color:#fbbf24} .qwhy.warn .d{background:var(--warn)}
-.qact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.qact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;min-width:0}
 .qact .btn2{padding:4px 9px;font-size:11.5px}
 .qact a.rei{margin-left:4px}
 @media(max-width:820px){
   /* Stacked, because five columns in 380px is five ellipses. The label order is the reading order. */
   .rowhead{display:none}
-  .qrow{grid-template-columns:1fr auto;padding:12px 14px;gap:6px 10px}
+  .qrow{grid-template-columns:minmax(0,1fr) auto;padding:12px 14px;gap:6px 10px}
   .qrow>div:first-child{grid-column:1}
   .qage{grid-column:2;text-align:right}
   .qown,.qwhy{grid-column:1/-1}

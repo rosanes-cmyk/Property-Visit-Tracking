@@ -402,6 +402,34 @@ for (const [file, job] of [
   check('age renders as a single figure', /<span class="qage hot">46d<\/span>/.test(html), true);
   check('a lead that is not overdue shows its due date instead',
     api.qAge({ due: '2026-09-20' })[0].includes('2026-09-20'), true);
+
+  console.log('\n--- and the columns line up, which is a property of the TRACKS ---');
+  /*
+   * The action track was `auto`, so it sized to its own buttons — and how many buttons a row has depends
+   * on the lead's stage. A row offering three actions made a wider action track than a row offering one,
+   * which moved that row's other four columns to different x positions. Every row was internally
+   * consistent and no two agreed; the header, having no buttons, collapsed that track to zero and matched
+   * none of them. AGE and WHY wandered down the page and the widest rows ran REI off the right edge.
+   *
+   * A grid lines up only when no track depends on the contents of its row.
+   */
+  // Comment-stripped, same reason as the block above.
+  const css = DASH.slice(DASH.indexOf('<style>'), DASH.indexOf('</style>'))
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const gridRule = (css.match(/\.rowhead,\.qrow\{[^}]*grid-template-columns:([^;]+);/) || [])[1];
+  check('the header and every row share one template',
+    /\.rowhead,\.qrow\{display:grid/.test(css), true);
+  check('no track sizes itself to the row it is in',
+    /\bauto\b/.test(String(gridRule)), false);
+  // The widest thing the age column ever holds is a date; a fixed track has to fit it.
+  check('the age track is wide enough for a date', /\s92px\s/.test(String(gridRule)), true);
+  check('the action track has a width of its own', /\s300px$/.test(String(gridRule).trim()), true);
+  /*
+   * Which means the buttons wrap INSIDE their cell rather than widening it. That is the trade — a row with
+   * three actions is two lines tall, and every column still starts where the header says it does.
+   */
+  check('so the buttons wrap instead of pushing the grid',
+    /\.qact\{[^}]*flex-wrap:wrap/.test(css), true);
 }
 {
   const AUDIT = read('scripts/audit-notes.mjs');
