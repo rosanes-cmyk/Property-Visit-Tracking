@@ -330,6 +330,80 @@ for (const [file, job] of [
   }
 }
 {
+  /*
+   * THE BOARD IS A WORK QUEUE, AND RED HAS TO MEAN SOMETHING.
+   *
+   * The card grid stopped working at this volume: 57 SLA breaches and 60 overdue, four cards to a screen,
+   * every one of them red, each carrying seven pieces of metadata at equal weight. The client's verdict was
+   * blunt and correct. Nothing on it answered "where do I start", which is the only question a queue has.
+   *
+   * These are RUN, not matched against source, because the whole point is which rows come out coloured.
+   */
+  const DASH = fs.readFileSync(path.resolve('apps-script/Dashboard.html'), 'utf8');
+  const grab = (name) => {
+    const i = DASH.indexOf(`function ${name}(`);
+    let depth = 0;
+    for (let k = DASH.indexOf('{', i); k < DASH.length; k += 1) {
+      if (DASH[k] === '{') depth += 1;
+      else if (DASH[k] === '}') { depth -= 1; if (!depth) return DASH.slice(i, k + 1); }
+    }
+    throw new Error(`${name} not found`);
+  };
+  const api = new Function(
+    ['esc', 'money', 'sellerLink', 'actionsFor', 'qAge', 'qWhy', 'rowHTML', 'sev'].map(grab).join('\n')
+    + '; return { rowHTML, qWhy, qAge, sev };'
+  )();
+
+  /*
+   * sev() returned 'crit' for anything with daysOverdue > 0. Sixty leads are overdue, so every card was
+   * red — a severity applied to everything is a severity applied to nothing.
+   */
+  check('an ordinary overdue lead is amber, not red', api.sev({ daysOverdue: 46 }), 'warn');
+  check('an SLA breach is amber too — there are 57 of them', api.sev({ sla: 'No contact 48h+' }), 'warn');
+  check('a double booking IS red', api.sev({ daysOverdue: 46, conflict: true }), 'crit');
+  check('so is a price gap', api.sev({ gap: 40000 }), 'crit');
+  check('so is a row the automation could not parse', api.sev({ dq: 'Exception' }), 'crit');
+  check('a healthy lead gets no colour at all', api.sev({ stage: 'Offer Sent' }), '');
+
+  /*
+   * And the reason line agrees with the stripe. It did not: qWhy called an SLA breach 'crit' while sev()
+   * called it 'warn', which would have repainted the entire SLA section red from the other direction.
+   */
+  for (const [label, rec] of [['overdue', { daysOverdue: 46, sla: 'x' }], ['conflict', { conflict: true }],
+    ['gap', { gap: 1 }], ['clean', { next: 'Call Thursday' }]]) {
+    check(`the reason dot matches the severity on a ${label} row`, api.qWhy(rec)[0], api.sev(rec));
+  }
+
+  /*
+   * ONE reason, chosen by what somebody would act on first. The card listed every badge it had, so a lead
+   * with a breach, a gap and a blocker gave the eye three starting points and no ranking.
+   */
+  check('the worst reason wins',
+    api.qWhy({ conflict: true, gap: 5, sla: 'x', blocker: 'Title' })[1], 'Double-booked');
+  // The [since ...] stamp is machinery; it must not reach a row somebody reads.
+  check('the parked stamp is stripped from the reason',
+    /\[since/.test(api.qWhy({ exception: 'No address in REI. [since 2026-09-04T22:23:06.876Z]' })[1]), false);
+
+  console.log('\n--- nothing was hidden to make room ---');
+  /*
+   * The detail panel carries Delete/Edit/Close and NONE of the stage actions, so moving them behind it to
+   * save a column would have cost real work. Every button that was on the card is on the row.
+   */
+  const rec = { rowNum: 7, seller: 'Antoine Moore', address: '3275 Dakota St, Oakland, CA 94602',
+    owner: 'Juan', daysOverdue: 46, offer: 550000, sla: 'Offer decision overdue',
+    stage: 'Visit Completed — Needs Review', rei: 'https://my.reiblackbook.com/contacts/1' };
+  const html = api.rowHTML(rec);
+  for (const act of ['nurture', 'recordOfferSent', 'setNextAction']) {
+    check(`${act} is still one click away`, html.includes(`data-act="${act}"`), true);
+  }
+  check('...and so is the full record', html.includes('data-detail="7"'), true);
+  check('...and the REI link', html.includes('reiblackbook.com/contacts/1'), true);
+  // Age is one right-aligned number, which is the entire reason for a column.
+  check('age renders as a single figure', /<span class="qage hot">46d<\/span>/.test(html), true);
+  check('a lead that is not overdue shows its due date instead',
+    api.qAge({ due: '2026-09-20' })[0].includes('2026-09-20'), true);
+}
+{
   const AUDIT = read('scripts/audit-notes.mjs');
   /*
    * The QUIET path matters more than the busy one. "Nothing to correct" is the normal result and the whole

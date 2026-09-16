@@ -186,6 +186,51 @@ a.rei:hover{color:var(--brand)}
 .empty{color:var(--faint);font-size:12.5px;padding:14px;text-align:center;background:var(--surface);
   border:1px dashed var(--border-2);border-radius:var(--r)}
 
+/* ---------- Work-queue rows ----------
+ *
+ * The board was a card grid and it stopped working at this volume. 57 SLA breaches and 60 overdue: four
+ * cards filled a screen, every one of them red, each carrying seven pieces of metadata at the same weight.
+ * Nothing told you where to start, which is the only question a work queue has to answer.
+ *
+ * Rows fit twelve leads in the same space and — the part cards cannot do — line their values up, so 46d
+ * next to 2d is a glance instead of a read. The cards stay where they are right: BEING ADDED, which is a
+ * handful of things somebody watches individually.
+ *
+ * Every action that was on a card is still on its row. Nothing moved behind a menu: the detail panel does
+ * not carry the stage actions, so hiding them would have cost real work to save space.
+ */
+.rows{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)}
+.rowhead,.qrow{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 74px minmax(0,1.5fr) auto;
+  gap:10px 14px;align-items:center;padding:10px 15px}
+.rowhead{background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;font-weight:650;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.qrow{border-bottom:1px solid var(--border);font-size:13px}
+.qrow:last-child{border-bottom:none}
+.qrow:hover{background:var(--surface-2)}
+.qwho{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.qwhere{font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qown{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* One number, right-aligned, tabular: the whole point of a column. */
+.qage{font-variant-numeric:tabular-nums;font-weight:600;font-size:12.5px;text-align:right;white-space:nowrap}
+.qage.hot{color:var(--crit)} .qage.warm{color:var(--warn)} .qage.cool{color:var(--muted)}
+.qwhy{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.qwhy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qwhy .d{width:5px;height:5px;border-radius:50%;background:var(--border-2);flex:0 0 auto}
+.qwhy.crit{color:#fca5a5} .qwhy.crit .d{background:var(--crit)}
+.qwhy.warn{color:#fbbf24} .qwhy.warn .d{background:var(--warn)}
+.qact{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.qact .btn2{padding:4px 9px;font-size:11.5px}
+.qact a.rei{margin-left:4px}
+@media(max-width:820px){
+  /* Stacked, because five columns in 380px is five ellipses. The label order is the reading order. */
+  .rowhead{display:none}
+  .qrow{grid-template-columns:1fr auto;padding:12px 14px;gap:6px 10px}
+  .qrow>div:first-child{grid-column:1}
+  .qage{grid-column:2;text-align:right}
+  .qown,.qwhy{grid-column:1/-1}
+  .qact{grid-column:1/-1;justify-content:flex-start;margin-top:2px}
+}
+
 /* ---------- Pagination ---------- */
 .pager{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:12px 2px 4px}
 .pinfo{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -465,7 +510,23 @@ function compute(r){
   r.exception=r.exception||''; r.missing=r.missing||'';
   return r;
 }
-function sev(r){if(r.daysOverdue>0||r.dq==='Exception')return 'crit';if(r.stalled||r.dq==='Incomplete')return 'warn';if(r.stage==='Contract Signed')return 'good';return '';}
+/*
+ * RED HAS TO MEAN SOMETHING, and it had stopped.
+ *
+ * This returned 'crit' for anything with daysOverdue > 0 — and 60 leads are overdue, so every card on the
+ * board carried a red stripe, a red badge and red text. A severity applied to everything is a severity
+ * applied to nothing: the client's word for the result was accurate.
+ *
+ * Overdue is the NORMAL state of this board, so it is amber. Red is kept for the things that are wrong in
+ * a way somebody has to answer today: a double booking, a row the automation could not make sense of, a
+ * price gap. Those are countable on one hand, which is what makes the colour worth looking at.
+ */
+function sev(r){
+  if(r.conflict||r.dq==='Exception'||r.gap>0)return 'crit';
+  if(r.daysOverdue>0||r.sla||r.stalled||r.dq==='Incomplete')return 'warn';
+  if(r.stage==='Contract Signed')return 'good';
+  return '';
+}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function money(n){return n?'$'+Number(n).toLocaleString():'';}
 function sellerLink(r,txt){var t=esc(txt||r.seller||'(no name)');return r.rei?('<a class="slink" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">'+t+' <span class="ext">↗</span></a>'):t;}
@@ -705,6 +766,61 @@ function cardHTML(r){
   return h+'</div></div>';
 }
 /*
+ * ONE ROW OF THE WORK QUEUE.
+ *
+ * Same record, same actions, same click targets as the card it replaces — the difference is that the five
+ * facts somebody actually triages on are in five columns, so they line up down the page.
+ *
+ * WHICH five, and why these: who and where (one cell, because an address without a name is unreadable),
+ * who owns it, how old it is, the single reason it is on this list, and what to do. Everything else the
+ * card was showing — stage, next action, the call note, the exception text — is a click away in Full
+ * record, where it has room to be read rather than truncated.
+ */
+function qAge(r){
+  var d=r.daysOverdue||0;
+  if(d>0)return ['<span class="qage '+(d>30?'hot':d>7?'warm':'cool')+'">'+d+'d</span>',d];
+  return ['<span class="qage cool">'+esc(r.due||'—')+'</span>',0];
+}
+/*
+ * The ONE reason this row is in front of you, picked in the order somebody would act on them.
+ *
+ * The card listed all of them as separate badges and they competed; on a lead with an SLA breach, a gap
+ * and a blocker the eye had three places to start and no ranking between them.
+ */
+function qWhy(r){
+  if(r.conflict)return ['crit','Double-booked'];
+  if(r.gap>0)return ['crit','Price gap '+money(r.gap)];
+  /*
+   * AMBER, not red, and this is the same decision sev() makes. There are 57 SLA breaches: inside the
+   * section named after them, a red dot on every row restates the heading. Red is left for the two or
+   * three rows in that list that are ALSO double-booked or carrying a price gap — which is the only way
+   * the colour tells anybody where to start.
+   */
+  if(r.sla)return ['warn',r.sla];
+  if(r.blocker)return ['warn','Blocked: '+r.blocker];
+  if(r.exception)return ['warn',String(r.exception).replace(/\s*\[since [^\]]*\]\s*/,' ').trim()];
+  if(r.missing)return ['warn','Missing: '+r.missing];
+  if(r.stalled)return ['warn','Stalled'];
+  if(r.next)return ['','' +r.next];
+  return ['',r.stage||''];
+}
+function rowHTML(r){
+  var age=qAge(r), why=qWhy(r);
+  var h='<div class="qrow">';
+  h+='<div><div class="qwho" data-detail="'+esc(r.rowNum)+'" title="View full record">'+sellerLink(r)+'</div>'
+    +'<div class="qwhere">'+esc(r.address||'')+'</div></div>';
+  h+='<div class="qown">'+esc(r.owner||'Unassigned')+(r.offer?(' · '+money(r.offer)):'')+'</div>';
+  h+=age[0];
+  h+='<div class="qwhy'+(why[0]?' '+why[0]:'')+'"><span class="d"></span><span>'+esc(why[1])+'</span></div>';
+  h+='<div class="qact">';
+  actionsFor(r).forEach(function(a){
+    h+='<button class="btn2'+(a[2]?' primary':'')+'" data-act="'+a[0]+'" data-id="'+esc(r.rowNum)+'">'+a[1]+'</button>';
+  });
+  h+='<button class="btn2" data-detail="'+esc(r.rowNum)+'">🔎</button>';
+  if(r.rei)h+='<a class="rei" href="'+esc(r.rei)+'" target="_blank" rel="noreferrer">REI ↗</a>';
+  return h+'</div></div>';
+}
+/*
  * Order depends on what the section is FOR.
  *
  * "Upcoming Visits (Scheduled)" is about what is coming, so overdue-first is the wrong rule there: it buried
@@ -764,7 +880,13 @@ function sectionInner(si,live){
   var start=pg*PSIZE, shown=rows.slice(start,start+PSIZE);
   var html='<div class="sec"><h2>'+esc(s[0])+'</h2><span class="n">'+rows.length+'</span><span class="rule"></span></div>';
   if(!rows.length){return html+'<div class="empty">Nothing here right now.</div>';}
-  html+='<div class="grid">'+shown.map(cardHTML).join('')+'</div>';
+  /*
+   * The header names the columns once instead of every row repeating a label, which is most of what made
+   * the card version so noisy: "👤 Unassigned  📅 2026-08-01  46d overdue" on all sixty of them.
+   */
+  html+='<div class="rows"><div class="rowhead"><span>Seller</span><span>Owner</span>'
+    +'<span style="text-align:right">Age</span><span>Why</span><span></span></div>'
+    +shown.map(rowHTML).join('')+'</div>';
   if(pages>1){
     html+='<div class="pager"><span class="pinfo">'+(start+1)+'–'+(start+shown.length)+' of '+rows.length+'</span>'
       +'<div class="pbtns"><button class="pbtn" data-pg="'+si+'" data-to="'+(pg-1)+'"'+(pg===0?' disabled':'')+'>‹ Prev</button>';
