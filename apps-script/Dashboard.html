@@ -48,9 +48,12 @@ body{
 
 /* ---------- App bar ---------- */
 .appbar{background:var(--surface);color:var(--ink);padding:10px 22px;display:flex;
-  justify-content:space-between;align-items:center;position:sticky;top:0;z-index:20;
-  border-bottom:1px solid var(--border)}
-.brand{display:flex;align-items:center;gap:11px}
+  justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:20;border-bottom:1px solid var(--border)}
+/* Wraps rather than crushing the product name against the status text on a narrow window.
+   The bar is measured, not assumed to be 45px, so growing a line costs nothing below it. */
+.brand{display:flex;align-items:center;gap:11px;min-width:0}
+.brand h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brand .logo{font-size:18px;width:32px;height:32px;display:grid;place-items:center;
   background:var(--brand);border-radius:8px;box-shadow:none}
 .brand h1{margin:0;font-size:15px;font-weight:650;letter-spacing:-.1px}
@@ -120,18 +123,38 @@ select:focus,input:focus,textarea:focus{border-color:var(--brand);outline:none}
 .card.crit{border-left-color:var(--crit)}
 .card.warn{border-left-color:var(--warn)}
 .card.good{border-left-color:var(--good)}
-.card .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+/*
+ * THE CARD HEADER, and the reason it is this specific set of rules.
+ *
+ * It read "F u l t o n ,  J o e" down the left edge of the card - one character per line - and the cause
+ * was overflow-wrap:anywhere on the name, added to stop long addresses widening a card.
+ *
+ * `anywhere` and `break-word` wrap identically. They differ in one place that is easy to miss: `anywhere`
+ * also counts those break points when the browser works out the element's MIN-CONTENT width, so the name
+ * block's minimum became one character. The two status chips beside it are white-space:nowrap and so have
+ * a min-content width of their whole text - "Visit Completed - Needs Review" is most of the card. Flex
+ * gave the chips what they demanded and squeezed the name into the character it had said it could live in.
+ *
+ * `break-word` wraps long text without offering to shrink below a real word, which is what was wanted.
+ *
+ * The rest of the rule set is what makes a narrow card behave: the name block may grow and shrink but
+ * never below its own content (min-width:0 is what lets it shrink INSIDE a flex row at all), and the row
+ * wraps, so on a phone the chips drop to their own line instead of eating the name.
+ */
+.card .top{display:flex;justify-content:flex-start;gap:8px 10px;align-items:flex-start;flex-wrap:wrap}
+.card .top>div{flex:1 1 170px;min-width:0}
 .card .seller{font-weight:650;font-size:14.5px;letter-spacing:-.1px}
-.card .addr{font-size:12px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
-.card .seller{overflow-wrap:anywhere}
-/* "2765 77th Ave, Oakland, CA, 94605, UNITED STATES" has no break opportunity a browser likes,
-   and one card widening drags the whole grid row with it. */
+.card .addr{font-size:12px;color:var(--muted);margin-top:2px;overflow-wrap:break-word}
+/* "2765 77th Ave, Oakland, CA, 94605, UNITED STATES" has few break opportunities a browser
+   likes, and one card widening drags its whole grid row with it. */
+.card .seller{overflow-wrap:break-word}
 
 .chipflag{font-size:10.5px;font-weight:700;border-radius:5px;padding:3px 8px;white-space:nowrap;
-  margin-left:6px;background:var(--crit-bg);border:1px solid rgba(239,68,68,.35);color:var(--crit-ink);
-  height:fit-content;letter-spacing:.03em}
+  margin-left:0;background:var(--crit-bg);border:1px solid rgba(239,68,68,.35);color:var(--crit-ink);
+  height:fit-content;letter-spacing:.03em;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .chipstage{font-size:10.5px;font-weight:600;border-radius:5px;padding:3px 9px;white-space:nowrap;
-  background:var(--surface-2);border:1px solid var(--border-2);color:var(--muted);height:fit-content}
+  background:var(--surface-2);border:1px solid var(--border-2);color:var(--muted);height:fit-content;
+  flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 
 .meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:11px;font-size:12.5px;color:var(--muted);align-items:center}
 .meta b{color:var(--ink);font-weight:600}
@@ -257,11 +280,11 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
 
 .modal.detail{max-width:760px;padding:0}
-.detail .dhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+.detail .dhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;
   padding:20px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;
   background:var(--surface);z-index:1;border-radius:12px 12px 0 0}
-.detail .d-seller{font-size:17px;font-weight:650}
-.detail .d-addr{color:var(--muted);font-size:12.5px;margin-top:2px}
+.detail .d-seller{font-size:17px;font-weight:650;overflow-wrap:break-word}
+.detail .d-addr{color:var(--muted);font-size:12.5px;margin-top:2px;overflow-wrap:break-word}
 .detail .dbody{padding:8px 24px 4px}
 .dl-grp{margin:16px 0}
 .dl-grp h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--brand-2);font-weight:650}

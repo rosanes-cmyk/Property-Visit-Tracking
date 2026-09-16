@@ -253,7 +253,13 @@ for (const [file, job] of [
    * CSS happens to have open.
    */
   const DASH = fs.readFileSync(path.resolve('apps-script/Dashboard.html'), 'utf8');
-  const css = DASH.slice(DASH.indexOf('<style>'), DASH.indexOf('</style>'));
+  const cssRaw = DASH.slice(DASH.indexOf('<style>'), DASH.indexOf('</style>'));
+  /*
+   * COMMENT-STRIPPED, and this file has now made that mistake itself. The check below forbids
+   * overflow-wrap:anywhere — and failed on the comment ABOVE the fix, which names the property in order
+   * to explain why it is gone. An assertion decided by prose is decided by nothing.
+   */
+  const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
 
   /*
    * 1. THE SECONDARY TEXT SCALE. --faint measured 2.85:1 on --surface against a 4.5:1 requirement, and it
@@ -295,6 +301,33 @@ for (const [file, job] of [
   // A phone's home indicator sits over the bottom 34px; the booking button was half under it.
   check('the FAB clears the home indicator',
     /bottom:calc\(22px \+ env\(safe-area-inset-bottom/.test(css), true);
+
+  /*
+   * 3. THE CARD HEADER THAT READ DOWNWARDS.
+   *
+   * It rendered "F u l t o n ,  J o e" one character per line. The cause was overflow-wrap:anywhere,
+   * added in the previous commit to stop a long address widening a card.
+   *
+   * `anywhere` and `break-word` wrap identically. They differ in one place: `anywhere` also counts those
+   * break points when the browser computes MIN-CONTENT width, so the name block's minimum became one
+   * character — while the status chips next to it are white-space:nowrap and therefore demand their full
+   * text. Flex honoured both and gave the name the single character it had said it could live in.
+   *
+   * Nothing about the declaration looks wrong, which is why it is asserted rather than remembered.
+   */
+  check('no element offers to shrink to one character', /overflow-wrap:\s*anywhere/.test(css), false);
+  check('...long text still wraps, the safe way', /overflow-wrap:break-word/.test(css), true);
+  /*
+   * min-width:0 is the other half. A flex item defaults to min-width:auto and refuses to shrink below its
+   * content, so without this the name block cannot give way at all and pushes the chips off the card.
+   */
+  check('the name block can shrink inside its flex row', /\.card \.top>div\{flex:1 1 170px;min-width:0\}/.test(css), true);
+  check('...and the row wraps instead of crushing it', /\.card \.top\{display:flex;[^}]*flex-wrap:wrap/.test(css), true);
+  // A nowrap chip that cannot shrink is what dictated the row in the first place.
+  for (const chip of ['chipstage', 'chipflag']) {
+    check(`.${chip} gives way rather than dictating the row`,
+      new RegExp(`\\.${chip}\\{[^}]*flex:0 1 auto;min-width:0`).test(css.replace(/\n\s*/g, '')), true);
+  }
 }
 {
   const AUDIT = read('scripts/audit-notes.mjs');
