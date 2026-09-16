@@ -350,8 +350,11 @@ for (const [file, job] of [
     throw new Error(`${name} not found`);
   };
   const api = new Function(
-    ['esc', 'money', 'sellerLink', 'actionsFor', 'qAge', 'qWhy', 'rowHTML', 'sev'].map(grab).join('\n')
-    + '; return { rowHTML, qWhy, qAge, sev };'
+    'var AV_HUES=[214,268,178,24,332,140,44];'
+    + "var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];"
+    + ['esc', 'money', 'sellerLink', 'actionsFor', 'shortDate', 'qAge', 'qWhy', 'avatar', 'rowHTML', 'sev']
+      .map(grab).join('\n')
+    + '; return { rowHTML, qWhy, qAge, sev, avatar };'
   )();
 
   /*
@@ -393,15 +396,35 @@ for (const [file, job] of [
     owner: 'Juan', daysOverdue: 46, offer: 550000, sla: 'Offer decision overdue',
     stage: 'Visit Completed — Needs Review', rei: 'https://my.reiblackbook.com/contacts/1' };
   const html = api.rowHTML(rec);
-  for (const act of ['nurture', 'recordOfferSent', 'setNextAction']) {
-    check(`${act} is still one click away`, html.includes(`data-act="${act}"`), true);
-  }
-  check('...and so is the full record', html.includes('data-detail="7"'), true);
-  check('...and the REI link', html.includes('reiblackbook.com/contacts/1'), true);
+  /*
+   * ONE action on the row — the stage's primary — and every other one on the menu. Four buttons of equal
+   * weight is four decisions before you have read the lead.
+   *
+   * Nothing was dropped to make the space, and that is what these check. The detail panel carries
+   * Delete/Edit/Close and NONE of the stage actions, so "it's in Full record" would have been false.
+   */
+  check('the row shows the stage\'s primary action', html.includes('data-act="recordOfferSent"'), true);
+  check('...and only that one', (html.match(/data-act=/g) || []).length, 1);
+  check('...with a menu for the rest', html.includes('data-menu="7"'), true);
+  const menu = DASH.slice(DASH.indexOf('function openRowMenu('));
+  check('the menu offers every non-primary action',
+    /acts\.forEach\(function\(a\)\{ if\(primary&&a\[0\]===primary\[0\]\)return;/.test(menu), true);
+  check('...plus the full record', /data-detail="'\+esc\(r\.rowNum\)\+'"/.test(menu), true);
+  check('...plus the REI link', /if\(r\.rei\)html\+=/.test(menu), true);
+  /*
+   * Appended to <body>, because .rows has overflow:hidden for its rounded corners — a menu inside a row
+   * would be clipped, and a row near the bottom of a section would open one nobody could read.
+   */
+  check('the menu is not clipped by the panel', /document\.body\.appendChild\(m\)/.test(menu), true);
+  check('...and flips up when it would fall off the bottom',
+    /window\.innerHeight\)top=box\.top/.test(menu.replace(/\s+/g, '')), true);
+  // The offer lost its column when the owner became a face; it belongs with the reason, not nowhere.
+  check('the offer is still on the row',
+    api.rowHTML({ ...rec, conflict: true }).includes('$550,000'), true);
   // Age is one right-aligned number, which is the entire reason for a column.
   check('age renders as a single figure', /<span class="qage hot">46d<\/span>/.test(html), true);
   check('a lead that is not overdue shows its due date instead',
-    api.qAge({ due: '2026-09-20' })[0].includes('2026-09-20'), true);
+    api.qAge({ due: '2026-09-20' })[0].includes('Sep 20'), true);
 
   console.log('\n--- and the columns line up, which is a property of the TRACKS ---');
   /*
@@ -416,20 +439,18 @@ for (const [file, job] of [
   // Comment-stripped, same reason as the block above.
   const css = DASH.slice(DASH.indexOf('<style>'), DASH.indexOf('</style>'))
     .replace(/\/\*[\s\S]*?\*\//g, '');
-  const gridRule = (css.match(/\.rowhead,\.qrow\{[^}]*grid-template-columns:([^;]+);/) || [])[1];
-  check('the header and every row share one template',
-    /\.rowhead,\.qrow\{display:grid/.test(css), true);
-  check('no track sizes itself to the row it is in',
-    /\bauto\b/.test(String(gridRule)), false);
-  // The widest thing the age column ever holds is a date; a fixed track has to fit it.
-  check('the age track is wide enough for a date', /\s92px\s/.test(String(gridRule)), true);
-  check('the action track has a width of its own', /\s300px$/.test(String(gridRule).trim()), true);
+  const gridRule = (css.match(/\.ch,\.qrow\{[^}]*grid-template-columns:([^;]+);/) || [])[1];
+  check('the header and every row share one template', /\.ch,\.qrow\{display:grid/.test(css), true);
+  check('no track sizes itself to the row it is in', /\bauto\b/.test(String(gridRule)), false);
+  check('the age track is a fixed width', /\s76px\s/.test(String(gridRule)), true);
+  check('the action track has a width of its own', /\s208px;?$/.test(String(gridRule).trim()), true);
   /*
-   * Which means the buttons wrap INSIDE their cell rather than widening it. That is the trade — a row with
-   * three actions is two lines tall, and every column still starts where the header says it does.
+   * And a date is printed short enough to live in it. "2026-09-16" needed half again as much column to
+   * say what "Sep 16" says, and that width was coming out of the status beside it.
    */
-  check('so the buttons wrap instead of pushing the grid',
-    /\.qact\{[^}]*flex-wrap:wrap/.test(css), true);
+  check('a due date is shortened to fit', api.qAge({ due: '2026-09-16' })[0].includes('Sep 16'), true);
+  check('...and anything that is not a date is left alone',
+    api.qAge({ due: '2:00 PM' })[0].includes('2:00 PM'), true);
 }
 {
   const AUDIT = read('scripts/audit-notes.mjs');
