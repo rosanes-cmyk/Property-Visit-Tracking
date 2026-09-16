@@ -701,7 +701,27 @@ export async function scrapeReiVisit(context, reiLink, emailFallback = {}) {
        * message until now, so a timing bug got written onto the row as though REI had answered.
        */
       const labelWasOnScreen = /property address/i.test(visibleText);
-      result.warnings.push(labelWasOnScreen
+      /*
+       * AND THE LABEL BEING THERE IS NOT EVIDENCE OF ANYTHING. REI draws it either way — it is part of the
+       * About panel's layout, not a sign that a value arrived. So this test was true for every contact
+       * whose address REI simply does not hold, and those were told to re-run, for ever.
+       *
+       * Kyle Flores spent ELEVEN DAYS on the client's board that way. Every attempt logged:
+       *
+       *     About panel settled with 34 field(s)
+       *     REI showed the Property Address label but no value — the page may not have finished loading
+       *
+       * Thirty-four fields had rendered. Nothing was still loading. His REI record has no address on it,
+       * and the one thing that would have fixed it — somebody typing the address into REI — is the one
+       * thing the message never suggested, because it kept blaming us.
+       *
+       * The panel having rendered is the real test, and the project already uses it elsewhere: REI
+       * answering with a stage or a name means the fields came back. If they did and the address is empty,
+       * the address is empty. Only a panel that produced nothing at all is a rendering problem.
+       */
+      const panelRendered = Boolean(result.contactStage || result.sellerName || result.phone
+        || result.assignedOwner || result.leadSource);
+      result.warnings.push(labelWasOnScreen && !panelRendered
         ? 'Property address label is on the page but its value could not be read — the page may not have '
           + 'finished rendering. Worth re-running before treating this as REI having no address.'
         : 'Property address was not found.');

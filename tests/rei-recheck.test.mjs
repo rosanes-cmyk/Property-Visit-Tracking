@@ -1234,6 +1234,38 @@ check('the message still distinguishes nothing-to-compare from agreement',
   'Fandy · 212 Orland St, Las Vegas, NV 89107 · REI returned NOTHING to compare — no appointment date and no '
   + 'contact fields. The page may not have rendered, or the contact has no appointment in REI.');
 check('an empty scrape is retried once', /Retrying once/.test(RUNNER), true);
+
+/*
+ * THE SAME TEST, APPLIED TO THE ADDRESS — and it was being got backwards.
+ *
+ * "REI has no Property Address on this contact" and "the page did not finish rendering" are opposite
+ * problems: the first is REI's data and a person fixes it in REI, the second is ours and re-running fixes
+ * it. The scraper decided between them by asking whether the words "Property Address" appeared on the page.
+ *
+ * REI draws that LABEL either way. It is part of the About panel's layout. So every contact whose address
+ * REI does not hold was reported as a rendering problem, and the board told somebody to wait for the next
+ * run — for ever.
+ *
+ * Kyle Flores, eleven days on the client's board, every attempt logging:
+ *
+ *     About panel settled with 34 field(s)
+ *     REI showed the Property Address label but no value — the page may not have finished loading
+ *
+ * Thirty-four fields had rendered. The one action that would have fixed it, typing the address into REI,
+ * was the one the message never mentioned.
+ *
+ * The rule is the one three lines up: a contact that exists comes back with a name and a phone. If any of
+ * those arrived, the panel rendered, and an empty address is an empty address.
+ */
+const SCRAPER_CODE = SCRAPER
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+check('a rendered panel is what decides it, not the label',
+  /const panelRendered = Boolean\(result\.contactStage \|\| result\.sellerName \|\| result\.phone/.test(SCRAPER_CODE),
+  true);
+check('...so "may not have finished rendering" needs the panel to have produced NOTHING',
+  /labelWasOnScreen && !panelRendered/.test(SCRAPER_CODE), true);
+check('the label alone no longer buys a re-run',
+  /labelWasOnScreen\s*\n?\s*\?\s*'Property address label/.test(SCRAPER_CODE), false);
 check('...after a pause, because the cause is a page still rendering',
   /setTimeout\(resolve, 4000\)/.test(RUNNER), true);
 check('a second empty result is recorded as unreadable',
