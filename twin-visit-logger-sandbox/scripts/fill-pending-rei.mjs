@@ -342,6 +342,35 @@ async function noteParkReason(sheets, headers, row, reason) {
   }
 }
 
+/**
+ * Take a parked row off the board once its booking has been merged into another row.
+ *
+ * The board decides what is pending purely by whether Property Address starts with the placeholder, so
+ * replacing that text is what clears the card. The replacement says where the real row is, because the
+ * next person to see this will be looking at two rows for one seller and wondering which is which.
+ *
+ * The row is NOT deleted. Deleting somebody else's row is not this script's call, and a row that vanishes
+ * is indistinguishable from one that was never created.
+ */
+async function retireParkedRow(sheets, headers, row, intoRowNumber) {
+  try {
+    const col = headers.indexOf('Property Address');
+    if (col < 0) return;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `${config.trackerSheet}!${columnLetter(col + 1)}${row.__rowNumber}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[`DUPLICATE — this booking was merged into row ${intoRowNumber}`]] }
+    });
+    console.log(`    cleared the parked row ${row.__rowNumber} — the board now shows row ${intoRowNumber} only`);
+    await noteParkReason(sheets, headers, row, `Merged into row ${intoRowNumber}, which already had this `
+      + 'contact. This row can be deleted; nothing is lost.');
+  } catch (error) {
+    console.log(`    (could not clear the parked row: ${error.message})`);
+    console.log('    it will stay on the board and be retried — no data is lost, but it will keep showing.');
+  }
+}
+
 async function main() {
   console.log('Twin Visit Logger · finish the rows added on the board');
   console.log(`Mode: ${APPLY ? 'APPLY' : 'DRY RUN — nothing will be written'}`);
@@ -391,7 +420,8 @@ async function main() {
   }
   const headers = grid[0].map((h) => String(h).trim());
   const rows = grid.slice(1).map((values, i) => {
-    const rec = { __rowNumber: i + 2 };
+    // __values is the RAW array, kept because upsertVisit reads an existing row by column index.
+    const rec = { __rowNumber: i + 2, __values: values };
     headers.forEach((h, c) => { rec[h] = values[c]; });
     return rec;
   });
@@ -695,10 +725,48 @@ async function main() {
        * Then the parked row must be CLEARED, not just left. upsertVisit writes to the matched row, so
        * without this the placeholder sits beside the real card forever, and every run tries it again.
        */
-      const match = await findExistingVisit(auth, visit);
-      const mergingInto = match?.rowNumber && match.rowNumber !== row.__rowNumber ? match.rowNumber : 0;
+      /*
+       * AND WHEN IT MATCHES NOTHING, THE PARKED ROW IS THE ANSWER — it is the row we are standing on.
+       *
+       * This line used to hand the result straight to upsertVisit, and when the matcher came back empty
+       * upsertVisit wrote a NEW row. It came back empty every single time, and could not do otherwise: the
+       * matcher works on Gmail message id, REI record id, REI link, or a normalised address verified by
+       * phone, and a row a colleague booked from the board has NONE of those. Its record id and link are
+       * blank until this very script fills them, and its address is the placeholder "PENDING REI LOOKUP —".
+       * Phone alone never matches; it is only ever a verifier for an address.
+       *
+       * So every finished booking was written to a fresh row while the parked one stayed parked. On the
+       * client's sheet: Marie Tran 407 and 414, Frank Yong 408 and 416, Kathleen Tostanoski 410 and 415,
+       * Everett Morgan 412 and 418, Emmanuel Hoggs 413 and 417. Five people, ten rows, five cards that
+       * could never clear — one of them showing "Still not finished" for 11.8 days — while the log said
+       * "filled row 418 · calendar event set · Chat briefing posted" and meant it.
+       *
+       * The file header has claimed "The EXISTING row is updated in place. Nothing is appended, so a
+       * colleague's row cannot become two" since the day it was written. It was describing the intention.
+       */
+      const searched = await findExistingVisit(auth, visit);
+      const match = searched.found ? searched : {
+        ...searched,
+        found: true,
+        rowNumber: row.__rowNumber,
+        row: row.__values || [],
+        calendarEventId: text(row['Calendar Event ID']) || '',
+        matchedOn: 'the parked row itself'
+      };
+      const mergingInto = searched.found && searched.rowNumber !== row.__rowNumber ? searched.rowNumber : 0;
       if (mergingInto) {
         console.log(`    this contact already has row ${mergingInto} — merging into it`);
+        /*
+         * AND THE PARKED ROW IS RETIRED, which the comment above has promised since it was written while
+         * no code did it. upsertVisit writes to the MATCHED row, so a parked row left holding
+         * "PENDING REI LOOKUP —" stays on the board beside the real card for ever, and every run picks it
+         * up and does the whole REI lookup again to reach the same conclusion.
+         *
+         * It is marked, not deleted. Nothing in this project deletes a row somebody else created: the
+         * address says plainly what happened and which row to look at, the card stops showing because the
+         * text no longer begins with the placeholder, and a person can remove it when they see it.
+         */
+        await retireParkedRow(sheets, headers, row, mergingInto);
         /*
          * The date the colleague typed is the reason this row exists, so it is carried across. REI may
          * not know about the new booking yet; that is the whole point of somebody typing it.
