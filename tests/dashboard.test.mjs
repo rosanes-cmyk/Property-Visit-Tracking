@@ -218,6 +218,34 @@ for (const [file, job] of [
   check('...and named as such in the summary', /NOT REACHED/.test(FILL), true);
 }
 {
+  /*
+   * A STUCK CARD SHOWS WHAT THE LOOKUP FOUND, not what the card guesses.
+   *
+   * Kyle Flores's card read "Most often REI has signed itself out — run 1 - Sign in to REI" for eleven
+   * days while the row beside it held the real finding: "The REI page did not finish loading, so the
+   * address could not be read." REI was signed in throughout, so the one action the card kept asking for
+   * could never have helped.
+   *
+   * fill-pending writes its finding into Exception Reason on every attempt. Nothing displayed it — the
+   * pending branch returns before the line that shows r.exception on an ordinary card. Twice now the fix
+   * for a wrong hint has been to write a better hint; the fix is to stop guessing when there is an answer.
+   */
+  const DASH = fs.readFileSync(path.resolve('apps-script/Dashboard.html'), 'utf8');
+  check('a stuck card prefers the reason written on the row',
+    /\? \(String\(r\.exception\|\|''\)\.replace\(\/\\s\*\\\[since \[\^\\\]\]\*\\\]\\s\*\/, ' '\)\.trim\(\)/.test(DASH),
+    true);
+  check('...escaped, because it is text from a sheet', /\? esc\(String\(r\.exception\)/.test(DASH), true);
+  // The guess survives for the one case where it is all anybody has: nothing written yet.
+  check('...and the guess remains as the fallback',
+    /: 'The office PC does this, and it has not\./.test(DASH), true);
+  /*
+   * The stamp is machinery, not a sentence: pendingSince() reads the clock out of it. Printing it would
+   * put "[since 2026-09-04T22:23:06.876Z]" on a card somebody reads at a front door.
+   */
+  check('the [since ...] stamp is stripped before display',
+    (DASH.match(/replace\(\/\\s\*\\\[since \[\^\\\]\]\*\\\]\\s\*\//g) || []).length >= 2, true);
+}
+{
   const AUDIT = read('scripts/audit-notes.mjs');
   /*
    * The QUIET path matters more than the busy one. "Nothing to correct" is the normal result and the whole

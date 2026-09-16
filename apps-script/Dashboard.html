@@ -479,19 +479,30 @@ function cardHTML(r){
       '<div class="dnote" style="margin:6px 2px 0">'+
       (stale
         /*
-         * Name the cause that is actually most likely, not the one that is easiest to describe.
+         * THE REASON THE PC WROTE BEATS ANY GUESS THIS CARD CAN MAKE.
          *
-         * This card sat at "Still not finished 1489m" — twenty-five hours — while telling the reader to check
-         * the PC was switched on and signed in to Windows. It was. The real reason was that REI had signed the
-         * browser profile out, so the lookup had nothing to search, and the log said so plainly on the PC.
+         * The guess below was itself written to replace an earlier, worse guess: a card sat at "Still not
+         * finished 1489m" telling the reader to check the PC was switched on, and it was — REI had signed
+         * the browser profile out. So the wording was changed to name the likelier cause. That was still
+         * the wrong shape of fix, because it is still a guess.
          *
-         * A hint that sends somebody to the wrong place costs more than no hint: they check Windows, find
-         * nothing wrong, and conclude the card is broken. Order the two by likelihood and name the shortcut
-         * that fixes the common one, so the fix is a double-click rather than a diagnosis.
+         * Kyle Flores made that plain. His card said "Most often REI has signed itself out — run 1 - Sign
+         * in to REI" for ELEVEN DAYS, while the row beside it held what the lookup had actually found:
+         * "The REI page did not finish loading, so the address could not be read." REI was signed in the
+         * whole time. Signing in again could never have helped, and that is what the card kept asking for.
+         *
+         * fill-pending writes its real finding into Exception Reason on every attempt. It was there all
+         * along; nothing displayed it, because this branch returns before the line further down that shows
+         * r.exception on an ordinary card. So: show what was found, and fall back to the guess only when
+         * nothing has been written yet — which is the one case where a guess is all anybody has.
+         *
+         * The "[since ...]" stamp is stripped: it is how pendingSince() reads the clock, not a sentence.
          */
-        ? 'The office PC does this, and it has not. Most often REI has signed itself out — on that PC, '
-          + 'run "1 - Sign in to REI", then "3 - Finish pending bookings". If that is not it, check the PC '
-          + 'is switched on and signed in to Windows.'
+        ? (String(r.exception||'').replace(/\s*\[since [^\]]*\]\s*/, ' ').trim()
+          ? esc(String(r.exception).replace(/\s*\[since [^\]]*\]\s*/, ' ').trim())
+          : 'The office PC does this, and it has not. Most often REI has signed itself out — on that PC, '
+            + 'run "1 - Sign in to REI", then "3 - Finish pending bookings". If that is not it, check the PC '
+            + 'is switched on and signed in to Windows.')
         : 'You can close this tab — the office PC is doing it. The card will fill itself in.')+
       '</div></div>';
   }
