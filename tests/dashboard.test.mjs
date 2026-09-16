@@ -246,6 +246,57 @@ for (const [file, job] of [
     (DASH.match(/replace\(\/\\s\*\\\[since \[\^\\\]\]\*\\\]\\s\*\//g) || []).length >= 2, true);
 }
 {
+  /*
+   * THE LAYOUT THINGS THAT ONLY BREAK ON SOMEBODY ELSE'S SCREEN.
+   *
+   * Both were measured rather than argued about, and neither shows up in the window a person writing the
+   * CSS happens to have open.
+   */
+  const DASH = fs.readFileSync(path.resolve('apps-script/Dashboard.html'), 'utf8');
+  const css = DASH.slice(DASH.indexOf('<style>'), DASH.indexOf('</style>'));
+
+  /*
+   * 1. THE SECONDARY TEXT SCALE. --faint measured 2.85:1 on --surface against a 4.5:1 requirement, and it
+   *    was not decoration: the sub-label under every KPI number, the "no rows" line, empty fields in the
+   *    detail panel, the pagination gaps. This board is read on a phone outside a house.
+   */
+  const tone = (name) => (css.match(new RegExp(`--${name}:(#[0-9a-f]{6})`, 'i')) || [])[1];
+  const lum = (hex) => {
+    const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a, b) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const surface = tone('surface');
+  for (const name of ['ink', 'muted', 'faint']) {
+    const r = ratio(tone(name), surface);
+    check(`--${name} clears WCAG AA on --surface (${r.toFixed(2)}:1)`, r >= 4.5, true);
+  }
+  // ...and the two secondary tones stay far enough apart to still mean different things.
+  check('--muted and --faint remain visibly different',
+    lum(tone('muted')) / lum(tone('faint')) > 1.3, true);
+
+  /*
+   * 2. THE STICKY STACK. Three bars pinned at top:0 / 45px / 93px, which assumes bars that never change
+   *    height — while the tab row and the alert ribbon both wrap, and below 640px the ribbon takes a line
+   *    of its own. The filter row then sat on top of the tabs.
+   */
+  check('the stacked bars offset from measured heights, not fixed pixels',
+    /top:calc\(var\(--h-appbar\) \+ var\(--h-subbar\)\)/.test(css), true);
+  check('...and no bar is pinned to a hardcoded offset again',
+    /position:sticky;\s*top:\s*\d+px/.test(css.replace(/top:0/g, '')), false);
+  check('something actually measures them', /new ResizeObserver\(apply\)/.test(DASH), true);
+  check('...and there is a first-frame fallback before it runs',
+    /--h-appbar:\d+px/.test(css), true);
+
+  // A phone's home indicator sits over the bottom 34px; the booking button was half under it.
+  check('the FAB clears the home indicator',
+    /bottom:calc\(22px \+ env\(safe-area-inset-bottom/.test(css), true);
+}
+{
   const AUDIT = read('scripts/audit-notes.mjs');
   /*
    * The QUIET path matters more than the busy one. "Nothing to correct" is the normal result and the whole

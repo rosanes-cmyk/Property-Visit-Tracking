@@ -8,10 +8,18 @@
 /* Professional dark theme — Linear/Vercel-grade. Flat surfaces, one calm accent, no glow. */
 :root{
   --bg:#0a0a0b; --surface:#111113; --surface-2:#18181b; --border:#26262b; --border-2:#35353c;
-  --ink:#ededf0; --muted:#8b8b93; --faint:#5c5c66;
+  --ink:#ededf0; --muted:#a1a1aa; --faint:#81818c;
+  /* Measured, not eyeballed. On --surface: muted 7.36:1, faint 4.90:1; both clear AA (4.5:1),
+     and they stay 1.6x apart so the hierarchy survives. The previous faint was 2.85:1 and it
+     carried real content - the sub-label under every KPI, "no rows", empty fields in the detail
+     panel. Unreadable on a phone outside a property, which is where this board is used. */
   --brand:#3b82f6; --brand-2:#60a5fa; --brand-soft:#0f1b30; --on-brand:#ffffff;
+  --crit-ink:#fca5a5;
   --good:#22c55e; --good-bg:#0a2016; --warn:#f59e0b; --warn-bg:#2a1f08; --crit:#ef4444; --crit-bg:#2a0f12;
   --r:10px; --r-sm:8px; --r-xs:6px;
+  /* Set from the real rendered heights by the observer at the end of this file. The fallbacks
+     are only what the page uses for its first frame. */
+  --h-appbar:45px; --h-subbar:48px;
   --sh:0 1px 2px rgba(0,0,0,.4);
   --sh-lift:0 8px 24px rgba(0,0,0,.5);
   --glow:none;
@@ -55,7 +63,8 @@ body{
 .appbar button:hover{border-color:var(--faint)}
 
 /* ---------- Sub bar (tabs) ---------- */
-.subbar{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:45px;z-index:19}
+.subbar{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;
+  top:var(--h-appbar);z-index:19}
 .subbar .inner{max-width:1360px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:3px}
 .seg button{border:none;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:12.5px;
@@ -75,7 +84,13 @@ body{
 .rchip.brand .rv{color:var(--brand-2)}
 
 /* ---------- Filter bar ---------- */
-.filters{background:var(--surface-2);border-bottom:1px solid var(--border);position:sticky;top:93px;z-index:18}
+/* Stacked, and the offsets are MEASURED. They were pinned at 45px and 93px, which assumed three
+   bars that never change height - but the tab row and the alert ribbon both wrap, and on a phone
+   the ribbon goes full width and drops to its own line. Below about 640px the subbar is taller
+   than 45px, so the filter bar landed on top of the tabs. It looked broken on exactly the device
+   somebody uses standing at a property. */
+.filters{background:var(--surface-2);border-bottom:1px solid var(--border);position:sticky;
+  top:calc(var(--h-appbar) + var(--h-subbar));z-index:18}
 .filters .inner{max-width:1360px;margin:0 auto;padding:8px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .chip{border:1px solid var(--border-2);background:var(--surface);color:var(--muted);border-radius:6px;
   padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;transition:all .12s}
@@ -107,10 +122,13 @@ select:focus,input:focus,textarea:focus{border-color:var(--brand);outline:none}
 .card.good{border-left-color:var(--good)}
 .card .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .card .seller{font-weight:650;font-size:14.5px;letter-spacing:-.1px}
-.card .addr{font-size:12px;color:var(--muted);margin-top:2px}
+.card .addr{font-size:12px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.card .seller{overflow-wrap:anywhere}
+/* "2765 77th Ave, Oakland, CA, 94605, UNITED STATES" has no break opportunity a browser likes,
+   and one card widening drags the whole grid row with it. */
 
 .chipflag{font-size:10.5px;font-weight:700;border-radius:5px;padding:3px 8px;white-space:nowrap;
-  margin-left:6px;background:var(--crit-bg);border:1px solid rgba(239,68,68,.35);color:#fca5a5;
+  margin-left:6px;background:var(--crit-bg);border:1px solid rgba(239,68,68,.35);color:var(--crit-ink);
   height:fit-content;letter-spacing:.03em}
 .chipstage{font-size:10.5px;font-weight:600;border-radius:5px;padding:3px 9px;white-space:nowrap;
   background:var(--surface-2);border:1px solid var(--border-2);color:var(--muted);height:fit-content}
@@ -216,7 +234,8 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .dq.Exception{background:var(--crit-bg);color:var(--crit)}
 
 /* ---------- FAB ---------- */
-.fab{position:fixed;right:22px;bottom:22px;background:var(--brand);color:var(--on-brand);border:none;
+/* bottom = 22px + the phone's home-indicator inset, so the button is not half under it. */
+.fab{position:fixed;right:22px;bottom:calc(22px + env(safe-area-inset-bottom,0px));background:var(--brand);color:var(--on-brand);border:none;
   border-radius:10px;padding:13px 20px;font-size:13.5px;font-weight:600;cursor:pointer;
   box-shadow:var(--sh-lift);z-index:15;transition:background .12s,transform .12s}
 .fab:hover:not([disabled]){background:var(--brand-2);transform:translateY(-1px)}
@@ -226,7 +245,9 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(3px);
   display:flex;align-items:center;justify-content:center;padding:16px;z-index:30}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;
-  width:100%;max-width:480px;max-height:90vh;overflow:auto;box-shadow:var(--sh-lift)}
+  width:100%;max-width:480px;max-height:90dvh;overflow:auto;box-shadow:var(--sh-lift)}
+/* dvh, not vh: with a mobile keyboard open, 90vh is taller than the screen and the Save button
+   sits below the fold of a box that cannot be scrolled to the end. */
 .modal h3{margin:0 0 4px;font-size:16px;font-weight:650}
 .modal .cap{color:var(--muted);font-size:12.5px;margin:0 0 16px}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
@@ -267,7 +288,7 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* ---------- Toast ---------- */
-#toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);
+#toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--ink);
   color:var(--bg);padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;z-index:40;
   box-shadow:var(--sh-lift)}
 @media (prefers-reduced-motion:no-preference){
@@ -278,7 +299,15 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 @keyframes pop{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-@media(max-width:640px){.ribbon{width:100%;margin-left:0;order:3}.subbar .inner{gap:11px}}
+@media(max-width:640px){
+  .ribbon{width:100%;margin-left:0;order:3}.subbar .inner{gap:11px}
+  /* 150px of label on a 360px screen left the bar itself about 90px wide, so every row looked
+     equally full. Stack instead: full-width label, full-width track, value beside it. */
+  .brow{grid-template-columns:1fr auto;gap:4px 10px}
+  .brow .lab{text-align:left;grid-column:1/-1;white-space:normal}
+  .appbar{padding:10px 16px}.wrap{padding:14px 16px 96px}
+  .subbar .inner,.filters .inner{padding-left:16px;padding-right:16px}
+}
 
 /* ---------- Reports ---------- */
 .repctrl{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
@@ -1066,6 +1095,41 @@ var os=document.getElementById('owner');OWNERS.forEach(function(o){var op=docume
 os.onchange=drawReset;document.getElementById('search').oninput=drawReset;document.getElementById('add').onclick=openAdd;
 document.getElementById('wrap').innerHTML='<div class="empty">Loading live data\u2026</div>';
 refresh();
+
+/*
+ * THE THREE STICKY BARS MEASURE THEMSELVES.
+ *
+ * The app bar, the tab row and the filter row are each stuck to the top, so the second and third have to
+ * know how tall the ones above them are. That was written as fixed pixels — top:45px and top:93px — which
+ * is right for exactly one window size.
+ *
+ * Both of the upper bars wrap. The alert ribbon is `flex-wrap:wrap` and below 640px it goes full width on
+ * its own line, so the tab row becomes roughly twice its assumed height and the filter row lands on top of
+ * it. Add an alert chip, or narrow the window to a laptop half-screen, and the same thing happens without
+ * a phone anywhere. It reads as a broken page rather than a layout that needs a number changing.
+ *
+ * So the heights are read from the rendered elements and written into the two custom properties the CSS
+ * offsets are built from. ResizeObserver catches wrapping, font loading, and a ribbon that gains a chip
+ * when the data refreshes — none of which fire a resize event.
+ */
+(function stickyOffsets(){
+  var bars=[['.appbar','--h-appbar'],['.subbar','--h-subbar']];
+  function apply(){
+    bars.forEach(function(b){
+      var el=document.querySelector(b[0]);
+      if(el) document.documentElement.style.setProperty(b[1], Math.round(el.getBoundingClientRect().height)+'px');
+    });
+  }
+  apply();
+  // Fires on wrap and on font swap; the resize listener covers browsers without the observer.
+  if(typeof ResizeObserver!=='undefined'){
+    var ro=new ResizeObserver(apply);
+    bars.forEach(function(b){ var el=document.querySelector(b[0]); if(el) ro.observe(el); });
+  }
+  window.addEventListener('resize',apply);
+  // The ribbon is rebuilt on every data load, so re-measure after one has landed.
+  window.addEventListener('load',apply);
+})();
 </script>
 </body>
 </html>
