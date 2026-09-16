@@ -98,10 +98,36 @@ export function looksLikeTestLead(address, sellerName) {
   return words.length >= 2 && words.every((w) => w === 'test');
 }
 
+/**
+ * THE LINE BELOW WHICH THE MACHINE-READABLE FIELDS START.
+ *
+ * The calendar event now opens with the PROPERTY INSPECTION briefing, because a person opening the event on
+ * their phone should see the same thing the team gets in Chat rather than a wall of Label: value. The
+ * labelled block is still there underneath: it is what every other step reads back.
+ *
+ * The two CANNOT share one namespace, and trying would have been a quiet disaster:
+ *
+ *   - the briefing prints "Motivation Level: 🟡 Medium (WARM — engaged)" where the field holds "WARM —
+ *     engaged", so a read-back would have re-decorated an already-decorated value on every sync;
+ *   - the briefing prints "_______" for anything nobody has filled in, and a parser reading that gets a
+ *     row of underscores where it expects a blank — then writes them onward as if they were the answer.
+ *
+ * So the parsers start below this line when it is present, and read the whole description when it is not,
+ * which keeps every event written before today readable.
+ */
+export const DETAILS_HEADING = 'DETAILS — used by the automation';
+
+/** Everything after the marker, or the whole text when there is no marker (older events). */
+function machineSection(description) {
+  const text = String(description ?? '');
+  const at = text.indexOf(DETAILS_HEADING);
+  return at < 0 ? text : text.slice(at + DETAILS_HEADING.length);
+}
+
 /** Read "Label: value" out of the event description the calendar module writes. */
 export function fieldFromDescription(description, label) {
   const prefix = `${label}:`.toLowerCase();
-  for (const line of String(description ?? '').split('\n')) {
+  for (const line of machineSection(description).split('\n')) {
     const trimmed = line.trim();
     if (trimmed.toLowerCase().startsWith(prefix)) {
       const value = trimmed.slice(prefix.length).trim();
@@ -149,7 +175,7 @@ export function reiLinkFromDescription(description) {
  * of REI's actual notes — the notes were in the calendar event the whole time, unread.
  */
 export function blockFromDescription(description, heading) {
-  const lines = String(description ?? '').split('\n');
+  const lines = machineSection(description).split('\n');
   const start = lines.findIndex((l) => l.trim().toLowerCase() === `${heading.toLowerCase()}:`);
   if (start < 0) return '';
 

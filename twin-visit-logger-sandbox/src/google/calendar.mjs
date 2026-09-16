@@ -2,9 +2,11 @@ import crypto from 'node:crypto';
 import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
-import {
-  extractPropertyRadar, extractBuilding, extractCallSummary, extractLogistics, mapsLink, minutesBeforeStart
-} from '../whatsapp/propertyradar.mjs';
+import { extractLogistics, minutesBeforeStart } from '../whatsapp/propertyradar.mjs';
+import { buildDescription, isCancelled } from './description.mjs';
+
+// Re-exported so every existing importer of buildDescription keeps working unchanged.
+export { buildDescription };
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const clip = (value, maxLength) => {
@@ -14,94 +16,6 @@ const clip = (value, maxLength) => {
 
 function linkHash(link) {
   return crypto.createHash('sha256').update(link || '').digest('hex').slice(0, 20);
-}
-
-function isCancelled(status) {
-  return normalize(status).toLowerCase().includes('cancel');
-}
-
-/**
- * The event description: a SUMMARY of the REI contact, as labelled single lines.
- *
- * It used to paste REI's Notes and Activity fields in verbatim — thousands of characters of engagement
- * counters, nine-bullet call summaries, account-update logs and comp verdicts. Nobody reads that on a
- * phone before a drive, and the client's answer on seeing it was to summarise.
- *
- * Every line is "Label: value" on ONE line, which serves both readers: a person opening the event, and the
- * WhatsApp step, which reads these labels back out. That is why the summarising happens HERE and once —
- * the note used to re-parse the raw notes downstream, so the same work was done twice from the same text.
- */
-export function buildDescription(visit) {
-  const radar = extractPropertyRadar(visit.notes || '');
-  const built = extractBuilding(visit.notes || '');
-  const call = extractCallSummary(visit.notes || '');
-  const trip = extractLogistics(visit.notes || '');
-
-  // Only lines with a value, except the identifying fields, which say "Not found" so their absence is
-  // visible rather than silent.
-  const some = (label, value) => (String(value || '').trim() ? `${label}: ${String(value).trim()}` : '');
-
-  return [
-    `Seller: ${visit.sellerName || 'Not found'}`,
-    `Phone: ${visit.phone || 'Not found'}`,
-    `Email: ${visit.email || 'Not found'}`,
-    `Property: ${visit.propertyAddress || 'Not found'}`,
-    // High, and never last: other steps read this back, and it must survive any truncation.
-    `REI BlackBook: ${visit.reiLink || 'Not found'}`,
-    // The VA's own link when they wrote one — it is the route their drive-time estimate came from.
-    some('Maps', extractLogistics(visit.notes || '').mapsLink || mapsLink(visit.propertyAddress)),
-    `Assigned Owner: ${visit.assignedOwner || 'Not found'}`,
-    `Current Stage: ${isCancelled(visit.taskStatus) ? 'Cancelled' : 'Visit Scheduled'}`,
-    `Task Status: ${visit.taskStatus || 'Not found'}`,
-    `Contact Stage: ${visit.contactStage || 'Not found'}`,
-    `Lead Source: ${visit.leadSource || 'Not found'}`,
-    '',
-    // The two facts that decide whether the visitor is late.
-    some('Leave Office', trip.leaveOffice),
-    some('Drive Time', trip.driveTime),
-    '',
-    /*
-     * THE BUILDING ITSELF, and Beds/Baths/SqFt were the bug that made this block necessary.
-     *
-     * The scraper reads them off REI's own text chips ("4 Beds", "2.0 Baths", "2,448 SqFt") and
-     * buildInspectionNote prints them — but nothing ever wrote them HERE, and the briefing is assembled
-     * from this description. So the line existed at both ends with nothing in the middle, and every
-     * briefing ever sent showed a blank where the house should be. Nobody reported it, because a missing
-     * line looks exactly like a house REI holds no chips for.
-     *
-     * REI's chips win over the PropertyRadar prose when both exist: the chips are structured fields and
-     * "6/3 3,200sf" is a VA's shorthand parsed out of a sentence.
-     */
-    some('Property Type', built.propertyType),
-    some('Beds', visit.beds || built.beds),
-    some('Baths', visit.baths || built.baths),
-    some('Square Footage', visit.sqft || built.sqft),
-    some('Lot Size', built.lotSize),
-    some('Garage', built.garage),
-    some('Year Built', built.yearBuilt),
-    some('County', built.county),
-    some('Estimated Value', radar.estimatedValue),
-    some('Assessed Value', radar.assessedValue),
-    some('Estimated Open Loans Balance', radar.openLoansBalance),
-    some('Estimated Equity', radar.estimatedEquity),
-    some('Purchase Date', radar.purchaseDate),
-    some('Occupancy', radar.occupancy),
-    some('Vested Owner', radar.vestedOwner),
-    '',
-    some('Motivation Level', call.motivationLevel),
-    some('Reason for Selling', call.reasonForSelling),
-    some('Property Condition', call.propertyCondition),
-    some('Known Issues', call.knownIssues),
-    some('Timeline', call.timeline),
-    some('Price Expectation', call.priceExpectation),
-    some('Call Summary', clip(call.summary, 700)),
-    some('Next Step', call.nextStep),
-    '',
-    `Next Action: ${visit.nextAction || 'Not found'}`
-  ].filter((entry) => entry !== '' || true)
-    // Collapse the runs of blank lines left by omitted values, so an empty section does not leave a gap.
-    .join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '')
-    .slice(0, 7800);
 }
 
 
@@ -254,7 +168,13 @@ export async function syncCalendarEvent(auth, visit, existingEventId = '') {
   const event = {
     summary: clip(`Property Visit | ${visit.sellerName || 'Seller'} | ${visit.propertyAddress || 'Address pending'}`, 500),
     location: visit.propertyAddress || '',
-    description: buildDescription(visit),
+    /*
+     * The appointment line is written from the event's OWN start, in the event's timezone, rather than
+     * from anything in the notes. It is the one fact the calendar is authoritative about.
+     */
+    description: buildDescription(visit, {
+      appointmentText: start.setZone(config.calendarTimezone).toFormat("cccc d LLLL yyyy, h:mm a")
+    }),
     start: { dateTime: start.toISO(), timeZone: config.calendarTimezone },
     end: { dateTime: end.toISO(), timeZone: config.calendarTimezone },
     extendedProperties: { private: privateProperties }
