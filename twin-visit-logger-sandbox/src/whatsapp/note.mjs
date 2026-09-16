@@ -41,7 +41,7 @@ export const TO_FILL_IN = '_______';
 export const NOTE_MARKER = 'PROPERTY INSPECTION';
 
 /** The heading as it appears in the message. */
-export const NOTE_HEADING = `🏠 ${NOTE_MARKER}`;
+export const NOTE_HEADING = `🏡 ${NOTE_MARKER}`;
 
 function line(icon, label, value) {
   return `${icon} ${label}: ${value || TO_FILL_IN}`;
@@ -114,65 +114,104 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
    * meeting, what was said, what the numbers are, what to fill in. Headings do that; length alone does not.
    */
   const out = [NOTE_HEADING];
-  if (address) out.push(`📍 ${address}`);
 
+  // An empty title means "no heading, just a blank line" — section 1 sits directly under the heading.
   const section = (title, lines) => {
     const real = lines.filter(Boolean);
     if (!real.length) return;
-    out.push('', title, ...real);
+    out.push('', ...(title ? [title] : []), ...real);
   };
 
-  section('━━ WHEN ━━', [
-    appointmentText && `📅 ${appointmentText} — in-person property visit`,
-    leaveOffice && `🚪 Leave office: ${leaveOffice}`,
-    driveTime && `🚗 Drive: ${driveTime}`,
-    maps && `🗺️ Directions: ${maps}`
-  ]);
-
-  section('━━ WHO ━━', [
-    `🧑 Seller: ${v('sellerName') || TO_FILL_IN}`,
+  /*
+   * SECTION 1 — WHO, WHERE, WHEN. Everything needed to arrive at the right door, at the right time,
+   * knowing who is opening it.
+   *
+   * County rides with the address because that is how the client wrote the template: "Property: Full
+   * address + county/area". It is what tells a visitor whether this is an hour away or five minutes.
+   */
+  const county = v('county');
+  section('', [
+    `📍 Property: ${address || TO_FILL_IN}${county ? ` (${county} County)` : ''}`,
+    // "Full name + important situation" — the one-line read of the person, not the whole call summary.
+    `👤 Seller: ${[v('sellerName') || TO_FILL_IN, shortText(call.story, 160)].filter(Boolean).join(' — ')}`,
     `📞 Phone: ${v('phone') || TO_FILL_IN}`,
-    v('email') && `✉️ Email: ${v('email')}`,
+    `📧 Email: ${v('email') || TO_FILL_IN}`,
+    `🔗 REI BlackBook: ${v('reiLink') || TO_FILL_IN}`,
     // Who must actually sign. A trust or a second owner changes the whole conversation.
     radar.vestedOwner && `🧾 Owner of record: ${radar.vestedOwner}`,
-    v('leadSource') && `📣 Lead source: ${v('leadSource')}`,
-    v('contactStage') && `📂 Lead stage: ${v('contactStage')}`,
-    v('assignedOwner') && `👤 Assigned: ${v('assignedOwner')}`,
-    v('reiLink') && `🔗 REI contact: ${v('reiLink')}`
-  ]);
-
-  section('━━ WHAT THE SELLER SAID ━━', [
-    call.contactResult && `☎️ Call: ${call.contactResult}`,
-    call.story && clipText(call.story, 500),
-    call.motivationLevel && `🌡️ Motivation: ${call.motivationLevel}`,
-    call.reasonForSelling && `🤝 Reason for selling: ${call.reasonForSelling}`,
-    call.timeline && `⏳ Timeline: ${call.timeline}`,
-    call.priceExpectation && `💰 Price expectation: ${call.priceExpectation}`
+    '',
+    `📅 Appointment: ${appointmentText || TO_FILL_IN}`,
+    /*
+     * The drive plan is NOT in the client's template, and it is kept anyway. It was asked for earlier and
+     * it is the only part of this note that is time-critical: "leave at 1:15" stops a visit being late in
+     * a way that no amount of seller background does. It sits under the appointment because that is what
+     * it is about. One word from the client removes it.
+     */
+    leaveOffice && `🚪 Leave office: ${leaveOffice}`,
+    driveTime && `🚗 Drive: ${driveTime}`,
+    maps && `🗺️ Directions: ${maps}`,
+    /*
+     * "Walkthrough By" is filled from Assigned Owner, which is the only who-is-going value that survives
+     * the trip through the calendar description. The tracker's own Assigned Visitor column never reaches
+     * here. Named honestly rather than silently: if the owner is not the visitor, this line is wrong, and
+     * whoever reads it can see what it came from.
+     */
+    `👷 Walkthrough By: ${v('assignedOwner') || TO_FILL_IN}`,
+    /*
+     * Commitments has no field anywhere — not in REI, not in the tracker. It prints as a blank on purpose.
+     * "We promised nothing" and "nobody wrote down what we promised" are different statements, and the
+     * second is the one that gets a visitor caught out at the door.
+     */
+    `📱 Commitments: ${v('commitments') || TO_FILL_IN}`,
+    '',
+    `LEAD SOURCE: ${v('leadSource') || TO_FILL_IN}`,
+    v('contactStage') && `📂 Lead stage: ${v('contactStage')}`
   ]);
 
   const beds = v('beds'), baths = v('baths'), sqft = v('sqft');
-  section('━━ THE NUMBERS ━━', [
-    (beds || baths || sqft) && `🏘️ ${[beds && `${beds} bd`, baths && `${baths} ba`, sqft && `${sqft} sqft`]
-      .filter(Boolean).join(' · ')}`,
+  section('🏠 PROPERTY DETAILS', [
     hasAnyPropertyRadar(radar) ? null : '(no PropertyRadar note on this contact yet)',
-    `💵 Estimated value: ${radar.estimatedValue || TO_FILL_IN}`,
-    `🏛️ Assessed value: ${radar.assessedValue || TO_FILL_IN}`,
-    `🏦 Open loans: ${radar.openLoansBalance || TO_FILL_IN}`,
-    `📈 Equity: ${radar.estimatedEquity || TO_FILL_IN}`,
-    `🗓️ Bought: ${radar.purchaseDate || TO_FILL_IN}`
+    `Property Type: ${v('propertyType') || TO_FILL_IN}`,
+    `Estimated Value: ${radar.estimatedValue || TO_FILL_IN}`,
+    `Beds/Baths: ${beds || baths ? [beds, baths].filter(Boolean).join(' / ') : TO_FILL_IN}`,
+    `Square Footage: ${sqft || TO_FILL_IN}`,
+    `Lot Size: ${v('lotSize') || TO_FILL_IN}`,
+    `Garage/Other Structures: ${v('garage') || TO_FILL_IN}`,
+    `Estimated Loan Balance: ${radar.openLoansBalance || TO_FILL_IN}`,
+    `Estimated Equity: ${radar.estimatedEquity || TO_FILL_IN}`,
+    // Kept from the old section: what was paid and when is what makes the equity figure mean anything.
+    radar.assessedValue && `Assessed Value: ${radar.assessedValue}`,
+    radar.purchaseDate && `Bought: ${radar.purchaseDate}`,
+    '',
+    '⚠️ Seller Corrections: if PropertyRadar or public records say one thing and the homeowner tells you'
+      + ' something different, WRITE IT DOWN.'
   ]);
 
   /*
-   * The blanks live in their own section with an instruction above them, so they read as a job to do rather
-   * than as missing information. Omitting them would say "there are no known issues", which is a different
-   * claim from "nobody has written them down yet".
+   * SECTION 3, and the client's own heading for it is "THE MOST IMPORTANT PART". The blanks matter more
+   * here than anywhere: omitting an empty Reason for Selling would read as "they have no reason", which is
+   * a claim, and a wrong one. A visible blank reads as a question still to ask.
    */
-  section('━━ FILL IN AT THE VISIT ━━', [
-    `👥 Occupancy: ${radar.occupancy || TO_FILL_IN}`,
-    `🔧 Condition: ${condition || TO_FILL_IN}`,
-    `⚠️ Known issues: ${call.knownIssues || TO_FILL_IN}`,
-    `🛠️ Repairs needed: ${TO_FILL_IN}`,
-    `📸 Photos taken: ${TO_FILL_IN}`
+  section('🔥 SELLER MOTIVATION', [
+    `Motivation Level: ${motivationWithColour(call.motivationLevel)}`,
+    /*
+     * "Explain the actual story. Don't just write 'wants to sell.'"
+     *
+     * Falls back to the call summary when REI holds no Reason for Selling label. The old template printed
+     * that summary as a section of its own; this one has nowhere else for it, and dropping it would throw
+     * away the single most useful paragraph on the page to satisfy a layout.
+     */
+    `Reason for Selling: ${call.reasonForSelling || clipText(call.story, 500) || TO_FILL_IN}`,
+    `Timeline: ${call.timeline || TO_FILL_IN}`,
+    `Occupancy: ${radar.occupancy || TO_FILL_IN}`,
+    `Property Condition: ${condition || TO_FILL_IN}`,
+    `Price Expectation: ${call.priceExpectation || TO_FILL_IN}`,
+    call.contactResult && `Last call: ${call.contactResult}`,
+    /*
+     * "Animals, family circumstances, access, previous conversations, appointments, promises we made, or
+     * anything Juan should know before walking through the door."
+     */
+    `Important Notes: ${call.knownIssues || TO_FILL_IN}`
   ]);
 
   /*
@@ -190,6 +229,46 @@ export function buildInspectionNote(visit = {}, { appointmentText = '', includeS
   }
 
   return out.join('\n');
+}
+
+/**
+ * The client's own scale: 🔴 High / 🟡 Medium / 🟢 Low.
+ *
+ * REI's wording is not that tidy — "HOT", "WARM", "Lead Temperature: COLD", "High motivation" all appear —
+ * so the colour is matched on meaning, and anything unrecognised is printed AS WRITTEN with no dot. A
+ * value the code does not understand is still information; replacing it with a wrong colour is not.
+ */
+export function motivationWithColour(level) {
+  const text = String(level || '').trim();
+  if (!text) return `🔴 High / 🟡 Medium / 🟢 Low — ${TO_FILL_IN}`;
+
+  /*
+   * THE GRADE IS WHAT COMES BEFORE THE DASH. extractCallSummary builds this line as "Warm — Not urgent,
+   * exploring options": the VA's temperature, then their reason. Scanning the whole string for keywords
+   * read "urgent" inside "Not urgent" and printed a seller who is in no hurry as 🔴 High — the most
+   * expensive wrong answer this line can give, because it decides how hard somebody pushes at the door.
+   *
+   * So the explicit grade is tried first and the reason only as a fallback, and "not urgent" is read for
+   * what it says.
+   */
+  const grade = text.split(/[—–-]/)[0].trim();
+  const NOT_URGENT = /\bnot\s+urgent\b|\bno\s+urgency\b|\bno\s+rush\b/i;
+  for (const source of [grade, text]) {
+    if (!source) continue;
+    if (/\b(high|hot|very motivated|urgent)\b/i.test(source) && !NOT_URGENT.test(source)) {
+      return `🔴 High (${text})`;
+    }
+    if (/\b(medium|mid|warm|moderate)\b/i.test(source)) return `🟡 Medium (${text})`;
+    if (/\b(low|cold|not motivated)\b/i.test(source) || NOT_URGENT.test(source)) return `🟢 Low (${text})`;
+  }
+  // Wording the code does not recognise is still information. A wrong colour on it would not be.
+  return text;
+}
+
+/** A short inline extract: no "full notes on the link" tail, because it sits mid-sentence. */
+function shortText(text, max) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length <= max ? value : `${value.slice(0, max).trimEnd()}…`;
 }
 
 /** Trim long free text and say so, rather than stopping mid-sentence as if that were the whole story. */
@@ -255,6 +334,13 @@ export function briefingFromDescription(description, { address, appointmentText 
     propertyAddress: address,
     sellerName: from('Seller'),
     phone: from('Phone'),
+    /*
+     * Email was written into the description and printed by the note builder, and never passed between
+     * the two — the same break as Beds/Baths/SqFt, found the same way. The client's template asks for it
+     * by name, and a visitor who cannot email the seller from outside the house has lost a way to reach
+     * them. This is the one message allowed to carry contact details at all.
+     */
+    email: from('Email'),
     reiLink: reiLinkFromDescription(description),
     leadSource: from('Lead Source'),
     contactStage: from('Contact Stage'),
@@ -263,6 +349,15 @@ export function briefingFromDescription(description, { address, appointmentText 
     leaveOffice: from('Leave Office'),
     driveTime: from('Drive Time'),
     mapsLink: from('Maps'),
+
+    propertyType: from('Property Type'),
+    beds: from('Beds'),
+    baths: from('Baths'),
+    sqft: from('Square Footage'),
+    lotSize: from('Lot Size'),
+    garage: from('Garage'),
+    yearBuilt: from('Year Built'),
+    county: from('County'),
 
     estimatedValue: from('Estimated Value'),
     assessedValue: from('Assessed Value'),

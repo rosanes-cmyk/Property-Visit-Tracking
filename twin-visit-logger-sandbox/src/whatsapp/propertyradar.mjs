@@ -72,12 +72,78 @@ export function extractPropertyRadar(notesText) {
      * The separator is [ \t], NOT \s. \s matches a newline, so the match ran past the end of the line
      * and swallowed the start of the next label: "David B Jackowitz\nSeller".
      */
-    vestedOwner: after(t, 'Vested Owner', /[A-Z][A-Za-z.'-]*(?:[ \t]+[A-Z][A-Za-z.'-]*){0,3}/, 60)
+    /*
+     * ...and each of those words must not be the START OF THE NEXT LABEL. Unlabelled, the name ran on:
+     * "Vested Owner Maria L Gomez. Seller Motivation: HOT" gave an owner of record of "Maria L Gomez.
+     * Seller", because "Seller" is a capitalised word like any other. A wrong name on the line that says
+     * who has to sign is worse than a blank one.
+     */
+    vestedOwner: after(
+      t,
+      'Vested Owner',
+      /[A-Z][A-Za-z.'-]*(?:[ \t]+(?!Seller|Lead|Reason|Timeline|Price|Known|Property|Estimated|Purchase|Occupancy|Notes|Next|Contact|Objections|Summary)[A-Z][A-Za-z.'-]*){0,3}/,
+      60
+      // A full stop ending the sentence is not part of the name. An initial's is: "Maria L." keeps it.
+    ).replace(/(?<![A-Z])\.$/, '')
   };
 }
 
 function titleCase(text) {
   return text.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+
+/**
+ * THE BUILDING, as opposed to the money. Property type, lot size, garage, county, year built.
+ *
+ * Added when the client rewrote the briefing around three sections and asked for Property Type, Lot Size
+ * and Garage/Other Structures by name.
+ *
+ * REI holds beds, baths and square footage as text chips, and the scraper reads those. It holds none of
+ * the rest — `_notAvailableInRei` in config/rei-selectors.json records that, checked and confirmed. The
+ * VA's PropertyRadar note does hold them, in their own wording, quoted in that same config: "PropertyRadar
+ * lists Single Family 6/3 3,200sf while seller describes a triplex". The note that carries the numbers
+ * carries the building too.
+ *
+ * SEPARATE from extractPropertyRadar rather than folded into it, because hasAnyPropertyRadar() decides
+ * whether the briefing prints "(no PropertyRadar note on this contact yet)". Adding fields to that object
+ * would change when that hint appears, and the hint is about the money.
+ *
+ * Every value here may come back ''. That is not a gap. The client's template prints these under "if
+ * PropertyRadar or public records say one thing and the homeowner tells you something different, WRITE IT
+ * DOWN" — they are lines to CHECK at the door, and a blank is the job rather than a failure.
+ */
+export function extractBuilding(notesText) {
+  const t = String(notesText || '');
+
+  /*
+   * Property type has no reliable label in their prose — the quoted example is "PropertyRadar lists Single
+   * Family 6/3", with the type running straight on from the source. So the labelled form is tried first and
+   * the known type words second. Guessing from an unlabelled capitalised phrase would happily return
+   * "Verification Note".
+   */
+  const TYPES = /\b(single[\s-]?family|multi[\s-]?family|duplex|triplex|fourplex|quadplex|condo(?:minium)?|townhou?se|mobile home|manufactured|apartment|vacant land|land)\b/i;
+  const labelledType = after(t, 'Property Type', /[A-Za-z][A-Za-z \-/]{2,28}/, 40);
+  const looseType = TYPES.exec(t);
+
+  // "6/3" — beds over baths, the shorthand their note uses next to the square footage.
+  const bedBath = /\b(\d{1,2})\s*\/\s*(\d{1,2}(?:\.\d)?)\b/.exec(t);
+  const looseSqft = /\b([\d,]{3,9})\s*(?:sf|sq\.?\s?ft|sqft|square feet)\b/i.exec(t);
+
+  return {
+    propertyType: titleCase((labelledType || (looseType ? looseType[1] : '')).trim()),
+    // Acres and square feet are both normal for a lot, so the unit is part of the value, not assumed.
+    lotSize: after(t, 'Lot Size', /[\d,.]+\s*(?:acres?|ac\b|sq\.?\s?ft|sqft|sf\b)/i, 40),
+    county: after(t, 'County', /[A-Z][A-Za-z.'-]*(?:[ \t]+[A-Z][A-Za-z.'-]*){0,2}/, 40),
+    /*
+     * Stops at a separator rather than taking a fixed width: their notes are glued single lines, so a
+     * 40-character window would run into whatever label comes next.
+     */
+    garage: after(t, 'Garage', /[^\n;|]{1,40}?(?=\s{2,}|[;|\n]|$)/, 60),
+    yearBuilt: after(t, 'Year Built', /\b(?:1[89]\d{2}|20\d{2})\b/, 30),
+    beds: bedBath ? bedBath[1] : '',
+    baths: bedBath ? bedBath[2] : '',
+    sqft: looseSqft ? looseSqft[1] : ''
+  };
 }
 
 /** True if anything at all was found — used to decide whether to say where the numbers came from. */
@@ -140,6 +206,35 @@ export function tidyReiNotes(text) {
   return t.replace(/\n{3,}/g, '\n\n').replace(/•\s*$/gm, '').trim();
 }
 
+/*
+ * A VALUE ALSO STOPS AT THE NEXT LABEL, not only at a separator.
+ *
+ * The stop set was "++", a newline or a bullet, which is right for a summary the VA typed as a list. It is
+ * not enough for the same text after REI has glued it into one unbroken line — a case this file already
+ * documents twice, and the reason for the 300-character escape hatch below.
+ *
+ * On a real briefing that gap printed four lines, each starting with its own label and then repeating the
+ * whole rest of the note:
+ *
+ *   Reason for Selling: inherited from her mother... Timeline: 30 days. Price Expectation: $780,000...
+ *   Timeline: 30 days. Price Expectation: $780,000. Known Issues: two large dogs...
+ *   Price Expectation: $780,000. Known Issues: two large dogs...
+ *
+ * Every one of those was under 300 characters, so the length guard passed them all. The three-section
+ * template the client asked for puts each of these on its own line, which is what made a long-standing
+ * overrun impossible to miss.
+ *
+ * This can only ever SHORTEN a value, and only when another known label follows it — so a note that was
+ * parsing correctly still parses the same way.
+ */
+const NEXT_LABEL = [
+  'Seller Motivation', 'Lead Temperature', 'Reason for Selling', 'Reason for Sale', 'Property Condition',
+  'Property Details', 'Property Type', 'Objections/Concerns', 'Objections', 'Known Issues', 'Timeline',
+  'Price Expectation', 'Next Step', 'Contact Result', 'Summary', 'Occupancy', 'Vested Owner',
+  'Estimated Value', 'Assessed Value', 'Estimated Open Loan', 'Estimated Equity', 'Purchase Date',
+  'Purchase Amount', 'Lot Size', 'Garage', 'Year Built', 'County', 'Leave Office', 'Drive Time', 'Notes'
+].map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|').replace(/^/, '(?:').replace(/$/, ')\\s*:');
+
 /**
  * Read one labelled field out of the VA's call summary.
  *
@@ -151,7 +246,8 @@ export function tidyReiNotes(text) {
  */
 export function labelledValue(text, label) {
   const source = String(text || '');
-  const re = new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:\\s*([^\\n•]*?)(?=\\+\\+|\\n|•|$)`, 'i');
+  const re = new RegExp(
+    `${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:\\s*([^\\n•]*?)(?=\\+\\+|\\n|•|${NEXT_LABEL}|$)`, 'i');
   const found = re.exec(source);
   if (!found) return '';
   const value = found[1].replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '');

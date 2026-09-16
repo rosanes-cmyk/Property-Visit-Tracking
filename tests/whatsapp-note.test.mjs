@@ -13,7 +13,7 @@
  *      with, because that is the last check before a message goes out.
  */
 import {
-  buildInspectionNote, containsSellerSensitive, TO_FILL_IN, briefingFromDescription
+  buildInspectionNote, containsSellerSensitive, TO_FILL_IN, briefingFromDescription, motivationWithColour
 } from '../twin-visit-logger-sandbox/src/whatsapp/note.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -51,7 +51,8 @@ for (const [what, value] of [
   ['lead stage', '9 Lost / Dead Lead'],
   ['assigned', 'Juan, Thea']
 ]) check(`${what} is present`, note.includes(value), true);
-check('beds/baths/sqft are combined on one line', note.includes('4 bd · 2.0 ba · 2,448 sqft'), true);
+check('beds and baths are on the line the client asked for', note.includes('Beds/Baths: 4 / 2.0'), true);
+check('...and square footage on its own', note.includes('Square Footage: 2,448'), true);
 check("the REI link is present so the full notes are one tap away",
   note.includes('reiblackbook.com/contacts/20473369'), true);
 
@@ -70,15 +71,15 @@ const CALL = buildInspectionNote({
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
 
 check('motivation is the grade then the reason',
-  CALL.includes('🌡️ Motivation: Warm — Not urgent, exploring options'), true);
+  CALL.includes('Motivation Level: 🟡 Medium (Warm — Not urgent, exploring options)'), true);
 check('known issues come from Objections/Concerns',
-  CALL.includes('⚠️ Known issues: Cautious — wants Juan to visit first'), true);
-check('occupancy comes from PropertyRadar', CALL.includes('👥 Occupancy: Owner Occupied'), true);
+  CALL.includes('Important Notes: Cautious — wants Juan to visit first'), true);
+check('occupancy comes from PropertyRadar', CALL.includes('Occupancy: Owner Occupied'), true);
 // The address is already the first line of the message; repeating it read as a different property.
 check('property condition drops the repeated address',
-  CALL.includes('🔧 Condition: 4bd/4ba, needs repairs'), true);
-check('the appointment says what kind of visit it is',
-  CALL.includes('in-person property visit'), true);
+  CALL.includes('Property Condition: 4bd/4ba, needs repairs'), true);
+check('the appointment is on its own labelled line',
+  CALL.includes('📅 Appointment: Tue, Aug 4, 2026, 11:00 AM'), true);
 
 console.log('\n--- and the long dump is gone ---');
 check('no raw REI notes block', CALL.includes('━━ ' + 'REI Notes'), false);
@@ -112,20 +113,25 @@ const PRE = buildInspectionNote({
   callSummary: 'Seller inherited the house and wants it gone',
   leaveOffice: '7:30 AM'
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
-check('the figure is used', PRE.includes('💵 Estimated value: $900,000'), true);
-check('equity is used', PRE.includes('📈 Equity: $400,000 (44%)'), true);
-check('occupancy is used', PRE.includes('👥 Occupancy: Vacant'), true);
-check('motivation is used', PRE.includes('🌡️ Motivation: Hot — needs to close fast'), true);
+check('the figure is used', PRE.includes('Estimated Value: $900,000'), true);
+check('equity is used', PRE.includes('Estimated Equity: $400,000 (44%)'), true);
+check('occupancy is used', PRE.includes('Occupancy: Vacant'), true);
+check('motivation is used', PRE.includes('Motivation Level: 🔴 High (Hot — needs to close fast)'), true);
 check('the call story is used', PRE.includes('Seller inherited the house'), true);
 check('leave time is used', PRE.includes('🚪 Leave office: 7:30 AM'), true);
 check('and it still says Lead Summary, not "no PropertyRadar note"',
   PRE.includes('📊 Lead Summary:  (no'), false);
 
-console.log('\n--- the three summary lines appear only when the VA wrote them ---');
-// Dropping the dump lost these, and they matter: how much time there is, whether a price has been named,
-// and what is expected after the visit. Nobody fills these in at the door, so an absent one is omitted
-// rather than shown as a blank to complete.
-check('timeline is shown', CALL.includes('⏳ Timeline: No pressure'), true);
+console.log('\n--- the summary lines are ALWAYS printed, blank when nobody wrote them ---');
+/*
+ * THIS REVERSED with the client's three-section template, and the reversal is the point of the section.
+ *
+ * These lines used to be omitted when empty, on the reasoning that nobody fills them in at the door. Their
+ * template prints Timeline, Price Expectation and the rest as a fixed list under the heading "THE MOST
+ * IMPORTANT PART", because the question is worth asking even when no VA has answered it. An omitted
+ * Timeline reads as "there is no deadline"; a blank one reads as "find out".
+ */
+check('timeline is shown', CALL.includes('Timeline: No pressure'), true);
 // The story, not a grade. It is what tells the person walking up to the door why they are there.
 check('the call narrative is shown',
   buildInspectionNote({ notes: 'Summary: David is exploring options and wants a visit first' }, {})
@@ -134,14 +140,18 @@ check('the call narrative is shown',
 const LONG_CALL = buildInspectionNote({ notes: `Summary: ${'word '.repeat(200)}` }, {});
 check('a long narrative is cut', LONG_CALL.length < 1600, true);
 check('...and says where the rest is', LONG_CALL.includes('full notes on the REI link above'), true);
-check('price expectation is omitted when "Not specified"',
-  CALL.includes('💰 Price expectation'), false);
+check('"Not specified" is shown as a blank to fill, not as an answer',
+  CALL.includes('Price Expectation: _______'), true);
 check('a named price IS shown',
-  buildInspectionNote({ notes: 'Price Expectation: wants 1.6M' }, {}).includes('💰 Price expectation: wants 1.6M'), true);
-// Timeline and price expectation are omitted when nobody wrote them; the after-the-visit line stays,
-// because "what happens next" is always a question worth leaving open.
-check('optional summary lines are omitted when empty',
-  ['⏳ Timeline', '💰 Price expectation'].some((l) => bare_.includes(l)), false);
+  buildInspectionNote({ notes: 'Price Expectation: wants 1.6M' }, {}).includes('Price Expectation: wants 1.6M'), true);
+/*
+ * A note with nothing in it still carries the whole question list. That is what makes this a form somebody
+ * can fill in at the property rather than a report that quietly shrinks to nothing on a thin lead — and a
+ * thin lead is exactly when the visitor needs the prompts.
+ */
+check('the questions survive an empty note',
+  ['Timeline: _______', 'Price Expectation: _______', 'Reason for Selling: _______']
+    .every((l) => bare_.includes(l)), true);
 // The section is gone: it printed the whole REI ACCOUNT UPDATE log, and what happens after a visit is
 // decided at the visit by whoever is reading this.
 check('there is no after-the-visit section', bare_.includes('AFTER THE VISIT'), false);
@@ -221,27 +231,62 @@ const FULLNOTE = buildInspectionNote({
     'Objections/Concerns: Cautious, wants a visit first++ Lead Temperature: WARM'
 }, { appointmentText: 'Tue, Aug 4, 2026, 11:00 AM' });
 
-for (const heading of ['━━ WHEN ━━', '━━ WHO ━━', '━━ WHAT THE SELLER SAID ━━',
-  '━━ THE NUMBERS ━━', '━━ FILL IN AT THE VISIT ━━']) {
+/*
+ * THE CLIENT'S OWN THREE SECTIONS, pasted in full as the spec and reproduced here as the test. Renaming a
+ * heading is now a decision somebody has to make on purpose rather than a tidy-up nobody notices.
+ */
+for (const heading of ['🏠 PROPERTY DETAILS', '🔥 SELLER MOTIVATION']) {
   check(`${heading} is there`, FULLNOTE.includes(heading), true);
 }
+for (const label of ['📍 Property:', '👤 Seller:', '📞 Phone:', '📧 Email:', '🔗 REI BlackBook:',
+  '📅 Appointment:', '👷 Walkthrough By:', '📱 Commitments:', 'LEAD SOURCE:']) {
+  check(`${label} is on the first section`, FULLNOTE.includes(label), true);
+}
 check('the heading still carries the marker, so a duplicate is recognised',
-  FULLNOTE.startsWith('🏠 PROPERTY INSPECTION'), true);
+  FULLNOTE.startsWith('🏡 PROPERTY INSPECTION'), true);
 // Who must actually sign. A trust or a second owner changes the whole conversation.
 check('owner of record is called out', FULLNOTE.includes('🧾 Owner of record: David B Jackowitz'), true);
-check('the call result is shown', FULLNOTE.includes('☎️ Call: Answered — 9 min 45 sec'), true);
+check('the call result is shown', FULLNOTE.includes('Last call: Answered — 9 min 45 sec'), true);
 check("the VA's own maps link wins", FULLNOTE.includes('🗺️ Directions: https://maps.app.goo.gl/tfL4u5Uam65aB28j9'), true);
 check('and it is not printed twice', FULLNOTE.includes('🚗 Drive: ~56 mins'), true);
 
-console.log('\n--- an empty section is omitted, not left as a bare heading ---');
-// A heading with nothing under it says the section exists and is empty, which is never what happened.
+console.log('\n=== The motivation colour reads the grade, not a keyword anywhere in the sentence ===');
+/*
+ * "Warm — Not urgent, exploring options" was printed as 🔴 High, because "urgent" appears inside "Not
+ * urgent". That is the most expensive wrong answer this line can give: it tells whoever is standing at the
+ * door to push hard on somebody who said they are in no hurry.
+ *
+ * The VA's explicit temperature comes first; the reason is only consulted when there is no grade.
+ */
+for (const [written, expected] of [
+  ['Warm — Not urgent, exploring options', '🟡 Medium'],
+  ['Hot — needs to close fast', '🔴 High'],
+  ['HOT', '🔴 High'],
+  ['Cold — just testing the market', '🟢 Low'],
+  ['Not urgent, exploring options', '🟢 Low'],
+  ['No rush at all', '🟢 Low']
+]) {
+  check(`"${written}" reads as ${expected}`,
+    motivationWithColour(written).startsWith(expected), true);
+}
+// Wording nobody anticipated is printed as written rather than guessed at.
+check('an unrecognised grade is passed through with no colour',
+  motivationWithColour('Seller is thinking about it'), 'Seller is thinking about it');
+
+console.log('\n--- a lead with nothing written on it still gets the whole form ---');
 const NO_CALL = buildInspectionNote({ propertyAddress: '1 A St, B, CA' }, { appointmentText: 'Tue 11:00 AM' });
-check('no "what the seller said" heading with nothing said',
-  NO_CALL.includes('━━ WHAT THE SELLER SAID ━━'), false);
-check('but the numbers section stays, as blanks to look up',
-  NO_CALL.includes('━━ THE NUMBERS ━━'), true);
-check('and the fill-in section stays, as the job at the door',
-  NO_CALL.includes('━━ FILL IN AT THE VISIT ━━'), true);
+check('the property section stays, as blanks to look up',
+  NO_CALL.includes('🏠 PROPERTY DETAILS'), true);
+check('and the motivation section stays, as the questions to ask',
+  NO_CALL.includes('🔥 SELLER MOTIVATION'), true);
+/*
+ * The unanswered motivation line offers the scale rather than a guess. Printing "Motivation Level:" alone
+ * invites somebody to read the blank as low.
+ */
+check('an unrated lead shows the scale, not a verdict',
+  NO_CALL.includes('Motivation Level: 🔴 High / 🟡 Medium / 🟢 Low'), true);
+check('the seller-corrections instruction is always there',
+  NO_CALL.includes('WRITE IT DOWN'), true);
 
 console.log('\n=== A swallowed REI log never reaches the group ===');
 /*

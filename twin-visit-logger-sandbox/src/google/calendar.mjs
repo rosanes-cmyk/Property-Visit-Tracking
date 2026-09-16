@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { DateTime } from 'luxon';
 import { config } from '../config.mjs';
 import {
-  extractPropertyRadar, extractCallSummary, extractLogistics, mapsLink, minutesBeforeStart
+  extractPropertyRadar, extractBuilding, extractCallSummary, extractLogistics, mapsLink, minutesBeforeStart
 } from '../whatsapp/propertyradar.mjs';
 
 const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -33,6 +33,7 @@ function isCancelled(status) {
  */
 export function buildDescription(visit) {
   const radar = extractPropertyRadar(visit.notes || '');
+  const built = extractBuilding(visit.notes || '');
   const call = extractCallSummary(visit.notes || '');
   const trip = extractLogistics(visit.notes || '');
 
@@ -59,6 +60,26 @@ export function buildDescription(visit) {
     some('Leave Office', trip.leaveOffice),
     some('Drive Time', trip.driveTime),
     '',
+    /*
+     * THE BUILDING ITSELF, and Beds/Baths/SqFt were the bug that made this block necessary.
+     *
+     * The scraper reads them off REI's own text chips ("4 Beds", "2.0 Baths", "2,448 SqFt") and
+     * buildInspectionNote prints them — but nothing ever wrote them HERE, and the briefing is assembled
+     * from this description. So the line existed at both ends with nothing in the middle, and every
+     * briefing ever sent showed a blank where the house should be. Nobody reported it, because a missing
+     * line looks exactly like a house REI holds no chips for.
+     *
+     * REI's chips win over the PropertyRadar prose when both exist: the chips are structured fields and
+     * "6/3 3,200sf" is a VA's shorthand parsed out of a sentence.
+     */
+    some('Property Type', built.propertyType),
+    some('Beds', visit.beds || built.beds),
+    some('Baths', visit.baths || built.baths),
+    some('Square Footage', visit.sqft || built.sqft),
+    some('Lot Size', built.lotSize),
+    some('Garage', built.garage),
+    some('Year Built', built.yearBuilt),
+    some('County', built.county),
     some('Estimated Value', radar.estimatedValue),
     some('Assessed Value', radar.assessedValue),
     some('Estimated Open Loans Balance', radar.openLoansBalance),
