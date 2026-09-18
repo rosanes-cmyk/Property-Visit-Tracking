@@ -126,6 +126,82 @@ try {
   }
 } catch { /* no log yet is not a problem: a machine that has never run REI has nothing to report */ }
 
+/*
+ * 4. EACH JOB SEPARATELY, and this is the gap that cost two days.
+ *
+ * Everything above asks whether ANYTHING ran. Nine scheduled tasks write the same heartbeat, so eight
+ * healthy ones drown one dead one: "Board Intake" stopped on the Wednesday at 13:24 and this check
+ * reported "All clear" every morning until the Friday, while bookings piled up on the board untouched.
+ *
+ * Windows was not much help either. The task showed Status: Running the whole time, because a wedged
+ * instance never exited and every start after it was refused with 0x800710E0 — "the operator refused the
+ * request". A green scheduled task and a green health check, describing a job that had not run in 48 hours.
+ *
+ * So each job is now judged on ITS OWN last run, read from the log it writes. No new bookkeeping: the logs
+ * are already there, the .cmd files already append a dated header to them, and a file's modified time is
+ * the one thing that cannot be faked by a job that never started.
+ *
+ * The allowance is deliberately generous — several times the interval — because this must not cry wolf on
+ * a laptop that slept through lunch. It is here to catch a job that has STOPPED, not one that is late.
+ */
+const JOBS = [
+  { name: 'New booking emails', log: 'scheduled-task.log', everyMin: 2, allowMin: 60 },
+  { name: 'Bookings added on the board', log: 'fill-pending.log', everyMin: 2, allowMin: 60 },
+  { name: 'REI re-check', log: 'recheck-task.log', everyMin: 20, allowMin: 180 },
+  { name: 'Bucket sweep', log: 'bucket-task.log', everyMin: 60, allowMin: 300 },
+  { name: 'Notes audit', log: 'audit-notes.log', everyMin: 60, allowMin: 300 },
+  { name: 'Morning briefings', log: 'briefings.log', everyMin: 1440, allowMin: 2160 }
+];
+
+/*
+ * The NEWEST of a job's logs, not the one with the tidy name.
+ *
+ * fill-pending writes to logs\fill-pending-<random>.log when the shared file is held open by an overlapping
+ * run. That fallback exists so a run cannot fail silently — and it is exactly what hid the truth here,
+ * because the obvious file sat frozen at Wednesday while the real output went somewhere nobody looked.
+ * Reading only the tidy name would have this check make the same mistake a person did.
+ */
+function lastRunOf(job) {
+  const dir = path.resolve('./logs');
+  const base = job.log.replace(/\.log$/, '');
+  let newest = 0;
+  try {
+    for (const file of fs.readdirSync(dir)) {
+      if (file !== job.log && !file.startsWith(`${base}-`)) continue;
+      if (!file.endsWith('.log')) continue;
+      const at = fs.statSync(path.join(dir, file)).mtimeMs;
+      if (at > newest) newest = at;
+    }
+  } catch { /* no logs folder yet: reported as never below */ }
+  return newest;
+}
+
+const stopped = [];
+for (const job of JOBS) {
+  const at = lastRunOf(job);
+  /*
+   * A job that has NEVER written is not reported. A fresh install, or a machine where that task was
+   * deliberately not created, would otherwise produce a permanent false alarm — and this check earns its
+   * keep by being quiet until it is not.
+   */
+  if (!at) continue;
+  const quietFor = now - at;
+  if (quietFor > job.allowMin * 60 * 1000) {
+    stopped.push(`  *${job.name}* — nothing for ${ago(quietFor)} (runs every ${
+      job.everyMin >= 1440 ? 'day' : `${job.everyMin} min`}).`);
+  }
+}
+if (stopped.length) {
+  problems.push(`*${stopped.length} job${stopped.length === 1 ? ' has' : 's have'} stopped while the rest keep running*`
+    + ' — this is the one Windows reports as healthy.');
+  problems.push(...stopped);
+  /*
+   * Name the fix, because it is the same one every time and it is not obvious: ending the task kills the
+   * wedged instance, and the next scheduled start two minutes later runs normally.
+   */
+  problems.push('  On that PC: schtasks /End /TN "Twin Visit Logger <name>" — the next run picks up by itself.');
+}
+
 if (!problems.length) {
   console.log('All clear: a sweep has finished, jobs are running, and REI is signed in. Nothing posted.');
   process.exit(0);

@@ -42,7 +42,7 @@ const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
 
 /* A throwaway app: only the three local files it reads, and a notifyChat that records instead of posting. */
-function run({ sweep, beat, sessionLog }) {
+function run({ sweep, beat, sessionLog, jobLogs }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-'));
   fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
@@ -54,6 +54,13 @@ function run({ sweep, beat, sessionLog }) {
   if (sweep) fs.writeFileSync(path.join(dir, 'data/LAST-SWEEP'), JSON.stringify(sweep));
   if (beat) fs.writeFileSync(path.join(dir, 'data/heartbeat.json'), JSON.stringify(beat));
   if (sessionLog) fs.writeFileSync(path.join(dir, 'logs/rei-session.log'), sessionLog);
+  /* jobLogs: { 'fill-pending.log': minutesSinceItLastRan } — written, then back-dated. */
+  for (const [file, minsAgo] of Object.entries(jobLogs || {})) {
+    const at = path.join(dir, 'logs', file);
+    fs.writeFileSync(at, 'x');
+    const when = new Date(Date.now() - minsAgo * 60000);
+    fs.utimesSync(at, when, when);
+  }
   const out = execFileSync(process.execPath, ['scripts/health-check.mjs'], { cwd: dir, encoding: 'utf8' });
   fs.rmSync(dir, { recursive: true, force: true });
   return out;
@@ -156,6 +163,55 @@ console.log('\n=== REI signed out, read from the session log\'s own words ===');
   // A machine that has never run REI has nothing to say about REI. Absence of a log is not a fault.
   const out = run({ ...healthy, sessionLog: null });
   check('no session log at all is not an alarm', /POSTED\|/.test(out), false);
+}
+
+console.log('\n=== One job dying among nine ===');
+/*
+ * THE GAP THAT COST TWO DAYS. Everything above asks whether ANYTHING ran, and nine tasks share one
+ * heartbeat — so eight healthy jobs drown one dead one. "Board Intake" stopped on the Wednesday at 13:24
+ * and this check said "All clear" every morning until the Friday, while bookings sat on the board.
+ *
+ * Windows agreed with it: the task showed Status: Running the whole time, because a wedged instance never
+ * exited and every start after it was refused with 0x800710E0. A green task and a green check, describing
+ * a job that had not run in 48 hours.
+ */
+{
+  const fresh = { 'scheduled-task.log': 1, 'fill-pending.log': 1, 'recheck-task.log': 5,
+    'bucket-task.log': 30, 'audit-notes.log': 30, 'briefings.log': 300 };
+  const out = run({ ...healthy, jobLogs: fresh });
+  check('all nine busy is silent', /POSTED\|/.test(out), false);
+
+  // The real case: everything fine except the one that stopped two days ago.
+  const one = run({ ...healthy, jobLogs: { ...fresh, 'fill-pending.log': 2 * 24 * 60 } });
+  check('one stopped job IS reported', /POSTED\|warn\|true/.test(one), true);
+  check('...and it is named', /Bookings added on the board/.test(one), true);
+  check('...with how long it has been quiet', /2 days/.test(one), true);
+  check('...and the others are not dragged in', /REI re-check/.test(one), false);
+  /* The fix is the same every time and is not guessable: end the task, the next start runs clean. */
+  check('...and the command that clears it', /schtasks \/End/.test(one), true);
+}
+{
+  /*
+   * LATE IS NOT STOPPED. A laptop that slept through lunch must not produce a card, or people stop
+   * reading them — which is the failure this whole file exists to avoid.
+   */
+  const out = run({ ...healthy, jobLogs: { 'fill-pending.log': 45 } });
+  check('a job 45 minutes late on a 2-minute cycle is not an alarm', /POSTED\|/.test(out), false);
+}
+{
+  /*
+   * The diverted log counts. fill-pending writes to fill-pending-<random>.log when the shared file is held
+   * open — and that fallback is exactly what hid the truth here, because the obvious file sat frozen while
+   * the real output went somewhere nobody looked. Reading only the tidy name repeats a person's mistake.
+   */
+  const out = run({ ...healthy,
+    jobLogs: { 'fill-pending.log': 3 * 24 * 60, 'fill-pending-7243.log': 2 } });
+  check('a run that had to divert its log still counts as a run', /Bookings added on the board/.test(out), false);
+}
+{
+  // A task that was never installed has no log, and a permanent false alarm would be worse than silence.
+  const out = run({ ...healthy, jobLogs: { 'fill-pending.log': 1 } });
+  check('a job that has never written is not reported missing', /REI re-check/.test(out), false);
 }
 
 console.log('\n=== It survives whatever it is pointed at ===');
