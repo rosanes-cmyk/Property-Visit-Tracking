@@ -470,6 +470,41 @@ for (const [what, prop, value] of [
  * Nothing noticed, because eight other jobs kept writing the shared heartbeat and the morning health check
  * read "All clear" throughout — the same failure this project keeps producing, one layer further out.
  */
+/*
+ * A SCHEDULED SCRIPT HAS NO USER, SO IT MAY NEVER OPEN A DIALOG.
+ *
+ * run-hidden.vbs is what every task actually launches, and it reported a missing runner with
+ * WScript.Echo. Under cscript that prints a line. Under WSCRIPT - which is what every task here uses -
+ * it opens a modal message box and waits for somebody to click OK. On a scheduled run there is nobody,
+ * and no visible desktop to click on.
+ *
+ * So the task sat at Status: Running for ever while the .cmd never launched and not one line reached any
+ * log. On the client's PC that cost two days: "Board Intake" showed Running with Last Result 0x800710E0
+ * (the operator refused the request) because Windows kept trying to start a second copy while the first
+ * held a dialog nobody could see. Ending the task produced a new one that hung identically. Bookings
+ * piled up on the board; every other job kept running, so the morning health check said All clear
+ * throughout.
+ *
+ * Read with comments stripped. The first version of this check failed on the comment ABOVE the fix,
+ * which names WScript.Echo in order to explain why it is gone - the same way the dashboard's own check
+ * failed last week. An assertion decided by prose is decided by nothing.
+ */
+{
+  const VBS = fs.readFileSync('twin-visit-logger-sandbox/scripts/run-hidden.vbs', 'utf8')
+    .split('\n').filter((l) => !/^\s*'/.test(l)).join('\n');
+  for (const blocking of ['WScript.Echo', 'MsgBox', 'InputBox', 'Popup']) {
+    check(`the launcher cannot ${blocking} a scheduled run into a hang`, VBS.includes(blocking), false);
+  }
+  check('...it writes the reason to a file instead', /OpenTextFile\(logFile, 8, True\)/.test(VBS), true);
+  check('...and still exits non-zero so the task records a failure', /WScript\.Quit 1/.test(VBS), true);
+  /*
+   * And it must not WAIT for the runner either: False is the third argument to shell.Run. Waiting would
+   * hold the task open for the whole job and produce the same "already running" refusals by a different
+   * route.
+   */
+  check('the launcher does not wait for the job it starts', /shell\.Run [^\n]*, 0, False/.test(VBS), true);
+}
+
 check('a stuck run is killed rather than blocking every run after it',
   /\$task\.Settings\.ExecutionTimeLimit = 'PT20M'/.test(INSTALL), true);
 /*
