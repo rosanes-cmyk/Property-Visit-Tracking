@@ -138,6 +138,24 @@ function Set-VisitTaskSettings {
     $task.Settings.DisallowStartIfOnBatteries = $false
     $task.Settings.StopIfGoingOnBatteries     = $false
     $task.Settings.StartWhenAvailable         = $true
+    <#
+      A WEDGED RUN MUST DIE ON ITS OWN, and this is the fault that hid for two days.
+
+      schtasks' default execution limit is 72 hours. An instance of "Board Intake" started on the
+      Wednesday at 13:24 and never exited - almost certainly waiting on the REI browser lock. Every two
+      minutes after that, Windows tried to start a fresh one and was refused with 0x800710E0, "the
+      operator or administrator has refused the request", because one was already running. So the job
+      stopped dead while its own scheduled task reported Status: Running, and it would have stayed that
+      way until the Friday afternoon.
+
+      Nothing noticed. Eight other jobs kept writing the shared heartbeat, so the morning health check
+      read "All clear" the whole time, and the only visible symptom was bookings sitting on the board.
+
+      Twenty minutes is longer than any of these jobs legitimately takes - the whole-book re-check is the
+      slowest and it gives up on the lock after twelve. Past that, the run is stuck, and a stuck run that
+      is killed costs one cycle while a stuck run that is kept costs every cycle after it.
+    #>
+    $task.Settings.ExecutionTimeLimit = 'PT20M'
     Set-ScheduledTask -TaskName $Name -Settings $task.Settings -ErrorAction Stop | Out-Null
   } catch {
     Write-Warning ("Could not set battery/catch-up options on '{0}': {1}" -f $Name, $_.Exception.Message)

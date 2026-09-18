@@ -454,8 +454,33 @@ for (const [what, prop, value] of [
   check('...including the daily sweeps', /Set-VisitTaskSettings -Name \$name/.test(INSTALL), true);
 }
 /*
+ * A WEDGED RUN HAS TO DIE ON ITS OWN, and this is the fault that hid for two days on the live machine.
+ *
+ * schtasks' default execution limit is 72 hours. A "Board Intake" instance started on the Wednesday at
+ * 13:24 and never exited — almost certainly waiting on the REI browser lock. Every two minutes after that,
+ * Windows tried to start a fresh one and was refused:
+ *
+ *     Status:        Running
+ *     Last Run Time: 9/18/2026 9:09:00 AM
+ *     Last Result:   -2147020576          (0x800710E0, "the operator refused the request")
+ *
+ * So the job was dead while its own scheduled task reported Running, and would have stayed that way until
+ * the Friday afternoon. Bookings added from the board sat untouched for two days.
+ *
+ * Nothing noticed, because eight other jobs kept writing the shared heartbeat and the morning health check
+ * read "All clear" throughout — the same failure this project keeps producing, one layer further out.
+ */
+check('a stuck run is killed rather than blocking every run after it',
+  /\$task\.Settings\.ExecutionTimeLimit = 'PT20M'/.test(INSTALL), true);
+/*
+ * Twenty minutes is longer than any of these jobs legitimately takes — the whole-book re-check is the
+ * slowest and gives up on the lock after twelve. Past that it is stuck, and a stuck run that is killed
+ * costs one cycle while a stuck run that is kept costs every cycle after it.
+ */
+
+/*
  * Mutate the settings the task already has rather than building a fresh set — New-ScheduledTaskSettingsSet
- * would silently drop the 72-hour execution limit and everything else schtasks configured.
+ * would silently drop everything else schtasks configured.
  */
 check('the existing settings are kept', /Set-ScheduledTask -TaskName \$Name -Settings \$task\.Settings/.test(INSTALL), true);
 check('...and a machine that refuses is warned about, not failed',
