@@ -129,6 +129,31 @@ if defined NOENV (
 )
 
 rem ======================================================================================================
+rem  EVERY FILE IS UNBLOCKED AS IT LANDS, AND THAT IS NOT HOUSEKEEPING - IT IS THE FAULT THAT STOPPED THE
+rem  AUTOMATION FOR TWO DAYS.
+rem
+rem  Windows tags anything downloaded from the internet with a hidden "Zone.Identifier" stream. Running a
+rem  tagged .cmd or .vbs shows:
+rem
+rem      Open File - Security Warning
+rem      The publisher could not be verified. Are you sure you want to run this software?
+rem
+rem  Clicked once by hand, it is a nuisance. Launched by a SCHEDULED TASK - hidden, with no interactive
+rem  desktop - that box appears where nobody can see it and waits for an OK that will never come.
+rem
+rem  On the client's PC that is exactly what happened. "Board Intake" sat at Status: Running from Wednesday
+rem  13:24 with Last Result 0x800710E0 ("the operator refused the request"), because Windows kept trying to
+rem  start a second copy while the first held an invisible dialog. The .cmd never ran. Not one line reached
+rem  any log - not even the dated header the script writes before anything else. Bookings piled up on the
+rem  board for two days while every other job carried on, so the morning health check said "All clear".
+rem
+rem  Running the same file by hand worked perfectly, because a person is there to click Run. That is what
+rem  made it so hard to see: the thing worked every time we tested it.
+rem
+rem  EVERY UPDATE RE-MARKS THE FILE, so this cannot be a one-off cleanup somebody remembers. It belongs
+rem  here, on the copy, because this is the only path a downloaded file takes into the app.
+rem ======================================================================================================
+rem ======================================================================================================
 rem  THERE IS NO LIST OF FILES ANY MORE. THE APP FOLDER IS THE LIST.
 rem
 rem  It used to carry a hand-written list of destinations, and the list is what kept failing:
@@ -205,6 +230,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  }" ^
   "  $dest = $dests[0];" ^
   "  Copy-Item $src.FullName $dest -Force;" ^
+  "  Unblock-File -Path $dest -ErrorAction SilentlyContinue;" ^
   "  $rel = $dest.Substring($app.Length).TrimStart('\','/');" ^
   "  Write-Host ('  COPIED   ' + $src.Name + '  ->  ' + $rel + '   (' + $src.CreationTime.ToString('MMM d HH:mm') + ')');" ^
   "  $done = $done + 1" ^

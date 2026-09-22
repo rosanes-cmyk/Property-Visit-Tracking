@@ -344,5 +344,39 @@ console.log('\n=== ...so the real question is answered by RUNNING it ===');
   }
 }
 
+console.log('\n=== Every copied file is unblocked, or a scheduled task hangs on a dialog nobody sees ===');
+/*
+ * THE FAULT THAT STOPPED THE AUTOMATION FOR TWO DAYS.
+ *
+ * Windows tags anything downloaded from the internet with a hidden Zone.Identifier stream. Running a
+ * tagged .cmd or .vbs shows "Open File - Security Warning: the publisher could not be verified".
+ *
+ * Clicked by hand it is a nuisance. Launched by a SCHEDULED TASK — hidden, with no interactive desktop —
+ * that box appears where nobody can see it and waits for an OK that never comes. "Board Intake" sat at
+ * Status: Running from Wednesday 13:24 with Last Result 0x800710E0, because Windows kept trying to start a
+ * second copy while the first held an invisible dialog. Not one line reached any log, not even the dated
+ * header the script writes before anything else.
+ *
+ * Running the same file by hand worked perfectly every time, because a person was there to click Run.
+ * That is what made it nearly impossible to see.
+ *
+ * And EVERY UPDATE RE-MARKS THE FILE, so it cannot be a cleanup somebody remembers to do. It has to happen
+ * on the copy, which is the only path a downloaded file takes into the app.
+ */
+{
+  const src = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/CopyUpdates.cmd'), 'utf8');
+  const code = src.split('\n').filter((l) => !/^\s*rem\b/i.test(l)).join('\n');
+  check('the copier unblocks what it installs', /Unblock-File -Path \$dest/.test(code), true);
+  /* Immediately after the copy, so a file cannot be left marked by an error later in the loop. */
+  check('...on the same pass as the copy',
+    /Copy-Item \$src\.FullName \$dest -Force;[\s\S]{0,120}Unblock-File/.test(code), true);
+  /*
+   * SilentlyContinue: a file with no mark, or a filesystem that has no alternate data streams, must not
+   * fail the install. The unblock is a precaution, not a step that can refuse.
+   */
+  check('...and a file that was never blocked does not break the run',
+    /Unblock-File[^\n]*-ErrorAction SilentlyContinue/.test(code), true);
+}
+
 console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
