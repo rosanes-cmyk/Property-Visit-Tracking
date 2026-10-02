@@ -49,6 +49,11 @@ function run({ sweep, beat, sessionLog, jobLogs }) {
   fs.mkdirSync(path.join(dir, 'src/utils'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
   fs.copyFileSync(SRC, path.join(dir, 'scripts/health-check.mjs'));
+  /*
+   * src/config.mjs is how the script knows it is standing in an app folder — see the wrong-folder guard.
+   * The throwaway app needs one, or every case below would take that branch instead of being tested.
+   */
+  fs.writeFileSync(path.join(dir, 'src/config.mjs'), 'export const config = {};\n');
   fs.writeFileSync(path.join(dir, 'src/utils/notify.mjs'),
     "export async function notifyChat(text, opts) { console.log('POSTED|' + opts.kind + '|' + opts.requested); return true; }\n");
   if (sweep) fs.writeFileSync(path.join(dir, 'data/LAST-SWEEP'), JSON.stringify(sweep));
@@ -212,6 +217,35 @@ console.log('\n=== One job dying among nine ===');
   // A task that was never installed has no log, and a permanent false alarm would be worse than silence.
   const out = run({ ...healthy, jobLogs: { 'fill-pending.log': 1 } });
   check('a job that has never written is not reported missing', /REI re-check/.test(out), false);
+}
+
+console.log('\n=== Run from the wrong folder, it refuses rather than guessing ===');
+/*
+ * IT LIED, AND IN THE MOST ALARMING WAY AVAILABLE.
+ *
+ * Everything it reads is relative to the working directory. Started from C:\\Users\\bryan rather than the
+ * app folder — from a stray copy of the file left there — it found no data folder and announced:
+ *
+ *     No REI sweep has ever finished on this PC
+ *     No job has ever reported in on this PC - the scheduled tasks may not be installed.
+ *
+ * Both sentences false, both frightening, on a machine where the automation was running normally.
+ * "Never" is the strongest claim this script can make and it was making it on no evidence: an absent file
+ * read as an absent history.
+ */
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notapp-'));
+  let out = '', code = 0;
+  try {
+    out = execFileSync(process.execPath, [SRC, '--print'], { cwd: dir, encoding: 'utf8' });
+  } catch (e) { out = String(e.stdout || ''); code = e.status; }
+  check('it says where it is, instead of what has never happened',
+    /This is not the app folder/.test(out), true);
+  check('...and never claims nothing has run', /has ever finished|ever reported in/.test(out), false);
+  check('...and names the folder it was looking in', out.includes(dir), true);
+  /* Non-zero, so a scheduled copy pointed at the wrong place records a failure rather than a clean run. */
+  check('...and exits non-zero', code, 2);
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log('\n=== It survives whatever it is pointed at ===');

@@ -37,6 +37,37 @@ import { notifyChat } from '../src/utils/notify.mjs';
 
 const PRINT_ONLY = process.argv.includes('--print');
 
+/*
+ * RUN FROM THE WRONG FOLDER, THIS LIED — and it lied in the most alarming way available.
+ *
+ * Everything it reads is relative to the working directory: ./data/LAST-SWEEP, ./data/heartbeat.json,
+ * ./logs/rei-session.log. Started from C:\Users\bryan instead of the app folder, it finds none of them
+ * and says:
+ *
+ *     No REI sweep has ever finished on this PC
+ *     No job has ever reported in on this PC - the scheduled tasks may not be installed.
+ *
+ * Both sentences are false and both are frightening. The client got exactly that, from a stray copy of
+ * this file left in their home folder, on a machine where the automation was running normally.
+ *
+ * "Never" is the strongest claim this script can make, and it was being made on no evidence at all —
+ * an absent file read as an absent history. src/config.mjs is present in every install and nowhere else,
+ * so it is the one thing that separates "nothing has run" from "I am not where I think I am".
+ */
+if (!fs.existsSync(path.resolve('./src/config.mjs'))) {
+  console.log('This is not the app folder, so there is nothing here to check.');
+  console.log(`  Looked in: ${process.cwd()}`);
+  console.log('');
+  console.log('  Everything this reads — the sweep stamp, the heartbeat, the REI session log — lives');
+  console.log('  beside the app. From anywhere else it would report "nothing has ever run", which would');
+  console.log('  be alarming and wrong.');
+  console.log('');
+  console.log('  cd into the folder that holds src\\ and scripts\\, then run it again. If you are not');
+  console.log('  sure which that is, scripts\\WhereIsTheApp.cmd reads the path out of the scheduled task.');
+  process.exit(2);
+}
+
+
 const readJson = (p) => {
   try { return JSON.parse(fs.readFileSync(path.resolve(p), 'utf8')); } catch { return null; }
 };
