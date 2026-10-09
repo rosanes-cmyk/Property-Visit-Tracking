@@ -15,7 +15,9 @@ set "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
 if not exist logs mkdir logs
 
 rem The hourly sweep: only the leads on the 3pm card. Everything else is covered by the ordinary
-rem 20-minute recheck.cmd, so the dashboard still fills in for the whole book, just slower.
+rem 20-minute recheck.cmd, so the dashboard still fills in for the whole book, just slower - which is
+rem true only because STARVING_HOURS (src\rei\recheck.mjs) forces a lead unread for six hours to the
+rem front of that run. Without it the priority sort starved two thirds of the live book for ever.
 if exist "logs\bucket-task.log" (
   for %%A in ("logs\bucket-task.log") do if %%~zA GTR 5000000 (
     if exist "logs\bucket-task.prev.log" del "logs\bucket-task.prev.log"

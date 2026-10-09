@@ -247,11 +247,26 @@ export const RECHECK_MINUTES = 20;
  * about seven hours, so a deal that moved in REI could sit wrong on the board most of a working day.
  *
  * 20 costs about five to eight minutes of browser time per run, which still finishes well inside the
- * 20-minute window, and brings a full pass under two hours. The ceiling this sets on REI is 20 x 3 x 24 =
+ * 20-minute window, and brings a full pass under two hours — the FIRST pass, and only while no lead has
+ * been checked yet (a never-checked lead scores waited = 99, one above the cap, so it outranks checked
+ * leads in its own tier). Every pass after that is governed by STARVING_HOURS below, not by this number. The ceiling this sets on REI is 20 x 3 x 24 =
  * 1440 page loads a day, and the ordering above means the leads that matter are read in the first minutes
  * of it rather than the last hours.
  */
 export const RECHECK_PER_RUN = 20;
+
+/**
+ * How long a lead may go unread before it outranks the priority queue entirely, in HOURS.
+ *
+ * Six, which is twice a working day. The arithmetic that makes it safe: 20 leads x 72 runs is 1,440 reads
+ * a day, and holding 157 leads to one read per six hours costs 628 of them. The rest still go to the
+ * priority queue, so the leads the sheet scores highest are read many times over between their forced
+ * reads rather than being pushed aside by the fix.
+ *
+ * Worst case a lead waits this plus one full drain. With the whole book stale at once, 157 leads at 20 a
+ * run empties in eight runs - about two and a half hours - so nothing goes much past nine hours unread.
+ */
+export const STARVING_HOURS = 6;
 
 /** Stages worth revisiting. A finished lead is not going to change in REI in a way we care about. */
 export const ACTIVE_STAGES = [
@@ -366,6 +381,28 @@ export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MIN
   const imminent = Boolean(visitKey) && stillScheduled
     && visitKey >= todayKey && visitKey <= tomorrowKey;
 
+  /*
+   * A BOOKED VISIT STILL AHEAD outranks the fairness rule below.
+   *
+   * The client, on being shown the starvation fix: "but it should prio the added visit need to be worked."
+   * He is right, and the fix as first written did not do it. A visit booked for next Thursday is not
+   * imminent, so it fell through to the priority queue and a lead nobody had read in six hours could be
+   * placed above a visit somebody is going to drive to. The whole point of re-reading REI is to know
+   * before the drive, not to be fair.
+   *
+   * These are the leads the card calls "Upcoming Visit" (attention-rules.mjs:80) — the ones with an action
+   * written against them: confirm it is going ahead, then mark it Completed or Canceled.
+   *
+   * BOUNDED TO FOURTEEN DAYS, deliberately. A tier that cannot be read in one run is a tier that starves
+   * everything beneath it, and "Visit Scheduled" carries no horizon — a visit booked for March would sit
+   * in this tier for months and permanently occupy the queue. Fourteen days is a visit somebody is working
+   * now; beyond it, the lead still gets the priority queue, the fairness floor, and the hourly bucket sweep,
+   * which reads every Visit Scheduled lead whatever its date.
+   */
+  const soonKey = dayKey(new Date(now.getTime() + 14 * 86400000));
+  const bookedAhead = Boolean(visitKey) && stillScheduled
+    && visitKey > tomorrowKey && visitKey <= soonKey;
+
   if (since < minutes) return 0;
 
   /*
@@ -395,7 +432,61 @@ export function recheckUrgency(row, lastCheckedIso, { now, minutes = RECHECK_MIN
   // Capped so a lead nobody has checked in a month cannot outrank a contract that went stale an hour ago.
   const waited = since === Infinity ? 99 : Math.min(Math.round(since - minutes), 98);
 
-  return (passedButScheduled ? 20000000 : imminent ? 10000000 : 0)
+  /*
+   * THE ESCAPE HATCH, and the bug it fixes.
+   *
+   * Every term above is in a separated magnitude so the ordering can be decided by reading it. That was
+   * right, and it had one consequence nobody traced: priority is worth up to 1,000,000 and waiting is
+   * CAPPED at 99, so a lower-scored lead can never age its way into a slot. Not "waits longer" — never.
+   * There was no fairness floor, unlike sweepParked below, which sorts oldest-checked-first on purpose.
+   *
+   * Driving this function over 72 runs against the client's real workbook — 157 eligible leads, 18
+   * distinct priority values, 20 taken per run:
+   *
+   *     54 of 157 leads read at least once in 24 hours
+   *    103 of 157 read NOT ONCE
+   *     the busiest lead read 36 times
+   *
+   * Two thirds of the live book was not being re-checked at all, while the banner said "157 of 418 can
+   * ever be re-checked" and the health check said the job ran. Both were true and neither was the answer.
+   *
+   * So: a lead nobody has looked at in STARVING_HOURS jumps ABOVE every priority-ranked lead, and below
+   * the two tiers that are about today. It is deliberately a tier and not a bigger ageing number, because
+   * the magnitudes are what make this function readable and a term that sometimes outranks another is how
+   * the original went unnoticed.
+   *
+   * It drains itself. Reading a lead clears its staleness, so it leaves the tier for STARVING_HOURS and
+   * the queue returns to priority order — the escape hatch costs the top leads nothing on a quiet sheet
+   * and guarantees a full pass on a busy one. Priority still orders leads WITHIN the tier, so when many
+   * go stale at once the important ones are still read first.
+   *
+   * Never-checked counts as starving: `since` is Infinity, which is past any threshold.
+   */
+  const starving = since >= STARVING_HOURS * 60;
+
+  /*
+   * Four tiers, strictly ordered and MUTUALLY EXCLUSIVE, each decidable by reading it:
+   *
+   *   20,000,000  the board is WRONG ABOUT TODAY  past visit still marked Scheduled
+   *   10,000,000  it is about to matter           visit today or tomorrow
+   *    7,000,000  a visit is booked and ahead     within a fortnight, still Scheduled
+   *    5,000,000  nobody has looked in STARVING_HOURS
+   *
+   * Exclusive and not additive, which is a correction to how the starvation fix was first written. Adding
+   * the staleness bonus ON TOP of a tier let a visit booked for next week that nobody had read in a day
+   * score 12,000,000 and overtake a visit happening TODAY — tests/rei-recheck.test.mjs caught it as
+   * "imminent beats merely stale" failing. A fairness floor is a floor: it lifts a lead that is in no tier
+   * at all, and it must never reorder the tiers above it, because those are about the drive somebody is
+   * making this morning.
+   *
+   * Below them the original ordering is untouched: the team's own Opportunity Priority, then stage weight,
+   * then how long the lead has waited as a tie-break.
+   */
+  return (passedButScheduled ? 20000000
+    : imminent ? 10000000
+    : bookedAhead ? 7000000
+    : starving ? 5000000
+    : 0)
     + Math.min(priority, 100) * 10000
     + stageWeight * 100
     + waited;

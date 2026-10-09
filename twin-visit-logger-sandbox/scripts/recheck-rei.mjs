@@ -79,8 +79,13 @@ const WAIT = args.includes('--wait');
  *
  * The client: "we need to prioritise those 8 buckets in updating and checking… that is the main goal, time
  * to time check in the REI of those every hour." Those leads are the ones somebody is actually working, so
- * they are the ones where a stale row costs something. Everything else keeps rotating through the ordinary
- * twenty-minute run, so the dashboard still fills in for the whole book — just slower.
+ * they are the ones where a stale row costs something. Everything else rotates through the ordinary
+ * twenty-minute run, so the dashboard fills in for the whole book — just slower.
+ *
+ * That last sentence was FALSE for two years and is the reason this went unseen. The ordinary run ranked
+ * strictly by Opportunity Priority with a capped ageing term, so 103 of the client's 157 live leads were
+ * never re-checked at all. STARVING_HOURS in src/rei/recheck.mjs is what makes it true now; the sentence
+ * stays because it is what the design intends, and it is now the behaviour as well.
  *
  * Membership comes from src/rei/attention-rules.mjs, which carries the card's OWN rules verbatim rather than
  * a translation of them, so the sweep cannot chase a different set of leads from the one Cherry can see.
@@ -260,9 +265,30 @@ if (BUCKETS_ONLY) {
     bySection[key] = (bySection[key] || 0) + 1;
   }
   for (const [key, n] of Object.entries(bySection)) console.log(`    ${key}: ${n}`);
-  candidates = onCard.slice(0, LIMIT);
+  /*
+   * OLDEST-CHECKED FIRST, so the card rotates.
+   *
+   * This was `onCard.slice(0, LIMIT)` over plain sheet order, with no sort and no staleness term, and the
+   * message below said the rest "wait for the next hour". They did not: the next hour picked the identical
+   * first forty rows and the leads past position forty were never swept at all — deterministically, for
+   * ever. These are by definition the leads somebody is actively working.
+   *
+   * It did not bite yet only because the card holds 29 and the limit is 40. That is luck, not design, and
+   * it is the kind that expires quietly as the business grows.
+   *
+   * Sorting by last check is the same rule sweepParked already uses for the parked book. Nothing else about
+   * --buckets changes: the SET of leads is still exactly what is on the card, and the eligibility ordering
+   * used by the ordinary run is still deliberately bypassed here.
+   */
+  const lastCheckOf = (r) => {
+    const iso = state[recheckKey(r)]?.lastCheckedAt;
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return Number.isNaN(t) ? -Infinity : t;          // never checked sorts first
+  };
+  candidates = [...onCard].sort((a, b) => lastCheckOf(a) - lastCheckOf(b)).slice(0, LIMIT);
   if (onCard.length > LIMIT) {
-    console.log(`  ${onCard.length - LIMIT} beyond this run's limit of ${LIMIT} — they wait for the next hour.`);
+    console.log(`  ${onCard.length - LIMIT} beyond this run's limit of ${LIMIT} — they go first next hour,`);
+    console.log('  because the card is swept oldest-checked first.');
     console.log('  Raise it with --limit if the card is regularly bigger than this.');
   }
 }
