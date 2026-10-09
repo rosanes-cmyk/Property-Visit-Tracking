@@ -131,21 +131,31 @@ console.log('\n=== One browser at a time, or REI logs the client out ===');
  * They land on the same minute every twenty, and a 20-lead run takes five to eight minutes.
  */
 /*
- * It takes the lock either way — but a SCHEDULED run stands down when it is busy and a --only run waits.
- * The timer fires again in twenty minutes so skipping costs nothing; a person checking one lead has no next
- * run, and lost the race three times in a row before this split existed. tests/lock covers the behaviour;
- * this asserts only that the lock is still taken on both paths.
+ * It takes the lock on every path, and WAITS on every path — a scheduled run simply bounds the wait.
+ *
+ * This block used to assert the opposite ("a scheduled run still stands down instead of queueing") and was
+ * protecting the fault it described: four jobs share this lock, three of them fire every two minutes, and
+ * the twenty-minute re-check that gave up instantly read two leads in 13.5 hours. tests/lock covers the
+ * behaviour in full; this asserts only that the lock is still taken, and taken the same way, on both paths.
+ *
+ * ASSERTED AGAINST COMMENT-STRIPPED SOURCE, which is not decoration. The "exits cleanly" check below passed
+ * throughout this change while the message it names had already been deleted from the code — it was
+ * matching the long comment that explains the message. That is the third time in this project an assertion
+ * has been satisfied by the prose describing a fix rather than the fix.
  */
-check('the re-check takes the lock', /await acquireLock(Waiting)?\(/.test(RUNNER), true);
-check('...and waits for it when a lead was named by hand',
-  /const release = \(ONLY \|\| WAIT\)\s*\n?\s*\?\s*await acquireLockWaiting/.test(RUNNER), true);
-check('...but a scheduled run still stands down instead of queueing',
-  /:\s*await acquireLock\(\);/.test(RUNNER), true);
-check('...the same unnamed one run-once uses',
+const RUNNER_CODE = RUNNER.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+check('the re-check takes the lock', /await acquireLock(Waiting)?\(/.test(RUNNER_CODE), true);
+check('...and waits for it rather than standing down',
+  /const release = await acquireLockWaiting\('run'/.test(RUNNER_CODE), true);
+check('...with a scheduled run bounding that wait', /SCHEDULED_LOCK_WAIT_MS/.test(RUNNER_CODE), true);
+check('...the same unnamed lock run-once uses',
   /acquireLock\(\);/.test(fs.readFileSync(new URL('../twin-visit-logger-sandbox/src/run-once.mjs', import.meta.url), 'utf8')), true);
-check('it exits cleanly when another run holds it', /Another REI run is active — skipped/.test(RUNNER), true);
+check('a busy lock is reported, not swallowed',
+  /REI stayed busy for \$\{waitedMin\} minutes/.test(RUNNER_CODE), true);
 check('...and names the reason, so the skip is not read as a fault',
-  /That is what was logging REI out/.test(RUNNER), true);
+  /that is what logs REI out/.test(RUNNER_CODE), true);
+check('...and a scheduled timeout still exits 0, leaving it to the next run',
+  /if \(ONLY \|\| WAIT\) process\.exit\(1\);/.test(RUNNER_CODE), true);
 check('the lock is released in finally, even on a crash',
   /\} finally \{\s*\n\s*await context\.close\(\);\s*\n\s*await release\(\);/.test(RUNNER), true);
 /*

@@ -200,5 +200,32 @@ const SWEEP = fs.readFileSync(path.resolve('twin-visit-logger-sandbox/scripts/re
 check('the bucket sweep sorts before it slices', /onCard\]\.sort\(/.test(SWEEP), true);
 check('...and the unsorted slice is gone', /candidates = onCard\.slice\(/.test(SWEEP), false);
 
+console.log('\n=== a fair queue is worthless if the job never gets the browser ===');
+/*
+ * The other half of the same failure, and the half that actually bit.
+ *
+ * The scheduled re-check used to call the non-waiting acquireLock() and stand down the instant the lock was
+ * busy, reasoning that "the timer fires every twenty minutes, so skipping costs nothing". Four jobs share
+ * that one lock and three of them now fire every TWO minutes, so the twenty-minute job lost the race every
+ * time: measured on the client's server, 13.5 hours of the task firing on schedule with Last Result 0 and
+ * exactly two leads read.
+ *
+ * It is the worst shape of fault this project keeps hitting — the scheduler healthy, the job healthy, exit
+ * code 0, and the work not happening. Standing down is a SUCCESS, so nothing could report it.
+ */
+check('the scheduled re-check waits for the lock instead of standing down',
+  /acquireLockWaiting\('run'/.test(SWEEP), true);
+check('...and the bare non-waiting acquireLock() is gone from the lock decision',
+  /:\s*await acquireLock\(\)/.test(SWEEP), false);
+check('...but the wait is BOUNDED, so runs cannot pile up behind a dead lock',
+  /SCHEDULED_LOCK_WAIT_MS\s*=\s*\d+\s*\*\s*60\s*\*\s*1000/.test(SWEEP), true);
+/*
+ * The exit code is the difference between a person and a timer. A hand-typed run must fail loudly; a timer
+ * that exits non-zero on a busy afternoon paints the scheduled task red for hours, and a red light nobody
+ * can act on is how a real one comes to be ignored.
+ */
+check('a timed-out scheduled run still exits 0, leaving it to the next run',
+  /if \(ONLY \|\| WAIT\) process\.exit\(1\);/.test(SWEEP), true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

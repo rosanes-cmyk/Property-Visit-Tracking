@@ -423,18 +423,34 @@ for (const row of candidates) console.log(`  row ${row.__rowNumber}  ${row['Sell
  * stops everything until somebody notices.
  */
 /*
- * A SCHEDULED run stands down; a run somebody typed WAITS.
+ * EVERY run waits for the lock. A scheduled one simply waits less.
  *
- * The two want opposite things from a busy lock. The timer fires every twenty minutes, so skipping costs
- * nothing — the next one picks up whatever accumulated. A person checking one lead has no next one, and
- * losing the race three times in a row is how this actually went. Waiting is chosen by --only, which is
- * already the flag that means "I am doing this by hand, now".
+ * This used to stand down the instant the lock was busy, on the reasoning written just above: "the timer
+ * fires every twenty minutes, so skipping costs nothing — the next one picks up whatever accumulated."
+ *
+ * That was true when it was written and is not true now. The same comment describes the collision it was
+ * sizing itself against — "the email task fires at :00 :05 :10 :15 :20" — and the email task now fires
+ * every TWO minutes, as does Board Intake, as does the WhatsApp watcher. All four take this one lock, and
+ * the hourly bucket sweep holds it for five to eight minutes at a time with --wait. A twenty-minute job
+ * that gives up instantly loses that race essentially always.
+ *
+ * Measured on the client's server: 13.5 hours, the task firing on schedule with Last Result 0 every time,
+ * and TWO leads read. Every run ended "Another REI run is active — skipped". The scheduler was healthy,
+ * the job was healthy, and the work was not happening. Nothing reported it, because standing down is a
+ * success — exit 0, by design.
+ *
+ * EIGHT MINUTES, not the twelve a hand-typed run gets. A run of 20 leads takes five to eight minutes, so
+ * eight of waiting plus eight of working still finishes inside the twenty-minute window and the next run
+ * starts on a free lock. Twelve could overrun it and have each run queue behind the last.
+ *
+ * It is still bounded, and a timeout still exits 0 and leaves it to the next run: waiting for a lock that
+ * a crashed process holds must not turn into a pile of waiting processes.
  */
-const release = (ONLY || WAIT)
-  ? await acquireLockWaiting('run', {
-    onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
-  })
-  : await acquireLock();
+const SCHEDULED_LOCK_WAIT_MS = 8 * 60 * 1000;
+const release = await acquireLockWaiting('run', {
+  ...((ONLY || WAIT) ? {} : { timeoutMs: SCHEDULED_LOCK_WAIT_MS }),
+  onWait: (secondsLeft) => console.log(`  REI is busy — retrying, up to ${Math.ceil(secondsLeft / 60)} more minute(s)`)
+});
 if (!release) {
   /*
    * The TIMEOUT message belongs to anything that waited, not only to --only.
@@ -444,15 +460,21 @@ if (!release) {
    * tried, and points at the wrong remedy. It had tried for twelve minutes, and the real cause was a lock file
    * left behind by a run that had been Ctrl+C'd.
    */
-  if (ONLY || WAIT) {
-    console.log('\nREI stayed busy for 12 minutes, which is longer than any single run should take.');
-    console.log('A run may have died holding the lock:');
-    console.log('  type data\\run.lock        <- shows the pid that claimed it');
-    console.log('  del data\\run.lock         <- only once you are sure no browser is open');
-    process.exit(1);
-  }
-  console.log('\nAnother REI run is active — skipped, to avoid two browsers on one profile.');
-  console.log('That is what was logging REI out. This run will be picked up by the next one.');
+  const waitedMin = (ONLY || WAIT) ? 12 : Math.round(SCHEDULED_LOCK_WAIT_MS / 60000);
+  console.log(`\nREI stayed busy for ${waitedMin} minutes, which is longer than any single run should take.`);
+  console.log('A run may have died holding the lock:');
+  console.log('  type data\\run.lock        <- shows the pid that claimed it');
+  console.log('  del data\\run.lock         <- only once you are sure no browser is open');
+  /*
+   * A hand-typed run FAILS here; a scheduled one exits 0 and leaves it to the next.
+   *
+   * The exit code is the whole difference. A person waiting at a prompt needs to be told it did not work.
+   * A timer that exits non-zero marks the scheduled task failed, and the twenty-minute cadence means a
+   * genuinely busy afternoon would paint the task red for hours — a red light nobody can act on is how a
+   * real one gets ignored.
+   */
+  if (ONLY || WAIT) process.exit(1);
+  console.log('Skipped rather than opening a second browser on one profile — that is what logs REI out.');
   process.exit(0);
 }
 

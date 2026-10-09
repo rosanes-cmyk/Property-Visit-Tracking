@@ -211,13 +211,26 @@ try {
 
   console.log('\n=== the callers use the right one ===');
   /*
-   * The distinction only matters if the scripts honour it. A scheduled re-check must NOT wait — waiting would
-   * pile up twenty-minute runs behind each other — and a --only re-check must.
+   * EVERY re-check waits; a scheduled one just waits less. These two assertions used to say the opposite —
+   * "the re-check waits only when --only was passed" and "...and stands down otherwise" — and they were
+   * faithfully protecting a bug.
+   *
+   * The reasoning for standing down was that waiting "would pile up twenty-minute runs behind each other".
+   * What actually happened on the client's server: four jobs share this lock, three of them now fire every
+   * TWO minutes, and the hourly bucket sweep holds it five to eight minutes at a time with --wait. The
+   * twenty-minute re-check lost the race every single time — 13.5 hours, the task firing on schedule with
+   * Last Result 0, and two leads read. Standing down is exit 0, so nothing reported it.
+   *
+   * The pile-up the old rule feared is prevented by BOUNDING the wait instead: eight minutes for a
+   * scheduled run, so eight waiting plus eight working still lands inside the twenty-minute window.
    */
   const RECHECK = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/scripts/recheck-rei.mjs'), 'utf8');
-  check('the re-check waits only when --only was passed',
-    /const release = \(ONLY \|\| WAIT\)\s*\n?\s*\?\s*await acquireLockWaiting/.test(RECHECK), true);
-  check('...and stands down otherwise', /:\s*await acquireLock\(\);/.test(RECHECK), true);
+  check('the re-check waits for the lock rather than standing down',
+    /const release = await acquireLockWaiting\('run'/.test(RECHECK), true);
+  check('...and a scheduled run bounds that wait', /SCHEDULED_LOCK_WAIT_MS/.test(RECHECK), true);
+  check('...while a hand-typed run keeps the longer default',
+    /\(\(ONLY \|\| WAIT\) \? \{\} : \{ timeoutMs: SCHEDULED_LOCK_WAIT_MS \}\)/.test(RECHECK), true);
+  check('...and the bare non-waiting acquireLock() is gone', /:\s*await acquireLock\(\);/.test(RECHECK), false);
   const DOCTOR = await fs.readFile(path.join(cwd, 'twin-visit-logger-sandbox/scripts/pagedoctor.mjs'), 'utf8');
   check('the doctor always waits — it is only ever run by hand',
     /await acquireLockWaiting\('run'/.test(DOCTOR), true);
