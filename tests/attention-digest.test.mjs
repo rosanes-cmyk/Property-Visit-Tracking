@@ -498,10 +498,18 @@ console.log('\n--- the same change through any door gives the same outcome ---')
  * an action button. They used to behave differently — the form only wrote the cells, so the stage
  * cascade and the log line were skipped. All three now run onVisitStatus_ and sync the calendar.
  */
-check('the full-record form runs the visit-status automation',
-  /if \(params\['Visit Status'\] !== undefined\) runHandler_\(onVisitStatus_, sh, rowNum\);/.test(WEB), true);
-check('...and the stage automation when the stage is edited',
-  /else if \(params\['Current Stage'\] !== undefined\) runHandler_\(onStageManual_, sh, rowNum\);/.test(WEB), true);
+/*
+ * ON A CHANGE, not on presence. These two asserted `params[h] !== undefined`, which the edit form makes
+ * true for every field on every save — so onVisitStatus_ ran on every edit, and for a 'Completed' visit
+ * it re-set Current Stage and Next Action Due Date over whatever the user had just typed in that same
+ * form. The `else if` beneath it was therefore unreachable, so moving a stage here never cascaded at all.
+ */
+check('the full-record form runs the visit-status automation when it CHANGES',
+  /var vsChanged = params\['Visit Status'\] !== undefined && String\(params\['Visit Status'\]\) !== wasVS;/.test(WEB), true);
+check('...and the stage automation when the stage changes',
+  /else if \(csChanged\) runHandler_\(onStageManual_, sh, rowNum\);/.test(WEB), true);
+check('...comparing against values read BEFORE the write loop',
+  /var wasVS = String\(R\.get\('Visit Status'\) \|\| ''\);/.test(WEB), true);
 check('an edit touching neither still syncs the calendar',
   /else syncVisitCalendar_\(sh, rowNum\);/.test(WEB), true);
 check('runHandler_ syncs the calendar itself, so it is not done twice',

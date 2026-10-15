@@ -555,8 +555,16 @@ function webRescheduleRow_(row, params) {
   var changed = [];
   var refused = [];
 
+  /*
+   * 'Seller Name' and 'Current Stage' were missing from this list.
+   *
+   * Both are fields the booking form collects — Seller Name carries a required asterisk — and on the
+   * RESCHEDULE path (any booking whose phone, address or REI link matches an existing row) neither was
+   * ever written. The user picked a stage, pressed Save, got "Updated", and the stage was untouched.
+   */
   ['Visit Date', 'Visit Time', 'Visit Status', 'Assigned Visitor', 'Assigned Owner',
-    'Lead Source', 'Next Action', 'Next Action Due Date', 'REI BlackBook Link', 'Phone'
+    'Lead Source', 'Next Action', 'Next Action Due Date', 'REI BlackBook Link', 'Phone',
+    'Seller Name', 'Current Stage'
   ].forEach(function (h) {
     if (params[h] === undefined || params[h] === '') return;
     var value;
@@ -571,8 +579,14 @@ function webRescheduleRow_(row, params) {
     if (String(before) !== String(value)) changed.push(h);
   });
 
+  /*
+   * Only realign the stage when the caller did NOT choose one. Now that 'Current Stage' is written above,
+   * forcing 'Visit Scheduled' here would overwrite the user's own pick a line after saving it.
+   */
   var stage = String(R.get('Current Stage') || '').trim();
-  if (STAGES_BEFORE_OFFER.indexOf(stage) >= 0 && String(params['Visit Status'] || '') === 'Scheduled') {
+  var callerPickedStage = params['Current Stage'] !== undefined && params['Current Stage'] !== '';
+  if (!callerPickedStage
+      && STAGES_BEFORE_OFFER.indexOf(stage) >= 0 && String(params['Visit Status'] || '') === 'Scheduled') {
     if (stage !== 'Visit Scheduled') { R.set('Current Stage', 'Visit Scheduled'); changed.push('Current Stage'); }
   }
 
@@ -728,7 +742,18 @@ function webAddRecordLocked_(params) {
   R.set('Created Date', today_());
   stamp_(R);
   R.flush();
-  if (params['Visit Status']) onVisitStatus_(new RowAccessor_(sh, row));
+  /*
+   * runHandler_, not a bare call on a fresh accessor.
+   *
+   * This handed onVisitStatus_ a brand-new RowAccessor_ that nobody ever flushed. RowAccessor_.set only
+   * marks the cell dirty; only flush() writes. So every cell the handler set on a NEW booking — Current
+   * Stage, Next Action, Next Action Due Date — was computed and thrown away, and a booking made through
+   * the form ended up in a different state from the identical booking made by editing the sheet.
+   *
+   * runHandler_ does handler(R), R.flush(), then syncVisitCalendar_, which is what the reschedule path
+   * next to this one already uses.
+   */
+  if (params['Visit Status']) runHandler_(onVisitStatus_, sh, row);
   /*
    * A booking whose date could not be read is flagged Incomplete rather than saved looking finished.
    * Missing Required Fields already puts a dateless row on the work queue; this says WHY on the card.
@@ -771,7 +796,10 @@ function webAction(action, id, params) {
         stamp_(R); R.flush(); break;
       case 'recordOfferSent':
         if (params.amount) R.set('Approved Offer Amount', Number(params.amount));
-        R.set('Offer Sent Date', dateValue_(params.date) || today_());
+        var offDv = dateValue_(params.date);
+        if (offDv) R.set('Offer Sent Date', offDv);
+        else if (params.date) refusedUpd.push('Offer Sent Date="' + params.date + '"');
+        else R.set('Offer Sent Date', today_());
         stamp_(R); R.flush(); runHandler_(onOfferSent_, sh, rowNum); break;
       case 'sellerCounter':
         if (params.amount) R.set('Counteroffer Amount', Number(params.amount));
@@ -785,24 +813,47 @@ function webAction(action, id, params) {
       // dates. It went unseen because openAction could never find a record, so no stage-action modal had
       // ever opened and neither line had run in production. Both now route through dateValue_.
       case 'contractSent':
-        R.set('Contract Sent Date', dateValue_(params.date) || today_());
+        var csDv = dateValue_(params.date);
+        if (csDv) R.set('Contract Sent Date', csDv);
+        else if (params.date) refusedUpd.push('Contract Sent Date="' + params.date + '"');
+        else R.set('Contract Sent Date', today_());
         stamp_(R); R.flush(); runHandler_(onContractSent_, sh, rowNum); break;
       case 'contractSigned':
-        R.set('Contract Signed Date', dateValue_(params.date) || today_());
+        var sgDv = dateValue_(params.date);
+        if (sgDv) R.set('Contract Signed Date', sgDv);
+        else if (params.date) refusedUpd.push('Contract Signed Date="' + params.date + '"');
+        else R.set('Contract Signed Date', today_());
         stamp_(R); R.flush(); runHandler_(onContractSigned_, sh, rowNum); break;
       case 'nurture':
         R.set('Current Stage', 'Long-Term Nurture');
-        if (dateValue_(params.due)) R.set('Next Action Due Date', dateValue_(params.due));
+        var dueDv = dateValue_(params.due);
+        if (dueDv) R.set('Next Action Due Date', dueDv);
+        else if (params.due) refusedUpd.push('Next Action Due Date="' + params.due + '"');
         if (params.nextAction) R.set('Next Action', params.nextAction);
         stamp_(R); R.flush(); runHandler_(onStageManual_, sh, rowNum); break;
       case 'setNextAction':
         if (params.nextAction) R.set('Next Action', params.nextAction);
-        if (dateValue_(params.due)) R.set('Next Action Due Date', dateValue_(params.due));
+        var dueDv = dateValue_(params.due);
+        if (dueDv) R.set('Next Action Due Date', dueDv);
+        else if (params.due) refusedUpd.push('Next Action Due Date="' + params.due + '"');
         if (params.owner) R.set('Assigned Owner', params.owner);
         stamp_(R); R.flush(); break;
       case 'updateRecord': {
         // edit any INPUT field from the full-record view (computed columns are ignored)
         var locked = COMPUTED_HEADERS.concat(['Property ID','Created Date','Last Updated Date','Updated By']);
+        /*
+         * Captured BEFORE the write loop, because the form posts EVERY field whether it was touched or not.
+         *
+         * The two branches below used to test `params[h] !== undefined`, which the form makes true for
+         * every editable field on every save. So onVisitStatus_ ran on every edit — and for a 'Completed'
+         * visit it unconditionally re-sets Current Stage and Next Action Due Date, straight over values the
+         * user had just typed in the same form. And because that `if` was always true, the `else if` for
+         * Current Stage was unreachable: moving a stage here never ran the stage cascade at all.
+         *
+         * "Was it supplied" cannot distinguish an edit from an untouched control. "Did it change" can.
+         */
+        var wasVS = String(R.get('Visit Status') || '');
+        var wasCS = String(R.get('Current Stage') || '');
         Object.keys(params).forEach(function(h){
           if (HEADERS.indexOf(h) < 0 || locked.indexOf(h) >= 0) return;
           var val = params[h];
@@ -829,9 +880,11 @@ function webAction(action, id, params) {
          * "Mark visit completed" button — the stage cascade and the log line were skipped. One field,
          * three doors, three outcomes. runHandler_ syncs the calendar itself, so it is not called twice.
          */
-        if (params['Visit Status'] !== undefined) runHandler_(onVisitStatus_, sh, rowNum);
-        else if (params['Current Stage'] !== undefined) runHandler_(onStageManual_, sh, rowNum);
-        else syncVisitCalendar_(sh, rowNum);
+        var vsChanged = params['Visit Status'] !== undefined && String(params['Visit Status']) !== wasVS;
+        var csChanged = params['Current Stage'] !== undefined && String(params['Current Stage']) !== wasCS;
+        if (vsChanged) runHandler_(onVisitStatus_, sh, rowNum);
+        else if (csChanged) runHandler_(onStageManual_, sh, rowNum);
+        else syncVisitCalendar_(sh, rowNum);   // nothing cascaded, but the row may still have moved the event
         break;
       }
       case 'deleteRecord':

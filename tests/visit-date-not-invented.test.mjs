@@ -161,8 +161,16 @@ for (const [label, raw] of [['WebApp.gs', WEB], ['Code.combined.gs', COMBINED]])
    * "something broke", which is the wrong way round. What must never happen is a site going back to a raw
    * new Date(), and the assertion below this one is what catches that.
    */
-  check(`${label}: every params.date write falls back to today, not to 1969`,
-    (src.match(/dateValue_\(params\.date\) \|\| today_\(\)/g) || []).length >= 3, true);
+  /*
+   * Was a count of `dateValue_(params.date) || today_()`. That idiom is now gone on purpose: it fell back
+   * to TODAY for a date the user typed and the sheet could not read, writing a wrong-but-valid date and
+   * reporting success. Each site now converts, refuses by name, and only defaults to today when the field
+   * was left EMPTY — so the assertion is on the refusal, which is the part that was missing.
+   */
+  check(`${label}: an unreadable date is refused by name, not replaced with today`,
+    (src.match(/refusedUpd\.push\('[A-Za-z ]+Date="'/g) || []).length >= 4, true);
+  check(`${label}: ...and an empty date field still falls back to today`,
+    (src.match(/else R\.set\('[A-Za-z ]+Date', today_\(\)\);/g) || []).length >= 3, true);
   check(`${label}: ...and no action writes a hand-typed date raw`,
     /new Date\(params\.(date|due)\)/.test(src), false);
 }

@@ -501,6 +501,16 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
   <span class="chip" data-f="overdue">Overdue</span>
   <span class="chip" data-f="stalled">Stalled</span>
   <span class="chip" data-f="norei">REI link missing</span>
+  <!--
+    These five had no chip and were reachable only from the alert ribbon. setFilter lights a chip by
+    matching data-f, so clicking a ribbon chip stripped `.on` from every chip: a filter was active, most
+    of the board had vanished, and nothing on screen said why or offered a way back except "All".
+  -->
+  <span class="chip" data-f="needs">Need decision</span>
+  <span class="chip" data-f="offers">Offers to follow up</span>
+  <span class="chip" data-f="sla">SLA breach</span>
+  <span class="chip" data-f="gap">Price gap</span>
+  <span class="chip" data-f="conflict">Double-booked</span>
   <select id="owner"><option value="">All owners</option></select>
   <input id="search" placeholder="Search seller or address…" style="flex:1;min-width:180px">
 </div></div>
@@ -639,7 +649,7 @@ function openDetail(id,edit){var r=RECS.filter(function(x){return String(x.rowNu
     ? '<button class="btn" data-x>Cancel</button><button class="btn p" data-save>Save changes</button>'
     : '<button class="btn danger" data-del>🗑 Delete</button><span style="flex:1"></span><button class="btn" data-edit>✏️ Edit</button><button class="btn p" data-x>Close</button>';
   host.innerHTML='<div class="modal detail"><div class="dhead"><div><div class="d-seller">'+sellerLink(r)+'</div><div class="d-addr">'+esc(r.address)+'</div></div><span class="chipstage">'+esc(r.stage)+'</span></div><div class="dbody">'+body+'</div><div class="foot">'+foot+'</div></div>';
-  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  document.body.appendChild(host);function close(){if(host.parentNode)host.parentNode.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});
   host.querySelector('[data-x]').onclick=close;
   if(!edit){
@@ -717,7 +727,11 @@ var VIEW='board',FILTER='all';
 var PSIZE=6,PAGE={};
 function keep(r){var own=document.getElementById('owner').value,q=document.getElementById('search').value.trim().toLowerCase();
   if(own&&r.owner!==own)return false; if(q&&(r.seller+' '+r.address).toLowerCase().indexOf(q)<0)return false;
-  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; if(FILTER==='gap')return r.gap>0; if(FILTER==='conflict')return r.conflict; return true;}
+  if(FILTER==='overdue')return r.daysOverdue>0; if(FILTER==='today')return r.due===todayISO(); if(FILTER==='stalled')return r.stalled; if(FILTER==='norei')return !r.rei&&r.stage!=='Lost / Closed Out'; if(FILTER==='sla')return !!r.sla; if(FILTER==='gap')return r.gap>0; if(FILTER==='conflict')return r.conflict;
+  // The two the ribbon could never reach. Plain stage tests, matching ribbon()'s own counters.
+  if(FILTER==='needs')return r.stage==='Visit Completed \u2014 Needs Review';
+  if(FILTER==='offers')return r.stage==='Offer Sent';
+  return true;}
 function actionsFor(r){var a=[];
   if(r.stage==='Visit Scheduled')a.push(['visitCompleted','Mark visit completed',1]);
   if(r.stage==='Visit Scheduled'||r.stage==='Visit Completed — Needs Review')a.push(['nurture','Move to nurture',0]);
@@ -1217,7 +1231,17 @@ function ribbon(live){
     ['brand','norei',c(function(r){return !r.rei&&r.stage!=='Lost / Closed Out';}),'REI link missing']
   ];
   document.getElementById('ribbon').innerHTML=items.map(function(it){return '<div class="rchip '+it[0]+'" data-jump="'+it[1]+'"><span class="rv num">'+it[2]+'</span><span class="rl">'+it[3]+'</span></div>';}).join('');
-  document.querySelectorAll('.rchip').forEach(function(el){el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');if(j==='overdue')setFilter('overdue');else if(j==='stalled')setFilter('stalled');else if(j==='norei')setFilter('norei');else if(j==='sla')setFilter('sla');else if(j==='gap')setFilter('gap');else if(j==='conflict')setFilter('conflict');else setFilter('all');};});
+  document.querySelectorAll('.rchip').forEach(function(el){/*
+     * Pass the key straight through instead of naming each one.
+     *
+     * This was an if/else chain testing six keys while ribbon() emits EIGHT. 'needs' and 'offers' matched
+     * nothing and fell into `else setFilter('all')`, so those two chips CLEARED whatever filter was on and
+     * showed the whole board — the opposite of their labels, with the chip still showing its count. Same
+     * shape as the openAction bug: a dispatcher that silently defaults instead of failing.
+     *
+     * A chain needing an edit in two places per chip is what produced this. keep() is now the only list.
+     */
+    el.onclick=function(){var j=el.getAttribute('data-jump');setView('board');setFilter(j||'all');};});
 }
 function computeConflicts(live){
   var byKey={};
@@ -1284,11 +1308,13 @@ function field(f,val){var k=f[0],label=f[1],type=f[2],req=f[3],inp;
   return '<div class="field"><label>'+esc(label)+(req?' *':'')+'</label>'+inp+'</div>';}
 function modal(title,fields,onSave,cap,defaults){var host=document.createElement('div');host.className='modal-bg';var today=todayISO();defaults=defaults||{};
   host.innerHTML='<div class="modal"><h3>'+esc(title)+'</h3>'+(cap?'<p class="cap">'+esc(cap)+'</p>':'')+fields.map(function(f){var dv=(defaults[f[0]]!=null&&defaults[f[0]]!=='')?defaults[f[0]]:(f[2]==='date'?today:'');return field(f,dv);}).join('')+'<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
-  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  document.body.appendChild(host);function close(){if(host.parentNode)host.parentNode.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
   host.querySelectorAll('select[data-na]').forEach(function(sel){var c=host.querySelector('[data-k="'+sel.getAttribute('data-k')+'__custom"]');sel.onchange=function(){if(sel.value==='__custom__'){c.style.display='block';c.focus();}else{c.style.display='none';}};});
   host.querySelector('[data-ok]').onclick=function(){var v={},ok=true;fields.forEach(function(f){var el=host.querySelector('[data-k="'+f[0]+'"]');var val=el?el.value:'';if(f[2]==='nextaction'&&val==='__custom__'){var c=host.querySelector('[data-k="'+f[0]+'__custom"]');val=c?c.value:'';}v[f[0]]=val;if(f[3]&&!String(val).trim())ok=false;});if(!ok){toast('Please fill the required (*) fields');return;}close();onSave(v);};}
-function toast(m){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},2400);}
+// ms is optional: a warning needs longer on screen than a confirmation, because the field it names still
+// has to be re-entered and 2.4 seconds is not enough to read one and act on it.
+function toast(m,ms){var t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none';},ms||2400);}
 function openAdd(){
   /* Belt and braces: the button is disabled until listsReady(), and this refuses anyway. */
   if(!LISTS_READY){toast('Still loading the lists from the sheet — one moment');return;}
@@ -1300,7 +1326,7 @@ function openAdd(){
    '<div class="row2"><div class="field"><label>Visit Status</label><select data-k="vstatus">'+VSTATUS.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Visitor</label><select data-k="visitor"><option value="">(none)</option>'+BOOKING_VISITORS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="row2"><div class="field"><label>Current Stage</label><select data-k="stage">'+STAGES.map(function(s){return '<option>'+s+'</option>';}).join('')+'</select></div><div class="field"><label>Assigned Owner</label><select data-k="owner"><option value="">(none)</option>'+BOOKING_OWNERS.map(function(o){return '<option>'+o+'</option>';}).join('')+'</select></div></div>'+
    '<div class="foot"><button class="btn" data-x>Cancel</button><button class="btn p" data-ok>Save</button></div></div>';
-  document.body.appendChild(host);function close(){document.body.removeChild(host);}
+  document.body.appendChild(host);function close(){if(host.parentNode)host.parentNode.removeChild(host);}
   host.addEventListener('click',function(e){if(e.target===host)close();});host.querySelector('[data-x]').onclick=close;
   host.querySelector('[data-ok]').onclick=function(){var g=function(k){var el=host.querySelector('[data-k="'+k+'"]');return el?el.value:'';};
     /*
@@ -1323,7 +1349,17 @@ function openAdd(){
  * that reason: it is the one property the page cannot work without.
  */
 function hydrate(x){return {rowNum:x.rowNum,id:x.id,created:x.created,seller:x.seller,address:x.address,phone:x.phone,lead:x.lead,stage:x.stage,owner:x.owner,visitStatus:x.visitStatus,next:x.nextAction,due:x.due,daysOverdue:Math.round(Number(x.daysOverdue)||0),stalled:!!x.stalled,blocker:x.blocker,lastResult:x.lastResult,offer:x.offerAmount,dq:x.dq||'OK',missing:x.missing||'',exception:x.exceptionReason||'',rei:x.rei,daysSince:x.daysSince,disposition:x.disposition,gift:x.gift,visitDate:x.visitDate,visitor:x.visitor,visitNotes:x.visitNotes,email:x.email,lastContact:x.lastContact,sla:x.sla||'',offerPromised:x.offerPromised,sellerFloor:x.sellerFloor,ourMax:x.ourMax,gap:Number(x.priceGap)||0,full:x.full};}
-function populateOwners(){var os=document.getElementById('owner');os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});}
+/*
+ * Keep the user's choice across the rebuild.
+ *
+ * onData runs on first load, after every save AND on the 20-second pending poll, and this rewrote the
+ * select's innerHTML every time — so picking an owner and waiting twenty seconds silently reset the board
+ * to "All owners" with no interaction at all. The older embedded copy of this page in WebApp.gs guards
+ * against exactly this (`if(s.options.length>1)return`), so the behaviour was lost, not missing.
+ *
+ * Restoring the value rather than skipping the rebuild, so a genuinely new owner still appears.
+ */
+function populateOwners(){var os=document.getElementById('owner');var cur=os.value;os.innerHTML='<option value="">All owners</option>';OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});if(cur&&OWNERS.indexOf(cur)>=0)os.value=cur;}
 function onData(d){RECS=(d.records||[]).map(hydrate);pollWhilePending();TRASH=d.trash||[];if(d.owners&&d.owners.length)OWNERS=d.owners;if(d.visitors&&d.visitors.length)VISITORS=d.visitors;
   if(d.bookingOwners&&d.bookingOwners.length)BOOKING_OWNERS=d.bookingOwners;
   if(d.bookingVisitors&&d.bookingVisitors.length)BOOKING_VISITORS=d.bookingVisitors;
@@ -1386,7 +1422,18 @@ function pollWhilePending(){
   if(!waiting&&PENDING_POLL){clearInterval(PENDING_POLL);PENDING_POLL=null;}
 }
 function refresh(){if(typeof google==='undefined'||!google.script||!google.script.run){onErr({message:'Google Apps Script bridge not available (google.script.run missing).'});return;}try{google.script.run.withSuccessHandler(onData).withFailureHandler(onErr).webGetData();}catch(e){onErr(e);}}
-function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){toast(res.updated?('Updated \u2714 rescheduled'+(res.seller?(' \u2014 '+res.seller):'')):(res.pending?'Added \u2714 finding it in REI\u2026':'Saved \u2714'));if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
+/*
+ * A save that only half-landed must say so.
+ *
+ * Every server write path already builds `warning` and `refusedDates` naming each date it would not
+ * vouch for — webAction, webAddRecordLocked_ and webRescheduleRow_ all return them. This handler read
+ * res.ok, res.updated, res.pending, res.seller and res.data, and never either of those, so a date the
+ * server deliberately refused to write was reported to the person who typed it as "Saved \u2714".
+ *
+ * The warning wins over the success text, and is held on screen longer than the usual toast, because it
+ * is a failure notice rather than a confirmation and the field it names still needs re-entering.
+ */
+function runAction(act,id,params,after){if(typeof google==='undefined'||!google.script||!google.script.run){toast('Cannot save: bridge unavailable');return;}google.script.run.withSuccessHandler(function(res){if(res&&res.ok){var okMsg=res.updated?('Updated \u2714 rescheduled'+(res.seller?(' \u2014 '+res.seller):'')):(res.pending?'Added \u2714 finding it in REI\u2026':'Saved \u2714');if(res.warning)toast('\u26a0 '+res.warning,7000);else toast(okMsg);if(after)after();if(res.data){onData(res.data);}else{refresh();}}else{toast('Error: '+((res&&res.error)||'failed'));}}).withFailureHandler(function(e){toast('Error: '+(e&&e.message||e));}).webAction(act,id,params||{});}
 document.querySelectorAll('.seg button').forEach(function(b){b.onclick=function(){setView(b.getAttribute('data-v'));};});
 document.querySelectorAll('.chip[data-f]').forEach(function(c){c.setAttribute('tabindex','0');c.onclick=function(){setFilter(c.getAttribute('data-f'));};});
 var os=document.getElementById('owner');OWNERS.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;os.appendChild(op);});

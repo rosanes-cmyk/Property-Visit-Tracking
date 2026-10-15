@@ -77,7 +77,15 @@ console.log('\n=== no hand-typed date reaches the sheet unchecked ===');
  */
 check('logContact routes its due date through dateValue_', /dateValue_\(params\.due\)/.test(SERVER), true);
 check('...and never calls new Date on it', /new Date\(params\.due\)/.test(SERVER), false);
-check('recordOfferSent routes its date through dateValue_', /R\.set\('Offer Sent Date', dateValue_\(params\.date\) \|\| today_\(\)\)/.test(SERVER), true);
+/*
+ * `dateValue_(x) || today_()` is right for an EMPTY field and wrong for a typo: it writes today's date
+ * over what the user meant and still reports success. The guarded form keeps the empty-field fallback and
+ * refuses an unreadable value by name.
+ */
+check('recordOfferSent routes its date through dateValue_', /var offDv = dateValue_\(params\.date\);/.test(SERVER), true);
+check('...and refuses an unreadable one by name rather than writing today',
+  /refusedUpd\.push\('Offer Sent Date="' \+ params\.date \+ '"'\)/.test(SERVER), true);
+check('...while an empty field still defaults to today', /else R\.set\('Offer Sent Date', today_\(\)\);/.test(SERVER), true);
 check('...and never calls new Date on it', /new Date\(params\.date\)/.test(SERVER), false);
 /*
  * A refused date must be REPORTED, not silently dropped. refusedUpd is what the response uses to tell the
