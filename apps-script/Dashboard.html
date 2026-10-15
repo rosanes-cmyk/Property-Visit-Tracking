@@ -32,6 +32,72 @@
   --glow:none;
   color-scheme:dark;
 }
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * MONOCHROME, AND A THEME THE TEAM CAN SWITCH.
+ *
+ * The client, on seeing the board: "its not like professional and business", and earlier, plainly,
+ * "dont to much color okay". They were right. The palette above puts a saturated blue on every row
+ * button, a purple avatar beside every name and eight coloured chips across the top, so nothing can
+ * stand out — everything is already shouting.
+ *
+ * This block redefines the TOKENS rather than the components. Every rule in the 900 lines below takes
+ * its colour from a variable, so the whole page turns black and white here and no component rule is
+ * touched. It is also why this is reversible: delete this block and the old look returns exactly.
+ *
+ * SEVERITY WITHOUT HUE. good/warn/crit do not collapse to one colour — they become a grey ramp, so
+ * urgency still reads. Dark: brighter is more urgent. Light: darker is more urgent. That keeps the
+ * one thing the colours were genuinely carrying, and drops the decoration that was drowning it.
+ *
+ * Default is dark (what the team uses today). [data-theme="light"] is the switch, and the device
+ * preference is honoured until somebody chooses.
+ * ---------------------------------------------------------------------------------------------
+ */
+:root{
+  --bg:#0B0B0C; --surface:#141416; --surface-2:#1C1C1F; --border:#2B2B2F; --border-2:#3A3A40;
+  --ink:#FFFFFF; --muted:#B4B4B8; --faint:#86868C;
+  --brand:#FFFFFF; --brand-2:#D8D8DC; --brand-soft:#1F1F23; --on-brand:#0B0B0C;
+  /* The ramp. Nothing here is a hue; the difference is how far it is from the background. */
+  --crit:#FFFFFF;  --crit-bg:#242428;  --crit-ink:#FFFFFF;
+  --warn:#B4B4B8;  --warn-bg:#1C1C1F;
+  --good:#86868C;  --good-bg:#1C1C1F;
+  --sh:0 1px 2px rgba(0,0,0,.5);
+  --sh-lift:0 8px 24px rgba(0,0,0,.65);
+  --glow:none;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F5F5F5; --border:#E2E2E2; --border-2:#CFCFCF;
+  --ink:#000000; --muted:#4A4A4A; --faint:#7B7B7B;
+  --brand:#000000; --brand-2:#2A2A2A; --brand-soft:#F1F1F1; --on-brand:#FFFFFF;
+  --crit:#000000;  --crit-bg:#EDEDED;  --crit-ink:#000000;
+  --warn:#4A4A4A;  --warn-bg:#F5F5F5;
+  --good:#7B7B7B;  --good-bg:#F5F5F5;
+  --sh:0 1px 2px rgba(0,0,0,.08);
+  --sh-lift:0 8px 24px rgba(0,0,0,.14);
+  --glow:none;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#F5F5F5; --border:#E2E2E2; --border-2:#CFCFCF;
+    --ink:#000000; --muted:#4A4A4A; --faint:#7B7B7B;
+    --brand:#000000; --brand-2:#2A2A2A; --brand-soft:#F1F1F1; --on-brand:#FFFFFF;
+    --crit:#000000;  --crit-bg:#EDEDED;  --crit-ink:#000000;
+    --warn:#4A4A4A;  --warn-bg:#F5F5F5;
+    --good:#7B7B7B;  --good-bg:#F5F5F5;
+    --sh:0 1px 2px rgba(0,0,0,.08);
+    --sh-lift:0 8px 24px rgba(0,0,0,.14);
+    color-scheme:light;
+  }
+}
+/* The switch itself: quiet, in the app bar, never competing with the work. */
+.themebtn{font:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  background:none;border:1px solid var(--border-2);color:var(--muted);border-radius:var(--r-xs);
+  padding:4px 10px;cursor:pointer;margin-left:10px}
+.themebtn:hover{background:var(--surface-2);color:var(--ink)}
+.themebtn:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{
@@ -61,8 +127,10 @@ body{
    The bar is measured, not assumed to be 45px, so growing a line costs nothing below it. */
 .brand{display:flex;align-items:center;gap:11px;min-width:0}
 .brand h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The emoji carries its own colour, which no token can reach — so it is desaturated here. It was the
+   last coloured thing on the page once the avatars went neutral. */
 .brand .logo{font-size:18px;width:32px;height:32px;display:grid;place-items:center;
-  background:var(--brand);border-radius:8px;box-shadow:none}
+  background:var(--brand);border-radius:8px;box-shadow:none;filter:grayscale(1) contrast(1.1)}
 .brand h1{margin:0;font-size:15px;font-weight:650;letter-spacing:-.1px}
 .brand .env{font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;
   color:var(--brand-2);background:var(--brand-soft);border:1px solid var(--border);
@@ -244,7 +312,7 @@ a.rei:hover{color:var(--brand)}
 .ow span{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ow.un span{color:var(--ink-3)}
 .av{width:21px;height:21px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
-  font-size:9.5px;font-weight:650;color:#fff}
+  font-size:9.5px;font-weight:650;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line)}
 .av.none{background:transparent;border:1px dashed var(--line-2);color:var(--ink-3)}
 
 .qage{text-align:right;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-3);
@@ -258,7 +326,7 @@ a.rei:hover{color:var(--brand)}
 
 /* ONE action. The rest are on the menu — nothing was removed, see rowMenu(). */
 .qact{display:flex;align-items:center;gap:6px;justify-content:flex-end;min-width:0}
-.go{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:6px 12px;font:inherit;
+.go{background:var(--accent);color:var(--on-brand);border:none;border-radius:7px;padding:6px 12px;font:inherit;
   font-size:12px;font-weight:550;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .go:hover{background:var(--accent-2)}
 .go.ghost{background:transparent;border:1px solid var(--line-2);color:var(--ink-2)}
@@ -454,7 +522,7 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .rtl{font-size:11.5px;color:var(--muted);margin-top:3px}
 .rsec{margin-top:22px;break-inside:avoid}
 .rsec h3{margin:0 0 2px;font-size:14px;display:flex;align-items:center;gap:8px;font-weight:650}
-.rcount{background:var(--brand);color:#fff;border-radius:5px;font-size:11px;font-weight:600;padding:1px 8px}
+.rcount{background:var(--brand);color:var(--on-brand);border-radius:5px;font-size:11px;font-weight:600;padding:1px 8px}
 .rrule{margin:0 0 8px;font-size:11.5px;color:var(--muted)}
 .rtab{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .rtab col.cprop{width:26%} .rtab col.cstage{width:15%} .rtab col.cnext{width:22%}
@@ -470,8 +538,12 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 .rmore{font-size:11px;color:var(--muted);margin:6px 2px 0;font-style:italic}
 
 @media print{
-  :root{--bg:#fff;--surface:#fff;--surface-2:#f4f6fb;--ink:#0b1016;--muted:#556;--faint:#889;
-    --border:#d5dbe6;--brand:#1746a6;--brand-2:#1746a6;--glow:none}
+  /* Print is monochrome too. It carried its own blue palette, so a report printed in colour on a page
+     that is black and white on screen — and colour printing is the thing nobody wants to pay for. */
+  :root{--bg:#fff;--surface:#fff;--surface-2:#f2f2f2;--ink:#000000;--muted:#444444;--faint:#777777;
+    --border:#d6d6d6;--border-2:#bbbbbb;--brand:#000000;--brand-2:#2a2a2a;--on-brand:#ffffff;
+    --crit:#000000;--crit-bg:#ededed;--crit-ink:#000000;
+    --warn:#444444;--warn-bg:#f2f2f2;--good:#777777;--good-bg:#f2f2f2;--glow:none}
   body{background:#fff;background-image:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .rmark,.rcount,.rtile,.rhead{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .appbar,.subbar,.filters,.fab,.repctrl,#toast{display:none !important}
@@ -487,7 +559,7 @@ col.c-overdue{width:8%} col.c-dq{width:8%}
 
 <div class="appbar">
   <div class="brand"><span class="logo">🏠</span><h1>Twin Visit Logger</h1><span class="env" id="env">Live · saving to the sheet</span></div>
-  <div class="right"><span class="live"><span class="dot"></span>Live board</span><span id="who">cherry@equitytrack.org</span></div>
+  <div class="right"><span class="live"><span class="dot"></span>Live board</span><button class="themebtn" id="themebtn" type="button">Light</button><span id="who"></span></div>
 </div>
 <div class="subbar"><div class="inner">
   <div class="seg" role="tablist">
@@ -659,6 +731,26 @@ function openDetail(id,edit){var r=RECS.filter(function(x){return String(x.rowNu
     host.querySelector('[data-save]').onclick=function(){var params={};host.querySelectorAll('[data-h]').forEach(function(el){params[el.getAttribute('data-h')]=el.value;});toast('Saving…');runAction('updateRecord',id,params,close);};
   }
 }
+/*
+ * The light/dark switch.
+ *
+ * Follows the device until somebody chooses; the choice then wins in both directions and is remembered.
+ * The label always names what pressing it WILL do, not what the page currently is.
+ */
+(function(){
+  var btn=document.getElementById('themebtn'),saved=null;
+  try{saved=localStorage.getItem('tvl-theme');}catch(e){}
+  if(saved==='dark'||saved==='light')document.documentElement.setAttribute('data-theme',saved);
+  function isDark(){var set=document.documentElement.getAttribute('data-theme');
+    if(set)return set==='dark';
+    return !(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches);}
+  function label(){btn.textContent=isDark()?'Light':'Dark';}
+  btn.onclick=function(){var next=isDark()?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem('tvl-theme',next);}catch(e){}
+    label();};
+  label();
+})();
 function todayISO(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 
 var SECTIONS=[
@@ -892,13 +984,19 @@ function qWhy(r){
  * so it is stable per person and needs no list to maintain; a lead with no owner gets a dashed outline,
  * which reads as a gap rather than as a person called Unassigned.
  */
-var AV_HUES=[214,268,178,24,332,140,44];
+/*
+ * The last coloured thing on the page, and the one the token layer could not reach: the hue was written
+ * straight into a style attribute. A different hue per owner looked like identity and read as decoration —
+ * six saturated discs down a column of otherwise black-and-white rows, drawing the eye to who owns a lead
+ * rather than to what needs doing about it.
+ *
+ * The initial already identifies the owner. It now sits in the same neutral the rest of the page uses, and
+ * AV_HUES is gone with it.
+ */
 function avatar(name){
   var n=String(name||'').trim();
   if(!n||/^unassigned$/i.test(n))return '<span class="av none">?</span>';
-  var h=0; for(var i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))>>>0;
-  var hue=AV_HUES[h%AV_HUES.length];
-  return '<span class="av" style="background:hsl('+hue+' 62% 46%)">'+esc(n[0].toUpperCase())+'</span>';
+  return '<span class="av">'+esc(n[0].toUpperCase())+'</span>';
 }
 /*
  * ONE action on the row. Four buttons of equal weight is four decisions before you have read the lead.
