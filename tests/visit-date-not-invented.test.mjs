@@ -154,8 +154,17 @@ for (const [label, raw] of [['WebApp.gs', WEB], ['Code.combined.gs', COMBINED]])
     /if \(map\['Visit Date'\] !== '' && map\['Visit Date'\] != null && dateValue_\(map\['Visit Date'\]\) === ''\) \{/.test(src), true);
   // The map feeds the calendar and the log as well as the row, so clearing it there covers all three.
   check(`${label}: ...and clears it, rather than correcting it`, /map\['Visit Date'\] = '';/.test(src), true);
-  check(`${label}: the contract dates fall back to today, not to 1969`,
-    (src.match(/dateValue_\(params\.date\) \|\| today_\(\)/g) || []).length, 2);
+  /*
+   * A FLOOR, not an exact count. This asserted exactly 2 — contractSent and contractSigned — and then
+   * failed the day recordOfferSent was routed through dateValue_ as well, reporting a safety improvement
+   * as a regression. An exact count makes "one more write site is now guarded" indistinguishable from
+   * "something broke", which is the wrong way round. What must never happen is a site going back to a raw
+   * new Date(), and the assertion below this one is what catches that.
+   */
+  check(`${label}: every params.date write falls back to today, not to 1969`,
+    (src.match(/dateValue_\(params\.date\) \|\| today_\(\)/g) || []).length >= 3, true);
+  check(`${label}: ...and no action writes a hand-typed date raw`,
+    /new Date\(params\.(date|due)\)/.test(src), false);
 }
 
 // The cards are in ChatNotify.gs; Code.combined.gs holds both, so it is checked in both lists on purpose.

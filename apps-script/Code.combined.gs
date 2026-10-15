@@ -2190,11 +2190,13 @@ function webAction(action, id, params) {
         R.set('Last Contact Date', today_());
         if (params.result) R.set('Last Contact Result', params.result);
         if (params.nextAction) R.set('Next Action', params.nextAction);
-        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        var dueVal = dateValue_(params.due);
+        if (dueVal) R.set('Next Action Due Date', dueVal);
+        else if (params.due) refusedUpd.push('Next Action Due Date');
         stamp_(R); R.flush(); break;
       case 'recordOfferSent':
         if (params.amount) R.set('Approved Offer Amount', Number(params.amount));
-        R.set('Offer Sent Date', params.date ? new Date(params.date) : today_());
+        R.set('Offer Sent Date', dateValue_(params.date) || today_());
         stamp_(R); R.flush(); runHandler_(onOfferSent_, sh, rowNum); break;
       case 'sellerCounter':
         if (params.amount) R.set('Counteroffer Amount', Number(params.amount));

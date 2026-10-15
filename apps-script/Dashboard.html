@@ -1261,7 +1261,19 @@ function applyAction(act,r,v){
   else if(act==='logContact'){r.lastContact=todayISO();if(v.lastResult)r.lastResult=v.lastResult;if(v.next)r.next=v.next;if(v.due)r.due=v.due;}
   else if(act==='setNextAction'){if(v.next)r.next=v.next;if(v.due)r.due=v.due;if(v.owner)r.owner=v.owner;}
 }
-function openAction(act,id){var r=RECS.filter(function(x){return x.id===id;})[0];if(!r)return;var spec=AF[act];
+/*
+ * Look the record up by ROW NUMBER, the same way openDetail does.
+ *
+ * This matched on x.id, the 'TVL-0001' Property ID, while every button and every overflow-menu item emits
+ * data-id = r.rowNum (see cardHTML, rowHTML and the menu builder). A row number never equals a Property ID,
+ * so the filter returned nothing, `if(!r)return` fired, and the function exited with no modal, no toast and
+ * no error. EVERY stage-action button on EVERY row has silently done nothing. Property ID is also blank on
+ * most imported rows, so emitting it instead would have swapped one dead path for another.
+ *
+ * String() on both sides because getAttribute returns a string and rowNum is a number — the strict compare
+ * is what openDetail already does at the top of this file.
+ */
+function openAction(act,id){var r=RECS.filter(function(x){return String(x.rowNum)===String(id);})[0];if(!r)return;var spec=AF[act];
   function fire(v){var pmap={recordOfferSent:{amount:v.offer,date:v.offerSent},sellerCounter:{amount:v.counter,result:v.lastResult},contractSent:{date:v.contractSent},contractSigned:{date:v.contractSigned},logContact:{result:v.lastResult,nextAction:v.next,due:v.due},nurture:{due:v.due,nextAction:v.next},setNextAction:{nextAction:v.next,due:v.due,owner:v.owner},visitCompleted:{}};toast('Saving…');runAction(act,id,pmap[act]||{});}
   if(!spec.f.length){fire({});return;}
   modal(spec.t+' — '+r.seller,spec.f,fire,null,{next:suggestNext(r.stage)});}

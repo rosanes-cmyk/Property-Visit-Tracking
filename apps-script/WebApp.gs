@@ -765,11 +765,13 @@ function webAction(action, id, params) {
         R.set('Last Contact Date', today_());
         if (params.result) R.set('Last Contact Result', params.result);
         if (params.nextAction) R.set('Next Action', params.nextAction);
-        if (params.due) R.set('Next Action Due Date', new Date(params.due));
+        var dueVal = dateValue_(params.due);
+        if (dueVal) R.set('Next Action Due Date', dueVal);
+        else if (params.due) refusedUpd.push('Next Action Due Date');
         stamp_(R); R.flush(); break;
       case 'recordOfferSent':
         if (params.amount) R.set('Approved Offer Amount', Number(params.amount));
-        R.set('Offer Sent Date', params.date ? new Date(params.date) : today_());
+        R.set('Offer Sent Date', dateValue_(params.date) || today_());
         stamp_(R); R.flush(); runHandler_(onOfferSent_, sh, rowNum); break;
       case 'sellerCounter':
         if (params.amount) R.set('Counteroffer Amount', Number(params.amount));
@@ -777,6 +779,11 @@ function webAction(action, id, params) {
         stamp_(R); R.flush(); runHandler_(onSellerCounter_, sh, rowNum); break;
       // dateValue_ throughout, so an unreadable date falls back to today (or is left alone) instead of
       // being turned into a real, valid, wrong one. See dateValue_ for what that looked like on screen.
+      //
+      // "Throughout" was not true when this was written: logContact and recordOfferSent above still called
+      // new Date(params.date) directly, and they are the two most-used buttons with the most hand-typed
+      // dates. It went unseen because openAction could never find a record, so no stage-action modal had
+      // ever opened and neither line had run in production. Both now route through dateValue_.
       case 'contractSent':
         R.set('Contract Sent Date', dateValue_(params.date) || today_());
         stamp_(R); R.flush(); runHandler_(onContractSent_, sh, rowNum); break;
