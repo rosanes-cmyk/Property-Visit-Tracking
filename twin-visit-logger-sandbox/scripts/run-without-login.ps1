@@ -121,8 +121,25 @@ $plain  = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
 if (-not $plain) { throw 'No password entered - nothing was changed.' }
 
-$ok = 0; $failed = @()
+<#
+  STOP AT THE FIRST CREDENTIAL FAILURE. NEVER LOOP.
+
+  This used to try the same password against every task in turn. One mistyped character therefore became
+  TEN failed logon attempts against the Windows account in a couple of seconds -- and on the client's
+  server that tripped the account lockout policy:
+
+      FAILED  Twin Visit Logger Notes Audit: The referenced account is currently locked out
+              and may not be logged on to.
+
+  which is far worse than the problem the script exists to fix: with the account locked, nobody can sign
+  in to that machine at all until the lockout expires. A wrong password is a user slip; turning it into a
+  lockout was a bug in this loop.
+
+  One password, one attempt. If Windows refuses it, nothing else is tried.
+#>
+$ok = 0; $failed = @(); $reasons = @(); $credBad = $false
 foreach ($t in $targets) {
+  if ($credBad) { break }
   try {
     # LogonType Password is what "run whether user is logged on or not" means underneath. Everything else
     # about the task -- its schedule, the 20-minute kill limit, the battery flags -- is left untouched.
@@ -130,8 +147,16 @@ foreach ($t in $targets) {
     Write-Host ("  converted  {0}" -f $t.TaskName) -ForegroundColor Green
     $ok++
   } catch {
-    Write-Warning ("  FAILED     {0}: {1}" -f $t.TaskName, $_.Exception.Message)
+    $msg = $_.Exception.Message
+    Write-Warning ("  FAILED     {0}: {1}" -f $t.TaskName, $msg)
     $failed += $t.TaskName
+    $reasons += $msg
+    if ($msg -match 'user name or password is incorrect|logon failure|password is incorrect|locked out') {
+      $credBad = $true
+      Write-Host ''
+      Write-Host '  Stopping here rather than trying the other tasks with the same password:' -ForegroundColor Yellow
+      Write-Host '  repeating it would count as another failed sign-in and can lock the Windows account.'
+    }
   }
 }
 $plain = $null; [GC]::Collect()
@@ -139,9 +164,62 @@ $plain = $null; [GC]::Collect()
 Write-Host ''
 Write-Host "Converted $ok task(s)." -ForegroundColor Green
 if ($failed.Count) {
+  <#
+    NAME THE REAL CAUSE, not the usual one.
+
+    This printed "the usual cause is that this PowerShell is not elevated" whatever Windows had actually
+    said -- and the first time it fired, Windows had said "The user name or password is incorrect" on all
+    ten lines. Sending somebody to re-open PowerShell as administrator when the real answer is "you typed
+    one character too many" is the same class of fault this whole script exists to end: a confident
+    message pointing at the wrong thing.
+  #>
+  $joined = ($reasons -join ' ')
   Write-Host ''
-  Write-Warning 'Some tasks could not be converted. The usual cause is that this PowerShell is not elevated.'
-  Write-Host '  Start menu -> type: powershell -> right-click -> Run as administrator, then run this again.'
+  if ($joined -match 'locked out') {
+    Write-Warning 'The Windows account is locked out. Nothing was changed.'
+    Write-Host ''
+    Write-Host '  DO NOT SIGN OUT of this machine while it is locked -- you may not be able to sign back in.'
+    Write-Host ''
+    Write-Host '  It clears by itself. To see how long:   net accounts'
+    Write-Host '  Look for "Lockout duration (minutes)" -- usually 10 to 30. Wait that long, then retry.'
+    Write-Host ''
+    Write-Host '  To clear it now, as an administrator:'
+    Write-Host '    1. Start menu -> type: lusrmgr.msc -> Enter'
+    Write-Host '    2. Users -> right-click the account -> Properties'
+    Write-Host '    3. Untick "Account is locked out" -> OK'
+    Write-Host ''
+    Write-Host '  Check the password before running this again:  it is the one you use to sign in to Windows.'
+  }
+  elseif ($joined -match 'user name or password is incorrect|logon failure|password is incorrect') {
+    Write-Warning 'The password was not accepted, so nothing was changed.'
+    Write-Host ''
+    Write-Host "  Windows checked it against the account $me and refused it."
+    Write-Host '  Nothing shows on screen as you type, so an extra keystroke is easy to miss -- press'
+    Write-Host '  Backspace a few times before you start, then type it slowly and run this again.'
+    Write-Host ''
+    Write-Host '  If the account has no password at all, Windows will not run a task signed out with it.'
+    Write-Host '  Set one on the account first, or keep the jobs as they are.'
+  }
+  elseif ($joined -match 'Access is denied|not authorized|requires elevation') {
+    Write-Warning 'Windows refused the change, so nothing was converted.'
+    Write-Host ''
+    Write-Host '  This PowerShell is not running as administrator.'
+    Write-Host '  Start menu -> type: powershell -> right-click -> Run as administrator, then run again.'
+  }
+  else {
+    Write-Warning 'Some tasks could not be converted. Windows gave the reason on each line above.'
+    Write-Host '  The two usual ones are a mistyped password, and a PowerShell that is not elevated.'
+  }
+  <#
+    A failed run must not print the celebratory next steps underneath its own warning. It did, and the
+    screen read as though it had worked.
+  #>
+  if ($ok -eq 0) {
+    Write-Host ''
+    Write-Host 'Nothing was changed. The jobs are exactly as they were.' -ForegroundColor Yellow
+    Write-Host ''
+    return
+  }
 }
 
 Write-Host ''

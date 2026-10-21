@@ -72,7 +72,46 @@ check('it refuses when no Twin Visit Logger task exists', /throw "No '\$PREFIX' 
 check('it refuses an empty password rather than converting with none',
   /if \(-not \$plain\) \{ throw/.test(CODE), true);
 check('a task it could not convert is reported, not swallowed', /\$failed \+= \$t\.TaskName/.test(CODE), true);
-check('...and the likeliest cause is named', /Run as administrator/.test(CODE), true);
+/*
+ * NAME THE REAL CAUSE. This printed "the usual cause is that this PowerShell is not elevated" whatever
+ * Windows had actually said -- and the first time it fired, Windows had said "The user name or password
+ * is incorrect" on all ten lines. Sending somebody to re-open PowerShell as administrator when the answer
+ * is "you typed one character too many" is the same fault this script exists to end: a confident message
+ * pointing at the wrong thing.
+ */
+check('it keeps the reason Windows gave', /\$reasons \+= \$msg/.test(CODE), true);
+
+/*
+ * THE ONE THAT MATTERS MOST, and it was learned the hard way.
+ *
+ * The loop used to try the same password against every task in turn, so ONE mistyped character became ten
+ * failed Windows logon attempts in a couple of seconds -- which tripped the account lockout policy on the
+ * client's server:
+ *
+ *     FAILED  Twin Visit Logger Notes Audit: The referenced account is currently locked out
+ *             and may not be logged on to.
+ *
+ * That is worse than the fault this script exists to fix. With the account locked nobody can sign in to
+ * that machine at all. A wrong password is a user slip; turning it into a lockout was a bug here.
+ */
+check('a refused password stops the run instead of being retried on every task',
+  /if \(\$credBad\) \{ break \}/.test(CODE), true);
+check('...and the credential failures that trigger that include a lockout',
+  /\$credBad = \$true/.test(CODE) && /locked out'\)/.test(CODE), true);
+check('...and it says why it stopped', /can lock the Windows account/.test(CODE), true);
+check('a locked-out account is told not to sign out', /DO NOT SIGN OUT/.test(CODE), true);
+check('...and is given both the wait and the unlock', /lusrmgr\.msc/.test(CODE) && /net accounts/.test(CODE), true);
+check('...and names a rejected password as a password problem',
+  /user name or password is incorrect\|logon failure/.test(CODE), true);
+check('...and a refusal to change as an elevation problem',
+  /Access is denied\|not authorized\|requires elevation/.test(CODE), true);
+check('...with a fallback when it is neither', /Windows gave the reason on each line above/.test(CODE), true);
+/*
+ * A run that converted nothing must not print the celebratory next steps under its own warning. It did,
+ * and the screen read as though it had worked.
+ */
+check('a run that converted nothing says so and stops',
+  /Nothing was changed\. The jobs are exactly as they were\./.test(CODE), true);
 check('it prints the state of every task before changing anything', /Current state:/.test(CODE), true);
 
 console.log('\n=== it leaves the rest of the task alone ===');
