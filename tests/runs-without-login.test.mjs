@@ -100,6 +100,17 @@ check('...and the credential failures that trigger that include a lockout',
   /\$credBad = \$true/.test(CODE) && /locked out'\)/.test(CODE), true);
 check('...and it says why it stopped', /can lock the Windows account/.test(CODE), true);
 check('a locked-out account is told not to sign out', /DO NOT SIGN OUT/.test(CODE), true);
+/*
+ * AND NOBODY IS EVER TOLD TO SIGN OUT TO "TEST" IT. That instruction was wrong twice over: a task with
+ * LogonType Password already runs in a background session, so signing out proves nothing a wait does
+ * not -- and the client's server runs an unrelated automation in the signed-in session, which following
+ * it would have killed. A script cannot know what else lives on the PC it is changing.
+ */
+check('the success path never asks anyone to sign out',
+  /Sign out of Windows completely/.test(CODE), false);
+check('...and says so explicitly, since it is the obvious thing to try',
+  /DO NOT sign out to "test" it/.test(CODE), true);
+check('...offering Win\+L instead', /Win\+L/.test(CODE), true);
 check('...and is given both the wait and the unlock', /lusrmgr\.msc/.test(CODE) && /net accounts/.test(CODE), true);
 check('...and names a rejected password as a password problem',
   /user name or password is incorrect\|logon failure/.test(CODE), true);

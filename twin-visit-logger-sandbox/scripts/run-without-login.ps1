@@ -223,18 +223,41 @@ if ($failed.Count) {
 }
 
 Write-Host ''
+<#
+  DO NOT TELL ANYONE TO SIGN OUT.
+
+  This used to say "sign out of Windows completely (not just lock)" as the way to prove the change had
+  worked. That advice was wrong twice over.
+
+  It is UNNECESSARY: a task with LogonType Password already runs in a background session, whether or not
+  anybody is signed in. The behaviour being tested is therefore happening on every fire from the moment
+  it is converted, and signing out proves nothing a wait does not.
+
+  It is also DANGEROUS on a real machine. The client's server runs an unrelated automation in the
+  signed-in session; following this instruction would have killed it. A script cannot know what else
+  lives on the PC it is changing, so it must not ask for something that stops everything on it.
+#>
 if ($All) {
   Write-Host 'WHAT TO DO NOW' -ForegroundColor Cyan
-  Write-Host '  1. Sign out of Windows completely (not just lock).'
-  Write-Host '  2. Leave it an hour.'
-  Write-Host '  3. Sign back in and run:  node scripts\health-check.mjs'
-  Write-Host '     All clear means the jobs ran with nobody signed in. This is finished.'
+  Write-Host '  Nothing. These now run in a background session whether anybody is signed in or not,'
+  Write-Host '  so a restart, a power cut or a sign-out no longer stops them.'
+  Write-Host ''
+  Write-Host '  DO NOT sign out to "test" it. That is not needed, and on a PC running anything else in'
+  Write-Host '  the signed-in session it would stop that too. Lock the screen with Win+L instead.'
+  Write-Host ''
+  Write-Host '  To confirm, in an hour:   node scripts\health-check.mjs'
+  Write-Host '  All clear means every job has run on its own. This is finished.'
+  Write-Host ''
+  Write-Host '  For real proof, restart the PC when it suits you and leave it at the sign-in screen.'
+  Write-Host '  The jobs run there. Check the health check afterwards.'
 } else {
   Write-Host 'WHAT TO DO NOW' -ForegroundColor Cyan
-  Write-Host '  1. Sign out of Windows completely (not just lock).'
-  Write-Host '  2. Leave it 30 minutes - the re-check runs every 20.'
-  Write-Host '  3. Sign back in and run:  node scripts\coverage-doctor.mjs'
-  Write-Host '     If "read in the last hour" is no longer 0, it worked with nobody signed in.'
+  Write-Host '  Wait 30 minutes - the re-check runs every 20 - then:'
+  Write-Host '     node scripts\coverage-doctor.mjs'
+  Write-Host '  If "read in the last hour" is no longer 0, the browser works with no desktop.'
+  Write-Host ''
+  Write-Host '  You do NOT need to sign out to test this. The converted task already runs in a'
+  Write-Host '  background session, so it is being exercised on every fire from now on.'
   Write-Host ''
   Write-Host '  Then convert the rest:'
   Write-Host '     powershell -ExecutionPolicy Bypass -File .\scripts\run-without-login.ps1 -All'
