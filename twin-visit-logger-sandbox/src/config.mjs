@@ -58,7 +58,23 @@ const raw = {
   defaultVisitDurationMinutes: int(process.env.DEFAULT_VISIT_DURATION_MINUTES, 60),
   reiUserDataDir: process.env.REI_USER_DATA_DIR || './browser-data/rei-sandbox',
   reiLoginUrl: process.env.REI_LOGIN_URL || 'https://my.reiblackbook.com/',
-  reiHeadless: bool(process.env.REI_HEADLESS, false),
+  /*
+   * HIDDEN BY DEFAULT.
+   *
+   * This defaulted to false, so every fresh install opened a visible Chromium window that drove itself
+   * around REI in front of whoever was at the desk. The client asked for it hidden on the first server
+   * ("xan we hide this crawler?"), set REI_HEADLESS=true by hand, and then had to ask again on the second
+   * one — because setup-app rebuilds .env from the workbook and this is not one of the settings it
+   * carries. A preference somebody has to remember on every machine is a default in the wrong place.
+   *
+   * Safe to flip: it ran headless on the previous server for weeks, reading the full About panel and the
+   * Notes tab, and the only paths that still force a window are the hand-run diagnostics — inspect-rei,
+   * notes-doctor, pagedoctor, rei-fields, rei-login, rei-task-doctor, test-scrape — which pass
+   * { headless: false } explicitly because a person is watching those on purpose.
+   *
+   * REI_HEADLESS=false still shows the window when somebody wants to watch a scheduled run.
+   */
+  reiHeadless: bool(process.env.REI_HEADLESS, true),
   reiPageTimeoutMs: int(process.env.REI_PAGE_TIMEOUT_MS, 45000),
   reiSelectorConfig: process.env.REI_SELECTOR_CONFIG || './config/rei-selectors.json',
   pollIntervalMinutes: int(process.env.POLL_INTERVAL_MINUTES, 5),
