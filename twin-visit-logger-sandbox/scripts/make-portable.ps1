@@ -170,12 +170,36 @@ $readme = @"
 TWIN VISIT LOGGER
 =================
 
+BEFORE YOU START - one file has to be put in by hand
+---------------------------------------------------
+Copy  credentials.json  into the  credentials\  folder next to this file.
+
+It is the Google sign-in file, and it is deliberately NOT in this package: including it would make
+this folder itself a credential, so a copy on a stick or in an email would be a way into the account.
+
+Get it from Google Cloud Console - APIs & Services -> Credentials -> under "OAuth 2.0 Client IDs",
+the download icon on the right of the row -> Download JSON -> rename it to  credentials.json
+
+Setup stops and says so if it is missing, rather than failing later where the cause is not obvious.
+
 TO SET UP THIS PC:  double-click  SET-UP-THIS-PC.cmd
 
-That is the whole installation. It reads its settings from your workbook, signs you in to Google
-and to REI, claims this PC as the active one, schedules the eight jobs, and checks that it works.
+That is the whole installation. It approves an administrator prompt, prepares Windows, reads its
+settings from your workbook, signs you in to Google and to REI, claims this PC as the active one,
+schedules the jobs, and then makes them survive a restart.
 
-You will be asked to sign in TWICE - once to Google, once to REI. Everything else is automatic.
+You will be asked to sign in TWICE - once to Google, once to REI - and for this PC's Windows
+password once, so Windows can sign the account back in by itself after a reboot. Everything else
+is automatic.
+
+WHY IT ASKS FOR THE WINDOWS PASSWORD
+------------------------------------
+Without it, the jobs run only while somebody is signed in to Windows. A 2am update reboot then stops
+everything, while Task Scheduler still reports Ready and Last Result 0 - a task that never fired
+cannot fail, so nothing looks wrong. Every outage this system has had was that.
+
+Windows stores the password itself, encrypted. It is never written to a file, a log or the package.
+Skip the step if you prefer; the jobs still work, but only while somebody is logged on.
 
 AFTERWARDS
 ----------
