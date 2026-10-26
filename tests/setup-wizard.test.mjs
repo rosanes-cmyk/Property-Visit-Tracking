@@ -200,8 +200,21 @@ check('...and says why it is there', /this is the file a person is looking\r?\nr
  * blocked, and a blocked script run by Task Scheduler fails SILENTLY — the task reports success and does
  * nothing at all. It already cost one debugging session on this project.
  */
-check('it clears Mark of the Web', /Unblock-File/.test(CMD), true);
-check('...and says why that matters', /fails\r?\nrem silently when Windows runs it on a schedule/.test(CMD), true);
+/*
+ * Mark of the Web still gets cleared, but from move-to-this-pc.ps1 rather than inline here -- it sits with
+ * the other things a new machine needs (the folder-location check, credentials, sleep, restart sign-on)
+ * instead of being the one Windows fix that happened to live in the launcher.
+ */
+const PREP = read('twin-visit-logger-sandbox/scripts/move-to-this-pc.ps1');
+check('it runs the Windows preparation first', /move-to-this-pc\.ps1/.test(CMD), true);
+check('...which clears Mark of the Web', /Unblock-File/.test(PREP), true);
+check('...and says why that matters', /hidden scheduled task, that dialog appears/.test(PREP), true);
+/*
+ * The step this file exists to protect: without it the jobs run only while somebody is signed in, which is
+ * what every outage so far has been.
+ */
+check('...and it finishes by making the jobs survive a restart',
+  /run-without-login\.ps1" -All/.test(CMD), true);
 /* The packaged folder has no Node on PATH, so "node" would fail on exactly the machine this is written for. */
 check('it prefers the bundled Node', /if exist "%~dp0runtime\\node\.exe"/.test(CMD), true);
 check('...and the bundled Chromium', /PLAYWRIGHT_BROWSERS_PATH/.test(CMD), true);

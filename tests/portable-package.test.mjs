@@ -160,7 +160,16 @@ console.log('\n--- Mark of the Web, the one that wastes a whole day ---');
  * run setup first, and setup clears it as its first act.
  */
 check('the zip step says to run setup first', /do not run anything else first/.test(PS), true);
-check('...and setup is what clears the block', /Unblock-File/.test(read('SET-UP-THIS-PC.cmd')), true);
+/*
+ * The unblocking moved OUT of SET-UP-THIS-PC.cmd and into move-to-this-pc.ps1, which setup now runs as its
+ * first step along with the folder-location check, the credentials check, the power settings and the
+ * restart sign-on policy. Asserting on the line's old home would have failed a refactor that lost nothing;
+ * what matters is that a one-click setup still reaches it, so that is what this checks -- both halves.
+ */
+check('...and setup still reaches the unblock, via the preparation step',
+  /move-to-this-pc\.ps1/.test(read('SET-UP-THIS-PC.cmd')), true);
+check('...which is where Unblock-File now lives',
+  /Unblock-File/.test(read('scripts/move-to-this-pc.ps1')), true);
 
 console.log('\n--- it will not quietly overwrite a previous build ---');
 check('an existing folder needs -Force', /re-run with -Force/.test(PS), true);
