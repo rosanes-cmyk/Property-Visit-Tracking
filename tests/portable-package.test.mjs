@@ -153,6 +153,25 @@ check('...and says how to move it when the old PC is broken',
 check('...and states that no credentials are inside', /No passwords, no Google token, no REI session/.test(PS), true);
 check('...and why that is deliberate', /not a way into your accounts/.test(PS), true);
 
+console.log('\n--- the zip must not fail a build that worked ---');
+/*
+ * Compress-Archive builds the archive in MEMORY. This package is about a gigabyte once Node and the two
+ * Chromium builds are in it, and on the client's server it threw OutOfMemoryException -- AFTER the folder
+ * had built perfectly. A successful build looked like a failed one because of an optional convenience step.
+ */
+/*
+ * Comment-stripped. The block explaining this fix quotes the old Compress-Archive error on purpose, so an
+ * assertion that "Compress-Archive is gone" would read the comment and fail -- the seventh time in this
+ * project that prose about a fix would have stood in for the fix, except pointing the other way.
+ */
+const PACK_SRC = read('scripts/make-portable.ps1')
+  .replace(/<#[\s\S]*?#>/g, '').replace(/^\s*#.*$/gm, '');
+check('zipping streams to disk rather than building in memory',
+  /\[System\.IO\.Compression\.ZipFile\]::CreateFromDirectory/.test(PACK_SRC), true);
+check('...and Compress-Archive is gone from the code', /Compress-Archive/.test(PACK_SRC), false);
+check('a zip failure leaves the folder and says so, rather than failing the build',
+  /The FOLDER is finished and is the thing you actually need/.test(PACK_SRC), true);
+
 console.log('\n--- Mark of the Web, the one that wastes a whole day ---');
 /*
  * A folder extracted from a downloaded zip is blocked by Windows, and a blocked script run by Task Scheduler

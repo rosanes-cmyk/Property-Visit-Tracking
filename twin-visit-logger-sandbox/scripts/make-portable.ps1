@@ -240,8 +240,40 @@ if ($Zip) {
   if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
   Write-Host ""
   Write-Host "Zipping (this takes a few minutes)..."
-  Compress-Archive -Path $dest -DestinationPath $zipPath
-  Write-Host "Zipped: $zipPath"
+  <#
+    .NET's ZipFile, not Compress-Archive.
+
+    Compress-Archive builds the archive in MEMORY, and this folder is about a gigabyte once Node and the
+    two Chromium builds are in it. On the client's server it threw:
+
+        Compress-Archive : Exception calling "Write" with "3" argument(s):
+        "Exception of type 'System.OutOfMemoryException' was thrown."
+
+    after the folder itself had built perfectly -- so the useful output was already on disk and the step
+    that failed was the optional one. Worse in 32-bit PowerShell, where the address space runs out sooner,
+    and that is what a .cmd launching "powershell" gets on many machines.
+
+    ZipFile::CreateFromDirectory streams to the file instead, so size stops mattering. It also zips the
+    FOLDER rather than its parent, which is what the "extract and double-click inside" instruction below
+    has always assumed.
+
+    Never fatal: the folder is the deliverable and the zip is a convenience for carrying it. A failure here
+    says so and leaves the folder in place, rather than making a successful build look like a failed one.
+  #>
+  try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+      $dest, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+    Write-Host "Zipped: $zipPath"
+  } catch {
+    Write-Host ""
+    Write-Warning ("Could not build the zip: {0}" -f $_.Exception.Message)
+    Write-Host "  The FOLDER is finished and is the thing you actually need:"
+    Write-Host "    $dest"
+    Write-Host "  Copy it to Drive or a stick as it is, or right-click it ->"
+    Write-Host "  Send to -> Compressed (zipped) folder, which Explorer does without loading it into memory."
+    $zipPath = $null
+  }
   # Mark of the Web: a folder extracted from a downloaded zip is BLOCKED, and a blocked script run by Task
   # Scheduler fails silently - the task reports success and does nothing. SET-UP-THIS-PC.cmd clears it as its
   # first act, which is why setup must always be the first thing run on a new machine.
