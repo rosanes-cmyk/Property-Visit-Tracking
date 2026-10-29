@@ -228,14 +228,33 @@ async function removeStaleLock(LOCK_PATH) {
  * `onWait` is called before each sleep so the caller can show progress: a silent five-minute pause is
  * indistinguishable from a hang.
  */
+/**
+ * Wait for the lock, and SAY SO ONCE A MINUTE — not once every five seconds.
+ *
+ * onWait used to fire on every poll. A twelve-minute wait therefore printed the same line about 140
+ * times, and the client's console looked like this:
+ *
+ *     REI is busy - retrying, up to 12 more minute(s)
+ *     REI is busy - retrying, up to 12 more minute(s)
+ *     ... x140
+ *
+ * which buried the list of leads the run had just printed above it, and reads like something failing
+ * over and over rather than one job politely queueing. The information in those 140 lines is the same
+ * information as in 12.
+ *
+ * Still called at least once, immediately, so a run that is waiting always says why before going quiet —
+ * silence and a hang look identical, and that distinction has cost this project days.
+ */
 export async function acquireLockWaiting(name = 'run', { timeoutMs = 12 * 60 * 1000, pollMs = 5000, onWait } = {}) {
   const deadline = Date.now() + timeoutMs;
+  let lastSaid = null;
   for (;;) {
     const release = await acquireLock(name);
     if (release) return release;
     const left = deadline - Date.now();
     if (left <= 0) return null;
-    if (onWait) onWait(Math.ceil(left / 1000));
+    const minutes = Math.ceil(left / 60000);
+    if (onWait && minutes !== lastSaid) { lastSaid = minutes; onWait(Math.ceil(left / 1000)); }
     await new Promise((resolve) => { setTimeout(resolve, Math.min(pollMs, left)); });
   }
 }

@@ -209,6 +209,31 @@ try {
     !!(await fs.stat(path.resolve('./data/handoff.lock')).catch(() => null)), true);
   await theirs();
 
+  console.log('\n=== a waiting run says so once a minute, not once every five seconds ===');
+  /*
+   * onWait fired on every poll, so a twelve-minute wait printed the same line ~140 times and buried the
+   * list of leads the run had printed above it. One job politely queueing looked like something failing
+   * over and over. The information in 140 lines is the information in 12.
+   */
+  {
+    const said = [];
+    const t0 = Date.now();
+    /* Hold it, so the waiter has to poll. */
+    const mine2 = await acquireLock('noisy');
+    const waiter = acquireLockWaiting('noisy', {
+      timeoutMs: 700, pollMs: 25, onWait: (s) => said.push(s),
+    });
+    const got = await waiter;
+    await mine2();
+    check('it gives up when the lock never frees', got, null);
+    /*
+     * Under a second the minute count never changes, so exactly one line is right. The old code would
+     * have produced one per 25ms poll.
+     */
+    check('...having said it once, not once per poll', said.length, 1);
+    check('...and it did not busy-wait', Date.now() - t0 >= 600, true);
+  }
+
   console.log('\n=== the callers use the right one ===');
   /*
    * EVERY re-check waits; a scheduled one just waits less. These two assertions used to say the opposite —
